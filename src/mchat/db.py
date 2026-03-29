@@ -1,0 +1,138 @@
+# ------------------------------------------------------------------
+# Component: Database
+# Responsibility: SQLite persistence for conversations and messages
+# Collaborators: models.conversation, models.message
+# ------------------------------------------------------------------
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+from mchat.config import DEFAULT_CONFIG_DIR
+from mchat.models.conversation import Conversation
+from mchat.models.message import Message, Provider, Role
+
+DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL DEFAULT 'New Chat',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    provider TEXT,
+    content TEXT NOT NULL,
+    model TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+"""
+
+
+class Database:
+    def __init__(self, db_path: Path | None = None) -> None:
+        self._path = db_path or DEFAULT_DB_PATH
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._path))
+        self._conn.execute("PRAGMA foreign_keys = ON")
+        self._init_schema()
+
+    def _init_schema(self) -> None:
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # -- Conversations --
+
+    def create_conversation(self, title: str = "New Chat") -> Conversation:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self._conn.execute(
+            "INSERT INTO conversations (title, created_at, updated_at) VALUES (?, ?, ?)",
+            (title, now, now),
+        )
+        self._conn.commit()
+        return Conversation(
+            id=cursor.lastrowid,
+            title=title,
+            created_at=datetime.fromisoformat(now),
+            updated_at=datetime.fromisoformat(now),
+        )
+
+    def list_conversations(self) -> list[Conversation]:
+        cursor = self._conn.execute(
+            "SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+        )
+        return [
+            Conversation(
+                id=row[0],
+                title=row[1],
+                created_at=datetime.fromisoformat(row[2]),
+                updated_at=datetime.fromisoformat(row[3]),
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def update_conversation_title(self, conv_id: int, title: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (title, now, conv_id),
+        )
+        self._conn.commit()
+
+    def delete_conversation(self, conv_id: int) -> None:
+        self._conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+        self._conn.commit()
+
+    # -- Messages --
+
+    def add_message(self, msg: Message) -> Message:
+        now = msg.created_at.isoformat()
+        cursor = self._conn.execute(
+            "INSERT INTO messages (conversation_id, role, provider, content, model, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                msg.conversation_id,
+                msg.role.value,
+                msg.provider.value if msg.provider else None,
+                msg.content,
+                msg.model,
+                now,
+            ),
+        )
+        # Touch the conversation's updated_at
+        self._conn.execute(
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            (now, msg.conversation_id),
+        )
+        self._conn.commit()
+        msg.id = cursor.lastrowid
+        return msg
+
+    def get_messages(self, conversation_id: int) -> list[Message]:
+        cursor = self._conn.execute(
+            "SELECT id, conversation_id, role, provider, content, model, created_at "
+            "FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+            (conversation_id,),
+        )
+        return [
+            Message(
+                id=row[0],
+                conversation_id=row[1],
+                role=Role(row[2]),
+                provider=Provider(row[3]) if row[3] else None,
+                content=row[4],
+                model=row[5] if row[5] else None,
+                created_at=datetime.fromisoformat(row[6]),
+            )
+            for row in cursor.fetchall()
+        ]
