@@ -36,8 +36,7 @@ class Router:
             prefix = match.group(1).lower()
             target = PREFIX_TO_PROVIDER[prefix]
             cleaned = user_input[match.end():].strip()
-            if target != BOTH:
-                self._last_used = target
+            self._last_used = target
             return target, cleaned
         return self._last_used, user_input
 

@@ -285,10 +285,13 @@ class MainWindow(QMainWindow):
 
         # Restore the provider that was last used in this conversation
         if conv.last_provider and self._router:
-            try:
-                self._router._last_used = Provider(conv.last_provider)
-            except ValueError:
-                pass
+            if conv.last_provider == BOTH:
+                self._router._last_used = BOTH
+            else:
+                try:
+                    self._router._last_used = Provider(conv.last_provider)
+                except ValueError:
+                    pass
         self._update_input_placeholder()
 
         self._chat.clear_messages()
@@ -313,7 +316,9 @@ class MainWindow(QMainWindow):
             self._input.set_placeholder("Configure an API key in Settings to start chatting")
             return
         current = self._router.last_used
-        if current == Provider.CLAUDE:
+        if current == BOTH:
+            self._input.set_placeholder("Message both — prefix claude, or gpt, for one")
+        elif current == Provider.CLAUDE:
             self._input.set_placeholder("Message Claude — prefix gpt, or both, to switch")
         else:
             self._input.set_placeholder("Message GPT — prefix claude, or both, to switch")
@@ -477,8 +482,13 @@ class MainWindow(QMainWindow):
             self._session_spend[provider_id] += cost
         self._update_spend_labels()
 
-        # If both are done, re-enable input
+        # If both are done, re-enable input and save "both" as last provider
         if not self._both_workers:
+            if self._current_conv:
+                self._current_conv.last_provider = BOTH
+                self._db.update_conversation_last_provider(
+                    self._current_conv.id, BOTH
+                )
             self._input.set_enabled(True)
             self._update_input_placeholder()
 
