@@ -458,9 +458,11 @@ class MainWindow(QMainWindow):
         self._both_workers.pop(provider_id, None)
 
         # Render this response immediately as a complete message
+        label = "Claude's take" if provider_id == Provider.CLAUDE else "GPT's take"
+        prefixed = f"**{label}:**\n\n{full_text}"
         msg = Message(
             role=Role.ASSISTANT,
-            content=full_text,
+            content=prefixed,
             provider=provider_id,
             model=model,
             conversation_id=self._current_conv.id,
