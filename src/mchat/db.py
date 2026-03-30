@@ -59,6 +59,10 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"
             )
+        if "last_provider" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN last_provider TEXT NOT NULL DEFAULT ''"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -82,7 +86,7 @@ class Database:
 
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
-            "SELECT id, title, system_prompt, created_at, updated_at "
+            "SELECT id, title, system_prompt, last_provider, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -90,8 +94,9 @@ class Database:
                 id=row[0],
                 title=row[1],
                 system_prompt=row[2] or "",
-                created_at=datetime.fromisoformat(row[3]),
-                updated_at=datetime.fromisoformat(row[4]),
+                last_provider=row[3] or "",
+                created_at=datetime.fromisoformat(row[4]),
+                updated_at=datetime.fromisoformat(row[5]),
             )
             for row in cursor.fetchall()
         ]
@@ -101,6 +106,13 @@ class Database:
         self._conn.execute(
             "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
             (title, now, conv_id),
+        )
+        self._conn.commit()
+
+    def update_conversation_last_provider(self, conv_id: int, provider: str) -> None:
+        self._conn.execute(
+            "UPDATE conversations SET last_provider = ? WHERE id = ?",
+            (provider, conv_id),
         )
         self._conn.commit()
 

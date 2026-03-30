@@ -280,6 +280,14 @@ class MainWindow(QMainWindow):
         self._current_conv = conv
         self._current_conv.messages = messages
 
+        # Restore the provider that was last used in this conversation
+        if conv.last_provider and self._router:
+            try:
+                self._router._last_used = Provider(conv.last_provider)
+            except ValueError:
+                pass
+        self._update_input_placeholder()
+
         self._chat.clear_messages()
         for msg in messages:
             self._chat.add_message(msg)
@@ -403,6 +411,13 @@ class MainWindow(QMainWindow):
         if cost is not None:
             self._session_spend[provider_id] += cost
         self._update_spend_labels()
+
+        # Remember which provider was last used in this conversation
+        if self._current_conv:
+            self._current_conv.last_provider = provider_id.value
+            self._db.update_conversation_last_provider(
+                self._current_conv.id, provider_id.value
+            )
 
         self._input.set_enabled(True)
         self._update_input_placeholder()

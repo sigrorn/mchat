@@ -36,7 +36,7 @@ _DOC_CSS = """
 """
 
 # How often to re-render the streaming message as markdown (ms)
-_RENDER_INTERVAL_MS = 300
+_RENDER_INTERVAL_MS = 2000
 
 
 def _short_model(model: str | None) -> str:
