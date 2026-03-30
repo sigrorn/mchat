@@ -28,3 +28,7 @@ Thumbs.db
 
 # Config (may contain API keys)
 .mchat/
+
+
+# output directory,  might contain saved files
+outputs
