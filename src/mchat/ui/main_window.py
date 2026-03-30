@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
         # Claude model combo + spend
         self._claude_combo = QComboBox()
         self._claude_combo.setMinimumWidth(180)
+        self._claude_combo.activated.connect(lambda: self._claude_combo.hidePopup())
         top_bar_layout.addWidget(self._claude_combo)
 
         self._claude_spend_label = QLabel("$0.00")
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         # OpenAI model combo + spend
         self._openai_combo = QComboBox()
         self._openai_combo.setMinimumWidth(180)
+        self._openai_combo.activated.connect(lambda: self._openai_combo.hidePopup())
         top_bar_layout.addWidget(self._openai_combo)
 
         self._openai_spend_label = QLabel("$0.00")
