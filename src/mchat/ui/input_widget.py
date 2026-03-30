@@ -57,6 +57,8 @@ class InputWidget(QWidget):
     def set_enabled(self, enabled: bool) -> None:
         self._text_edit.setEnabled(enabled)
         self._send_btn.setEnabled(enabled)
+        if enabled:
+            self._text_edit.setFocus()
 
     def set_placeholder(self, text: str) -> None:
         self._text_edit.setPlaceholderText(text)
