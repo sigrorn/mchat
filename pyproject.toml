@@ -26,5 +26,8 @@ mchat = "mchat.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+mchat = ["resources/*.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

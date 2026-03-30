@@ -6,18 +6,30 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from mchat.config import Config
 from mchat.db import Database
 from mchat.ui.main_window import MainWindow
 
+_ICON_PATH = Path(__file__).parent / "resources" / "icon.png"
+
 
 def main() -> None:
+    # Set AppUserModelID so Windows taskbar shows our icon, not Python's
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mchat.mchat")
+
     app = QApplication(sys.argv)
     app.setApplicationName("mchat")
     app.setStyle("Fusion")
+
+    if _ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(_ICON_PATH)))
 
     config = Config()
     db = Database()
