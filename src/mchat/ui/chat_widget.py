@@ -1,12 +1,16 @@
 # ------------------------------------------------------------------
 # Component: ChatWidget
 # Responsibility: Scrollable chat area rendered as a single QTextEdit
-#                 with per-line background colour by speaker
-# Collaborators: PySide6, models.message
+#                 with per-line background colour by speaker and
+#                 markdown rendering for assistant messages
+# Collaborators: PySide6, markdown, models.message
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import html as html_mod
 import re
+
+import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor
@@ -19,6 +23,18 @@ COLOR_USER = "#d4d4d4"
 COLOR_CLAUDE = "#b0b0b0"
 COLOR_OPENAI = "#e8e8e8"
 
+# Document-level stylesheet applied to rendered HTML
+_DOC_CSS = """
+    code  { background-color: rgba(0,0,0,0.06); padding: 1px 4px;
+            font-family: Consolas, 'Courier New', monospace; }
+    pre   { background-color: rgba(0,0,0,0.06); padding: 8px;
+            font-family: Consolas, 'Courier New', monospace;
+            white-space: pre-wrap; }
+    table { border-collapse: collapse; margin: 4px 0; }
+    th, td { border: 1px solid #999; padding: 4px 8px; }
+    th    { background-color: rgba(0,0,0,0.08); font-weight: bold; }
+"""
+
 
 def _short_model(model: str | None) -> str:
     """Shorten a model id for the copy prefix.
@@ -29,8 +45,8 @@ def _short_model(model: str | None) -> str:
     """
     if not model:
         return ""
-    # Claude: strip 'claude-' prefix and date suffix
-    m = re.match(r"^claude-(.+?)(-\d{8})?$", model)
+    # Claude: strip 'claude-' prefix and date/version suffix
+    m = re.match(r"^claude-(.+?)(-\d[\d-]*)?$", model)
     if m:
         return m.group(1)
     # GPT: strip 'gpt-' prefix
@@ -53,6 +69,9 @@ class ChatWidget(QTextEdit):
         self._streaming_msg: Message | None = None
         self._streaming_block_fmt: QTextBlockFormat | None = None
         self._is_empty = True
+        self._md = markdown.Markdown(
+            extensions=["tables", "fenced_code", "sane_lists"]
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -60,6 +79,7 @@ class ChatWidget(QTextEdit):
             "QTextEdit { border: none; background-color: #f5f5f5; }"
         )
         self.document().setDocumentMargin(16)
+        self.document().setDefaultStyleSheet(_DOC_CSS)
         self._apply_default_font()
 
     def _apply_default_font(self) -> None:
@@ -91,30 +111,75 @@ class ChatWidget(QTextEdit):
         return (message.role, message.provider, message.model)
 
     # ------------------------------------------------------------------
-    # Public API (matches the interface MainWindow expects)
+    # Markdown rendering
     # ------------------------------------------------------------------
 
-    def add_message(self, message: Message) -> None:
+    def _render(self, message: Message) -> str:
+        """Return HTML for a message: markdown for assistants, escaped for user."""
+        if message.role == Role.ASSISTANT and message.content:
+            self._md.reset()
+            return self._md.convert(message.content)
+        text = html_mod.escape(message.content) if message.content else ""
+        return text.replace("\n", "<br>")
+
+    # ------------------------------------------------------------------
+    # Inserting a fully-rendered message
+    # ------------------------------------------------------------------
+
+    def _insert_rendered(self, message: Message) -> None:
+        """Insert a message as rendered HTML with background colour on every block."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
         block_fmt = self._make_block_fmt(message)
         info = self._role_info(message)
 
-        lines = message.content.split("\n") if message.content else [""]
-        for i, line in enumerate(lines):
-            if self._is_empty and i == 0:
-                cursor.setBlockFormat(block_fmt)
-                self._is_empty = False
-            else:
-                cursor.insertBlock(block_fmt)
-            cursor.insertText(line)
-            self._block_roles[cursor.block().blockNumber()] = info
+        # Start a new block (or reuse the initial empty one)
+        if self._is_empty:
+            cursor.setBlockFormat(block_fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(block_fmt)
 
+        start_block = cursor.block().blockNumber()
+
+        # Insert HTML content
+        rendered = self._render(message)
+        cursor.insertHtml(rendered)
+
+        # Walk all blocks that were created and apply background + role
+        end_block = cursor.block().blockNumber()
+        doc = self.document()
+        for bn in range(start_block, end_block + 1):
+            block = doc.findBlockByNumber(bn)
+            if block.isValid():
+                bc = QTextCursor(block)
+                bc.setBlockFormat(block_fmt)
+                self._block_roles[bn] = info
+
+    def _rebuild(self) -> None:
+        """Re-render all messages with markdown formatting."""
+        saved = list(self._messages)
+        self.clear()
+        self._messages.clear()
+        self._block_roles.clear()
+        self._is_empty = True
+        for msg in saved:
+            self._messages.append(msg)
+            self._insert_rendered(msg)
+        self._scroll_to_bottom()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def add_message(self, message: Message) -> None:
         self._messages.append(message)
+        self._insert_rendered(message)
         self._scroll_to_bottom()
 
     def begin_streaming(self, message: Message) -> None:
+        """Start streaming — tokens arrive as plain text for speed."""
         self._streaming_msg = message
         self._streaming_block_fmt = self._make_block_fmt(message)
         info = self._role_info(message)
@@ -152,10 +217,13 @@ class ChatWidget(QTextEdit):
         self._scroll_to_bottom()
 
     def end_streaming(self) -> Message | None:
+        """Finish streaming and re-render with markdown formatting."""
         if self._streaming_msg:
             msg = self._streaming_msg
             self._streaming_msg = None
             self._streaming_block_fmt = None
+            # Rebuild so the completed message is markdown-rendered
+            self._rebuild()
             return msg
         return None
 
@@ -170,6 +238,7 @@ class ChatWidget(QTextEdit):
     def update_font_size(self, size: int) -> None:
         self._font_size = size
         self._apply_default_font()
+        self._rebuild()
 
     # ------------------------------------------------------------------
     # Copy with //user, //claude (<model>), //gpt (<model>) prefixes
