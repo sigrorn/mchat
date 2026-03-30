@@ -24,8 +24,9 @@ class Sidebar(QFrame):
     new_chat_requested = Signal()
     delete_requested = Signal(int)  # conversation id
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
+        self._font_size = font_size
         self.setFixedWidth(250)
         self._conversations: dict[int, Conversation] = {}
         self._build_ui()
@@ -44,9 +45,9 @@ class Sidebar(QFrame):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 12, 12, 12)
 
-        title = QLabel("mchat")
-        title.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
-        header_layout.addWidget(title)
+        self._title = QLabel("mchat")
+        self._title.setStyleSheet(f"color: white; font-size: {self._font_size + 4}px; font-weight: bold;")
+        header_layout.addWidget(self._title)
         header_layout.addStretch()
 
         new_btn = QPushButton("+")
@@ -63,15 +64,18 @@ class Sidebar(QFrame):
 
         # Conversation list
         self._list = QListWidget()
-        self._list.setStyleSheet(
-            "QListWidget { background-color: #2b2b2b; border: none; color: white; "
-            "font-size: 14px; padding: 4px; }"
-            "QListWidget::item { padding: 10px 12px; border-radius: 6px; margin: 2px 4px; }"
-            "QListWidget::item:selected { background-color: #444; }"
-            "QListWidget::item:hover { background-color: #3a3a3a; }"
-        )
+        self._apply_list_style()
         self._list.currentItemChanged.connect(self._on_item_changed)
         layout.addWidget(self._list)
+
+    def _apply_list_style(self) -> None:
+        self._list.setStyleSheet(
+            f"QListWidget {{ background-color: #2b2b2b; border: none; color: white; "
+            f"font-size: {self._font_size}px; padding: 4px; }}"
+            f"QListWidget::item {{ padding: 10px 12px; border-radius: 6px; margin: 2px 4px; }}"
+            f"QListWidget::item:selected {{ background-color: #444; }}"
+            f"QListWidget::item:hover {{ background-color: #3a3a3a; }}"
+        )
 
     def set_conversations(self, conversations: list[Conversation]) -> None:
         self._list.blockSignals(True)
@@ -95,3 +99,8 @@ class Sidebar(QFrame):
         if current:
             conv_id = current.data(Qt.ItemDataRole.UserRole)
             self.conversation_selected.emit(conv_id)
+
+    def update_font_size(self, size: int) -> None:
+        self._font_size = size
+        self._title.setStyleSheet(f"color: white; font-size: {size + 4}px; font-weight: bold;")
+        self._apply_list_style()

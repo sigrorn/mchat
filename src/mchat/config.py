@@ -17,7 +17,11 @@ DEFAULTS = {
     "default_provider": "claude",
     "claude_model": "claude-sonnet-4-20250514",
     "openai_model": "gpt-4o",
+    "font_size": 14,
 }
+
+MIN_FONT_SIZE = 8
+MAX_FONT_SIZE = 32
 
 
 class Config:

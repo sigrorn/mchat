@@ -22,9 +22,10 @@ PROVIDER_LABELS = {
 
 
 class MessageBubble(QFrame):
-    def __init__(self, message: Message, parent=None) -> None:
+    def __init__(self, message: Message, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
         self._message = message
+        self._font_size = font_size
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -50,26 +51,32 @@ class MessageBubble(QFrame):
         layout.setSpacing(4)
 
         # Sender label
-        sender_label = QLabel(f"<b>{sender}</b>")
-        sender_label.setStyleSheet("font-size: 12px; color: #444;")
-        layout.addWidget(sender_label)
+        self._sender_label = QLabel(f"<b>{sender}</b>")
+        self._sender_label.setStyleSheet(f"font-size: {self._font_size - 2}px; color: #444;")
+        layout.addWidget(self._sender_label)
 
         # Message content
-        content_label = QLabel(self._message.content)
-        content_label.setWordWrap(True)
-        content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        content_label.setStyleSheet("font-size: 14px; color: #1a1a1a;")
-        layout.addWidget(content_label)
+        self._content_label = QLabel(self._message.content)
+        self._content_label.setWordWrap(True)
+        self._content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._content_label.setStyleSheet(f"font-size: {self._font_size}px; color: #1a1a1a;")
+        layout.addWidget(self._content_label)
 
         # Model tag (for assistant messages)
+        self._model_label = None
         if self._message.model and self._message.role == Role.ASSISTANT:
-            model_label = QLabel(self._message.model)
-            model_label.setStyleSheet("font-size: 10px; color: #888;")
-            layout.addWidget(model_label)
+            self._model_label = QLabel(self._message.model)
+            self._model_label.setStyleSheet(f"font-size: {self._font_size - 4}px; color: #888;")
+            layout.addWidget(self._model_label)
 
     def update_content(self, text: str) -> None:
         """Update the message content (used during streaming)."""
         self._message.content = text
-        content_label = self.layout().itemAt(1).widget()
-        if isinstance(content_label, QLabel):
-            content_label.setText(text)
+        self._content_label.setText(text)
+
+    def update_font_size(self, size: int) -> None:
+        self._font_size = size
+        self._sender_label.setStyleSheet(f"font-size: {size - 2}px; color: #444;")
+        self._content_label.setStyleSheet(f"font-size: {size}px; color: #1a1a1a;")
+        if self._model_label:
+            self._model_label.setStyleSheet(f"font-size: {size - 4}px; color: #888;")

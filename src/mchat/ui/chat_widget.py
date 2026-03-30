@@ -18,8 +18,9 @@ from mchat.ui.message_bubble import MessageBubble
 
 
 class ChatWidget(QScrollArea):
-    def __init__(self, parent=None) -> None:
+    def __init__(self, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
+        self._font_size = font_size
         self._bubbles: list[MessageBubble] = []
         self._streaming_bubble: MessageBubble | None = None
         self._build_ui()
@@ -39,7 +40,7 @@ class ChatWidget(QScrollArea):
         self.setWidget(self._container)
 
     def add_message(self, message: Message) -> MessageBubble:
-        bubble = MessageBubble(message)
+        bubble = MessageBubble(message, font_size=self._font_size)
         # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, bubble)
         self._bubbles.append(bubble)
@@ -76,3 +77,8 @@ class ChatWidget(QScrollArea):
         QTimer.singleShot(50, lambda: self.verticalScrollBar().setValue(
             self.verticalScrollBar().maximum()
         ))
+
+    def update_font_size(self, size: int) -> None:
+        self._font_size = size
+        for bubble in self._bubbles:
+            bubble.update_font_size(size)

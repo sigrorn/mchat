@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mchat.config import Config
+from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
@@ -39,9 +40,11 @@ class MainWindow(QMainWindow):
         self._current_conv: Conversation | None = None
         self._stream_worker: StreamWorker | None = None
         self._router: Router | None = None
+        self._font_size = int(self._config.get("font_size") or 14)
 
         self._init_providers()
         self._build_ui()
+        self._setup_shortcuts()
         self._load_conversations()
 
     def _init_providers(self) -> None:
@@ -76,7 +79,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Sidebar
-        self._sidebar = Sidebar()
+        self._sidebar = Sidebar(font_size=self._font_size)
         self._sidebar.conversation_selected.connect(self._on_conversation_selected)
         self._sidebar.new_chat_requested.connect(self._on_new_chat)
         main_layout.addWidget(self._sidebar)
@@ -95,27 +98,67 @@ class MainWindow(QMainWindow):
         top_bar_layout.setContentsMargins(16, 8, 16, 8)
         top_bar_layout.addStretch()
 
-        settings_btn = QPushButton("⚙ Settings")
-        settings_btn.setStyleSheet(
-            "QPushButton { background: none; border: 1px solid #ccc; border-radius: 6px; "
-            "padding: 4px 12px; color: #666; font-size: 13px; }"
-            "QPushButton:hover { background-color: #eee; }"
-        )
-        settings_btn.clicked.connect(self._open_settings)
-        top_bar_layout.addWidget(settings_btn)
+        self._settings_btn = QPushButton("⚙ Settings")
+        self._apply_settings_btn_style()
+        self._settings_btn.clicked.connect(self._open_settings)
+        top_bar_layout.addWidget(self._settings_btn)
 
         right_layout.addWidget(top_bar)
 
         # Chat area
-        self._chat = ChatWidget()
+        self._chat = ChatWidget(font_size=self._font_size)
         right_layout.addWidget(self._chat, stretch=1)
 
         # Input area
-        self._input = InputWidget()
+        self._input = InputWidget(font_size=self._font_size)
         self._input.message_submitted.connect(self._on_message_submitted)
         right_layout.addWidget(self._input)
 
         main_layout.addWidget(right, stretch=1)
+
+    def _apply_settings_btn_style(self) -> None:
+        self._settings_btn.setStyleSheet(
+            f"QPushButton {{ background: none; border: 1px solid #ccc; border-radius: 6px; "
+            f"padding: 4px 12px; color: #666; font-size: {self._font_size - 1}px; }}"
+            f"QPushButton:hover {{ background-color: #eee; }}"
+        )
+
+    def _setup_shortcuts(self) -> None:
+        zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
+        zoom_in.activated.connect(self._zoom_in)
+
+        zoom_in2 = QShortcut(QKeySequence("Ctrl++"), self)
+        zoom_in2.activated.connect(self._zoom_in)
+
+        zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        zoom_out.activated.connect(self._zoom_out)
+
+        zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
+        zoom_reset.activated.connect(self._zoom_reset)
+
+    def _zoom_in(self) -> None:
+        self._set_font_size(self._font_size + 1)
+
+    def _zoom_out(self) -> None:
+        self._set_font_size(self._font_size - 1)
+
+    def _zoom_reset(self) -> None:
+        self._set_font_size(14)
+
+    def _set_font_size(self, size: int) -> None:
+        size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, size))
+        if size == self._font_size:
+            return
+        self._font_size = size
+        self._config.set("font_size", size)
+        self._config.save()
+        self._apply_font_size()
+
+    def _apply_font_size(self) -> None:
+        self._chat.update_font_size(self._font_size)
+        self._input.update_font_size(self._font_size)
+        self._sidebar.update_font_size(self._font_size)
+        self._apply_settings_btn_style()
 
     def _load_conversations(self) -> None:
         conversations = self._db.list_conversations()
@@ -227,3 +270,7 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self._config, self)
         if dialog.exec():
             self._init_providers()
+            new_size = int(self._config.get("font_size") or 14)
+            if new_size != self._font_size:
+                self._font_size = new_size
+                self._apply_font_size()

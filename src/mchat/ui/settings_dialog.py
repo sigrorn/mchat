@@ -14,10 +14,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
 )
 
-from mchat.config import Config
+from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE
 
 
 class SettingsDialog(QDialog):
@@ -77,6 +78,13 @@ class SettingsDialog(QDialog):
             self._openai_model.setCurrentIndex(idx)
         form.addRow("OpenAI Model:", self._openai_model)
 
+        # Font size
+        self._font_size = QSpinBox()
+        self._font_size.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
+        self._font_size.setSuffix(" px")
+        self._font_size.setValue(int(self._config.get("font_size") or 14))
+        form.addRow("Font Size:", self._font_size)
+
         layout.addLayout(form)
         layout.addSpacing(16)
 
@@ -106,5 +114,6 @@ class SettingsDialog(QDialog):
         self._config.set("default_provider", self._default_provider.currentText())
         self._config.set("claude_model", self._claude_model.currentText())
         self._config.set("openai_model", self._openai_model.currentText())
+        self._config.set("font_size", self._font_size.value())
         self._config.save()
         self.accept()
