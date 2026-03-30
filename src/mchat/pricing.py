@@ -25,11 +25,23 @@ _PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def _lookup_rates(model: str) -> tuple[float, float] | None:
+    """Find pricing for a model, trying exact match first then prefix."""
+    # Exact match
+    if model in _PRICES:
+        return _PRICES[model]
+    # Prefix match: e.g. "gpt-4.1-2025-04-14" should match "gpt-4.1"
+    for key, rates in sorted(_PRICES.items(), key=lambda kv: -len(kv[0])):
+        if model.startswith(key):
+            return rates
+    return None
+
+
 def estimate_cost(
     model: str, input_tokens: int, output_tokens: int
 ) -> float | None:
     """Return estimated cost in USD, or None if model pricing is unknown."""
-    rates = _PRICES.get(model)
+    rates = _lookup_rates(model)
     if rates is None:
         return None
     inp_rate, out_rate = rates
@@ -38,6 +50,4 @@ def estimate_cost(
 
 def format_cost(usd: float) -> str:
     """Format a dollar amount for display."""
-    if usd < 0.01:
-        return f"${usd:.4f}"
-    return f"${usd:.2f}"
+    return f"${usd:.5f}"

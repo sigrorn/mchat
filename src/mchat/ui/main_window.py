@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         self._claude_combo.activated.connect(lambda: self._claude_combo.hidePopup())
         top_bar_layout.addWidget(self._claude_combo)
 
-        self._claude_spend_label = QLabel("$0.00")
+        self._claude_spend_label = QLabel("$0.00000")
         self._apply_spend_label_style(self._claude_spend_label)
         top_bar_layout.addWidget(self._claude_spend_label)
 
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self._openai_combo.activated.connect(lambda: self._openai_combo.hidePopup())
         top_bar_layout.addWidget(self._openai_combo)
 
-        self._openai_spend_label = QLabel("$0.00")
+        self._openai_spend_label = QLabel("$0.00000")
         self._apply_spend_label_style(self._openai_spend_label)
         top_bar_layout.addWidget(self._openai_spend_label)
 
@@ -198,7 +198,7 @@ class MainWindow(QMainWindow):
             (Provider.OPENAI, self._openai_spend_label),
         ]:
             amount = self._session_spend[provider]
-            label.setText(format_cost(amount) if amount else "$0.00")
+            label.setText(format_cost(amount) if amount else "$0.00000")
 
     # ------------------------------------------------------------------
     # Shortcuts
