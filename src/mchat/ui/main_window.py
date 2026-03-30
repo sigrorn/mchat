@@ -342,11 +342,14 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        was_current = self._current_conv and self._current_conv.id == conv_id
         self._db.delete_conversation(conv_id)
-        if self._current_conv and self._current_conv.id == conv_id:
+        if was_current:
             self._current_conv = None
             self._chat.clear_messages()
         self._load_conversations()
+        if was_current:
+            self._on_new_chat()
 
     # ------------------------------------------------------------------
     # Messaging
