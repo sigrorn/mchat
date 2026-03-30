@@ -153,7 +153,12 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(top_bar)
 
         # Chat area
-        self._chat = ChatWidget(font_size=self._font_size)
+        self._chat = ChatWidget(
+            font_size=self._font_size,
+            color_user=self._config.get("color_user"),
+            color_claude=self._config.get("color_claude"),
+            color_openai=self._config.get("color_openai"),
+        )
         right_layout.addWidget(self._chat, stretch=1)
 
         # Input area
@@ -609,3 +614,8 @@ class MainWindow(QMainWindow):
             if new_size != self._font_size:
                 self._font_size = new_size
                 self._apply_font_size()
+            self._chat.update_colors(
+                self._config.get("color_user"),
+                self._config.get("color_claude"),
+                self._config.get("color_openai"),
+            )

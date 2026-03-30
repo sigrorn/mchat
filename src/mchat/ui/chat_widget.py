@@ -63,10 +63,20 @@ _RoleInfo = tuple[Role, Provider | None, str | None]
 
 
 class ChatWidget(QTextEdit):
-    def __init__(self, font_size: int = 14, parent=None) -> None:
+    def __init__(
+        self,
+        font_size: int = 14,
+        color_user: str = COLOR_USER,
+        color_claude: str = COLOR_CLAUDE,
+        color_openai: str = COLOR_OPENAI,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
         self._font_size = font_size
+        self._color_user = color_user
+        self._color_claude = color_claude
+        self._color_openai = color_openai
         self._messages: list[Message] = []
         self._block_roles: dict[int, _RoleInfo] = {}
         self._streaming_msg: Message | None = None
@@ -96,15 +106,14 @@ class ChatWidget(QTextEdit):
     # Colour helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _color_for(message: Message) -> str:
+    def _color_for(self, message: Message) -> str:
         if message.role == Role.USER:
-            return COLOR_USER
+            return self._color_user
         if message.provider == Provider.CLAUDE:
-            return COLOR_CLAUDE
+            return self._color_claude
         if message.provider == Provider.OPENAI:
-            return COLOR_OPENAI
-        return COLOR_USER
+            return self._color_openai
+        return self._color_user
 
     def _make_block_fmt(self, message: Message) -> QTextBlockFormat:
         fmt = QTextBlockFormat()
@@ -351,6 +360,12 @@ class ChatWidget(QTextEdit):
     def update_font_size(self, size: int) -> None:
         self._font_size = size
         self._apply_default_font()
+        self._rebuild()
+
+    def update_colors(self, color_user: str, color_claude: str, color_openai: str) -> None:
+        self._color_user = color_user
+        self._color_claude = color_claude
+        self._color_openai = color_openai
         self._rebuild()
 
     # ------------------------------------------------------------------

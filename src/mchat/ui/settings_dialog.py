@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QColorDialog,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -80,6 +82,16 @@ class SettingsDialog(QDialog):
         self._system_prompt.setPlaceholderText("System prompt sent at the start of new chats...")
         form.addRow("System Prompt:", self._system_prompt)
 
+        # Background colours
+        self._color_user_btn = self._make_color_btn(self._config.get("color_user"))
+        form.addRow("User colour:", self._color_user_btn)
+
+        self._color_claude_btn = self._make_color_btn(self._config.get("color_claude"))
+        form.addRow("Claude colour:", self._color_claude_btn)
+
+        self._color_openai_btn = self._make_color_btn(self._config.get("color_openai"))
+        form.addRow("GPT colour:", self._color_openai_btn)
+
         # Font size
         self._font_size = QSpinBox()
         self._font_size.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
@@ -109,6 +121,31 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(save_btn)
 
         layout.addLayout(btn_layout)
+
+    def _make_color_btn(self, hex_color: str) -> QPushButton:
+        """Create a button that shows and lets the user pick a colour."""
+        btn = QPushButton()
+        btn.setFixedSize(80, 28)
+        btn.setProperty("hex_color", hex_color)
+        self._apply_color_btn_style(btn, hex_color)
+        btn.clicked.connect(lambda _, b=btn: self._pick_color(b))
+        return btn
+
+    @staticmethod
+    def _apply_color_btn_style(btn: QPushButton, hex_color: str) -> None:
+        btn.setStyleSheet(
+            f"QPushButton {{ background-color: {hex_color}; border: 1px solid #999; "
+            f"border-radius: 4px; }}"
+        )
+        btn.setText(hex_color)
+
+    def _pick_color(self, btn: QPushButton) -> None:
+        current = QColor(btn.property("hex_color"))
+        color = QColorDialog.getColor(current, self, "Pick a colour")
+        if color.isValid():
+            hex_color = color.name()
+            btn.setProperty("hex_color", hex_color)
+            self._apply_color_btn_style(btn, hex_color)
 
     def _populate_model_combo(
         self, combo: QComboBox, provider_key: str, current_model: str
@@ -144,6 +181,9 @@ class SettingsDialog(QDialog):
         self._config.set("claude_model", self._claude_model.currentText())
         self._config.set("openai_model", self._openai_model.currentText())
         self._config.set("system_prompt", self._system_prompt.toPlainText().strip())
+        self._config.set("color_user", self._color_user_btn.property("hex_color"))
+        self._config.set("color_claude", self._color_claude_btn.property("hex_color"))
+        self._config.set("color_openai", self._color_openai_btn.property("hex_color"))
         self._config.set("font_size", self._font_size.value())
         self._config.save()
         self.accept()

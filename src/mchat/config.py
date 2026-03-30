@@ -18,6 +18,9 @@ DEFAULTS = {
     "claude_model": "claude-sonnet-4-20250514",
     "openai_model": "gpt-4.1",
     "font_size": 14,
+    "color_user": "#d4d4d4",
+    "color_claude": "#b0b0b0",
+    "color_openai": "#e8e8e8",
     "system_prompt": "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.",
 }
 
