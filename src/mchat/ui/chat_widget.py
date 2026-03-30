@@ -35,6 +35,9 @@ _DOC_CSS = """
     th    { background-color: rgba(0,0,0,0.08); font-weight: bold; }
 """
 
+# How often to re-render the streaming message as markdown (ms)
+_RENDER_INTERVAL_MS = 300
+
 
 def _short_model(model: str | None) -> str:
     """Shorten a model id for the copy prefix.
@@ -68,6 +71,8 @@ class ChatWidget(QTextEdit):
         self._block_roles: dict[int, _RoleInfo] = {}
         self._streaming_msg: Message | None = None
         self._streaming_block_fmt: QTextBlockFormat | None = None
+        self._streaming_start_pos: int = 0
+        self._render_timer: QTimer | None = None
         self._is_empty = True
         self._md = markdown.Markdown(
             extensions=["tables", "fenced_code", "sane_lists"]
@@ -170,6 +175,48 @@ class ChatWidget(QTextEdit):
         self._scroll_to_bottom()
 
     # ------------------------------------------------------------------
+    # Incremental streaming render
+    # ------------------------------------------------------------------
+
+    def _render_streaming_tick(self) -> None:
+        """Replace the streaming message's blocks with markdown-rendered HTML."""
+        if not self._streaming_msg or not self._streaming_msg.content:
+            return
+
+        doc = self.document()
+        start_block_num = doc.findBlock(self._streaming_start_pos).blockNumber()
+
+        # Clear stale role entries for streaming blocks
+        for bn in list(self._block_roles):
+            if bn >= start_block_num:
+                del self._block_roles[bn]
+
+        # Delete current streaming content (plain text or previous render)
+        cursor = self.textCursor()
+        cursor.setPosition(self._streaming_start_pos)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
+        )
+        cursor.removeSelectedText()
+
+        # Re-insert as rendered markdown HTML
+        block_fmt = self._streaming_block_fmt
+        info = self._role_info(self._streaming_msg)
+        rendered = self._render(self._streaming_msg)
+        cursor.insertHtml(rendered)
+
+        # Apply background and role to all new blocks
+        end_block = cursor.block().blockNumber()
+        for bn in range(start_block_num, end_block + 1):
+            block = doc.findBlockByNumber(bn)
+            if block.isValid():
+                bc = QTextCursor(block)
+                bc.setBlockFormat(block_fmt)
+                self._block_roles[bn] = info
+
+        self._scroll_to_bottom()
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -179,10 +226,11 @@ class ChatWidget(QTextEdit):
         self._scroll_to_bottom()
 
     def begin_streaming(self, message: Message) -> None:
-        """Start streaming — tokens arrive as plain text for speed."""
+        """Start streaming with periodic markdown re-rendering."""
         self._streaming_msg = message
         self._streaming_block_fmt = self._make_block_fmt(message)
         info = self._role_info(message)
+        self._messages.append(message)
 
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -193,8 +241,15 @@ class ChatWidget(QTextEdit):
         else:
             cursor.insertBlock(self._streaming_block_fmt)
 
+        # Record where streaming content starts (for incremental re-render)
+        self._streaming_start_pos = cursor.position()
         self._block_roles[cursor.block().blockNumber()] = info
-        self._messages.append(message)
+
+        # Start periodic markdown render
+        self._render_timer = QTimer(self)
+        self._render_timer.timeout.connect(self._render_streaming_tick)
+        self._render_timer.start(_RENDER_INTERVAL_MS)
+
         self._scroll_to_bottom()
 
     def append_token(self, token: str) -> None:
@@ -202,6 +257,7 @@ class ChatWidget(QTextEdit):
             return
         self._streaming_msg.content += token
 
+        # Append plain text for immediate feedback between render ticks
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
@@ -217,22 +273,28 @@ class ChatWidget(QTextEdit):
         self._scroll_to_bottom()
 
     def end_streaming(self) -> Message | None:
-        """Finish streaming and re-render with markdown formatting."""
+        """Finish streaming — stop timer and do a final clean render."""
         if self._streaming_msg:
             msg = self._streaming_msg
             self._streaming_msg = None
             self._streaming_block_fmt = None
-            # Rebuild so the completed message is markdown-rendered
+            if self._render_timer:
+                self._render_timer.stop()
+                self._render_timer = None
             self._rebuild()
             return msg
         return None
 
     def clear_messages(self) -> None:
+        if self._render_timer:
+            self._render_timer.stop()
+            self._render_timer = None
         self.clear()
         self._messages.clear()
         self._block_roles.clear()
         self._streaming_msg = None
         self._streaming_block_fmt = None
+        self._streaming_start_pos = 0
         self._is_empty = True
 
     def update_font_size(self, size: int) -> None:
