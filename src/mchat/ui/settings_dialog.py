@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: SettingsDialog
 # Responsibility: UI for managing API keys and settings
-# Collaborators: PySide6, config
+# Collaborators: PySide6, config, providers
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -19,12 +19,19 @@ from PySide6.QtWidgets import (
 )
 
 from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE
+from mchat.providers.base import BaseProvider
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: Config, parent=None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        providers: dict | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._config = config
+        self._providers = providers or {}
         self.setWindowTitle("Settings")
         self.setMinimumWidth(450)
         self._build_ui()
@@ -58,24 +65,12 @@ class SettingsDialog(QDialog):
 
         # Claude model
         self._claude_model = QComboBox()
-        self._claude_model.addItems([
-            "claude-opus-4-20250514",
-            "claude-sonnet-4-20250514",
-            "claude-haiku-4-20250414",
-        ])
-        current_model = self._config.get("claude_model")
-        idx = self._claude_model.findText(current_model)
-        if idx >= 0:
-            self._claude_model.setCurrentIndex(idx)
+        self._populate_model_combo(self._claude_model, "claude", self._config.get("claude_model"))
         form.addRow("Claude Model:", self._claude_model)
 
         # OpenAI model
         self._openai_model = QComboBox()
-        self._openai_model.addItems(["o3", "o3-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"])
-        current_model = self._config.get("openai_model")
-        idx = self._openai_model.findText(current_model)
-        if idx >= 0:
-            self._openai_model.setCurrentIndex(idx)
+        self._populate_model_combo(self._openai_model, "openai", self._config.get("openai_model"))
         form.addRow("OpenAI Model:", self._openai_model)
 
         # Font size
@@ -107,6 +102,33 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(save_btn)
 
         layout.addLayout(btn_layout)
+
+    def _populate_model_combo(
+        self, combo: QComboBox, provider_key: str, current_model: str
+    ) -> None:
+        """Fill a model combo from the live provider, falling back to config."""
+        from mchat.models.message import Provider
+
+        provider_enum = Provider(provider_key)
+        provider: BaseProvider | None = self._providers.get(provider_enum)
+
+        models: list[str] = []
+        if provider:
+            models = provider.list_models()
+
+        if not models:
+            # Bare-minimum fallback so the combo is never empty
+            if current_model:
+                models = [current_model]
+
+        combo.addItems(models)
+
+        # Ensure the currently-configured model is present and selected
+        if current_model and combo.findText(current_model) < 0:
+            combo.insertItem(0, current_model)
+        idx = combo.findText(current_model)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
 
     def _save(self) -> None:
         self._config.set("anthropic_api_key", self._anthropic_key.text().strip())

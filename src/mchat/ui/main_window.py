@@ -267,7 +267,8 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Error", f"Streaming failed:\n{error}")
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self._config, self)
+        providers = self._router._providers if self._router else {}
+        dialog = SettingsDialog(self._config, providers=providers, parent=self)
         if dialog.exec():
             self._init_providers()
             new_size = int(self._config.get("font_size") or 14)

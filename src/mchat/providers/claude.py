@@ -12,6 +12,12 @@ import anthropic
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
+FALLBACK_MODELS = [
+    "claude-opus-4-20250514",
+    "claude-sonnet-4-20250514",
+    "claude-haiku-4-20250414",
+]
+
 
 class ClaudeProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "claude-sonnet-4-20250514") -> None:
@@ -37,11 +43,15 @@ class ClaudeProvider(BaseProvider):
                 yield text
 
     def list_models(self) -> list[str]:
-        return [
-            "claude-opus-4-20250514",
-            "claude-sonnet-4-20250514",
-            "claude-haiku-4-20250414",
-        ]
+        try:
+            resp = self._client.models.list(limit=100)
+            models = sorted(
+                [m.id for m in resp.data],
+                reverse=True,
+            )
+            return models if models else FALLBACK_MODELS
+        except Exception:
+            return list(FALLBACK_MODELS)
 
     @staticmethod
     def _format_messages(messages: list[Message]) -> list[dict]:

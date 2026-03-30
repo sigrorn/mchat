@@ -5,6 +5,7 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 import openai
@@ -12,9 +13,22 @@ import openai
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
+FALLBACK_MODELS = [
+    "o3",
+    "o3-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+]
+
+# Prefixes that indicate a chat-capable model
+_CHAT_PREFIXES = re.compile(r"^(gpt-|o\d|chatgpt-)")
+
 
 class OpenAIProvider(BaseProvider):
-    def __init__(self, api_key: str, default_model: str = "gpt-4o") -> None:
+    def __init__(self, api_key: str, default_model: str = "gpt-4.1") -> None:
         self._client = openai.OpenAI(api_key=api_key)
         self._default_model = default_model
 
@@ -39,7 +53,15 @@ class OpenAIProvider(BaseProvider):
                 yield delta.content
 
     def list_models(self) -> list[str]:
-        return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
+        try:
+            resp = self._client.models.list()
+            models = sorted(
+                [m.id for m in resp.data if _CHAT_PREFIXES.match(m.id)],
+                reverse=True,
+            )
+            return models if models else FALLBACK_MODELS
+        except Exception:
+            return list(FALLBACK_MODELS)
 
     @staticmethod
     def _format_messages(messages: list[Message]) -> list[dict]:

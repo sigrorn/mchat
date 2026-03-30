@@ -6,6 +6,8 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
@@ -18,13 +20,36 @@ COLOR_CLAUDE = "#b0b0b0"
 COLOR_OPENAI = "#e8e8e8"
 
 
+def _short_model(model: str | None) -> str:
+    """Shorten a model id for the copy prefix.
+
+    claude-sonnet-4-20250514 -> sonnet-4
+    gpt-4.1-mini             -> 4.1-mini
+    o3-mini                  -> o3-mini
+    """
+    if not model:
+        return ""
+    # Claude: strip 'claude-' prefix and date suffix
+    m = re.match(r"^claude-(.+?)(-\d{8})?$", model)
+    if m:
+        return m.group(1)
+    # GPT: strip 'gpt-' prefix
+    if model.startswith("gpt-"):
+        return model[4:]
+    return model
+
+
+# Role info stored per text-block: (role, provider, model)
+_RoleInfo = tuple[Role, Provider | None, str | None]
+
+
 class ChatWidget(QTextEdit):
     def __init__(self, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
         self._font_size = font_size
         self._messages: list[Message] = []
-        self._block_roles: dict[int, tuple[Role, Provider | None]] = {}
+        self._block_roles: dict[int, _RoleInfo] = {}
         self._streaming_msg: Message | None = None
         self._streaming_block_fmt: QTextBlockFormat | None = None
         self._is_empty = True
@@ -61,6 +86,10 @@ class ChatWidget(QTextEdit):
         fmt.setBackground(QColor(self._color_for(message)))
         return fmt
 
+    @staticmethod
+    def _role_info(message: Message) -> _RoleInfo:
+        return (message.role, message.provider, message.model)
+
     # ------------------------------------------------------------------
     # Public API (matches the interface MainWindow expects)
     # ------------------------------------------------------------------
@@ -70,7 +99,7 @@ class ChatWidget(QTextEdit):
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
         block_fmt = self._make_block_fmt(message)
-        role_info = (message.role, message.provider)
+        info = self._role_info(message)
 
         lines = message.content.split("\n") if message.content else [""]
         for i, line in enumerate(lines):
@@ -80,7 +109,7 @@ class ChatWidget(QTextEdit):
             else:
                 cursor.insertBlock(block_fmt)
             cursor.insertText(line)
-            self._block_roles[cursor.block().blockNumber()] = role_info
+            self._block_roles[cursor.block().blockNumber()] = info
 
         self._messages.append(message)
         self._scroll_to_bottom()
@@ -88,7 +117,7 @@ class ChatWidget(QTextEdit):
     def begin_streaming(self, message: Message) -> None:
         self._streaming_msg = message
         self._streaming_block_fmt = self._make_block_fmt(message)
-        role_info = (message.role, message.provider)
+        info = self._role_info(message)
 
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -99,7 +128,7 @@ class ChatWidget(QTextEdit):
         else:
             cursor.insertBlock(self._streaming_block_fmt)
 
-        self._block_roles[cursor.block().blockNumber()] = role_info
+        self._block_roles[cursor.block().blockNumber()] = info
         self._messages.append(message)
         self._scroll_to_bottom()
 
@@ -111,12 +140,12 @@ class ChatWidget(QTextEdit):
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        role_info = (self._streaming_msg.role, self._streaming_msg.provider)
+        info = self._role_info(self._streaming_msg)
         parts = token.split("\n")
         for i, part in enumerate(parts):
             if i > 0:
                 cursor.insertBlock(self._streaming_block_fmt)
-                self._block_roles[cursor.block().blockNumber()] = role_info
+                self._block_roles[cursor.block().blockNumber()] = info
             if part:
                 cursor.insertText(part)
 
@@ -143,8 +172,20 @@ class ChatWidget(QTextEdit):
         self._apply_default_font()
 
     # ------------------------------------------------------------------
-    # Copy with //user, //claude, //gpt prefixes at speaker transitions
+    # Copy with //user, //claude (<model>), //gpt (<model>) prefixes
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _prefix_for(role_info: _RoleInfo) -> str:
+        role, provider, model = role_info
+        short = _short_model(model)
+        if role == Role.USER:
+            return "//user"
+        if provider == Provider.CLAUDE:
+            return f"//claude ({short})" if short else "//claude"
+        if provider == Provider.OPENAI:
+            return f"//gpt ({short})" if short else "//gpt"
+        return "//assistant"
 
     def createMimeDataFromSelection(self) -> QMimeData:
         cursor = self.textCursor()
@@ -158,22 +199,14 @@ class ChatWidget(QTextEdit):
         block = doc.findBlock(start)
 
         result_lines: list[str] = []
-        prev_role_info: tuple[Role, Provider | None] | None = None
+        prev_role_info: _RoleInfo | None = None
 
         while block.isValid() and block.position() < end:
             role_info = self._block_roles.get(block.blockNumber())
 
             # Insert prefix when speaker changes
             if role_info and role_info != prev_role_info:
-                role, provider = role_info
-                if role == Role.USER:
-                    result_lines.append("//user")
-                elif provider == Provider.CLAUDE:
-                    result_lines.append("//claude")
-                elif provider == Provider.OPENAI:
-                    result_lines.append("//gpt")
-                else:
-                    result_lines.append("//assistant")
+                result_lines.append(self._prefix_for(role_info))
                 prev_role_info = role_info
 
             # Extract selected portion of this block
