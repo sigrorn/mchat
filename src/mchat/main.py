@@ -22,19 +22,24 @@ def main() -> None:
     # Set AppUserModelID so Windows taskbar shows our icon, not Python's
     if sys.platform == "win32":
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mchat.mchat")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "mchat.mchat.app.1"
+        )
 
     app = QApplication(sys.argv)
     app.setApplicationName("mchat")
     app.setStyle("Fusion")
 
-    if _ICON_PATH.exists():
-        app.setWindowIcon(QIcon(str(_ICON_PATH)))
+    icon = QIcon(str(_ICON_PATH)) if _ICON_PATH.exists() else QIcon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     config = Config()
     db = Database()
 
     window = MainWindow(config, db)
+    if not icon.isNull():
+        window.setWindowIcon(icon)
     window.show()
 
     exit_code = app.exec()
