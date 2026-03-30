@@ -22,7 +22,7 @@ class InputWidget(QWidget):
         layout.setContentsMargins(16, 8, 16, 8)
 
         self._text_edit = QTextEdit()
-        self._text_edit.setPlaceholderText("claude, Type a message...")
+        self._text_edit.setPlaceholderText("")
         self._text_edit.setMaximumHeight(100)
         self._apply_text_edit_style()
         self._text_edit.installEventFilter(self)

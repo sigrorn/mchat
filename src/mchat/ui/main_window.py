@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self._populate_model_combos()
         self._setup_shortcuts()
         self._load_conversations()
+        self._update_input_placeholder()
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
@@ -277,6 +278,17 @@ class MainWindow(QMainWindow):
     # Messaging
     # ------------------------------------------------------------------
 
+    def _update_input_placeholder(self) -> None:
+        """Set the input placeholder to reflect the current default provider."""
+        if not self._router:
+            self._input.set_placeholder("Configure an API key in Settings to start chatting")
+            return
+        current = self._router.last_used
+        if current == Provider.CLAUDE:
+            self._input.set_placeholder("Message Claude — start with gpt, to switch")
+        else:
+            self._input.set_placeholder("Message GPT — start with claude, to switch")
+
     def _selected_model(self, provider_id: Provider) -> str:
         """Return the model currently selected in the top-bar combo."""
         if provider_id == Provider.CLAUDE:
@@ -370,6 +382,7 @@ class MainWindow(QMainWindow):
         self._update_spend_labels()
 
         self._input.set_enabled(True)
+        self._update_input_placeholder()
         self._stream_worker = None
 
     def _on_stream_error(self, error: str) -> None:
@@ -388,6 +401,7 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self._init_providers()
             self._populate_model_combos()
+            self._update_input_placeholder()
             new_size = int(self._config.get("font_size") or 14)
             if new_size != self._font_size:
                 self._font_size = new_size
