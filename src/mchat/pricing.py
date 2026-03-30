@@ -6,31 +6,28 @@
 from __future__ import annotations
 
 # Prices per 1M tokens: (input_rate, output_rate) in USD.
-# These are approximate and may lag behind actual pricing changes.
+# Keyed by base model family so that both dated IDs
+# (claude-sonnet-4-20250514) and aliases (claude-sonnet-4-6) match.
 _PRICES: dict[str, tuple[float, float]] = {
-    # Anthropic Claude
-    "claude-opus-4-20250514":   (15.00, 75.00),
-    "claude-sonnet-4-20250514": (3.00,  15.00),
-    "claude-haiku-4-20250414":  (0.80,  4.00),
-    # OpenAI GPT-4.1
-    "gpt-4.1":      (2.00, 8.00),
-    "gpt-4.1-mini": (0.40, 1.60),
+    # Anthropic Claude  (key = family prefix)
+    "claude-opus-4":   (15.00, 75.00),
+    "claude-sonnet-4": (3.00,  15.00),
+    "claude-haiku-4":  (0.80,  4.00),
+    # OpenAI GPT-4.1   (longer keys first in lookup)
     "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1":      (2.00, 8.00),
     # OpenAI GPT-4o
-    "gpt-4o":      (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o":      (2.50, 10.00),
     # OpenAI o-series
-    "o3":      (2.00, 8.00),
     "o3-mini": (1.10, 4.40),
+    "o3":      (2.00, 8.00),
 }
 
 
 def _lookup_rates(model: str) -> tuple[float, float] | None:
-    """Find pricing for a model, trying exact match first then prefix."""
-    # Exact match
-    if model in _PRICES:
-        return _PRICES[model]
-    # Prefix match: e.g. "gpt-4.1-2025-04-14" should match "gpt-4.1"
+    """Find pricing for a model by prefix match (longest key wins)."""
     for key, rates in sorted(_PRICES.items(), key=lambda kv: -len(kv[0])):
         if model.startswith(key):
             return rates
