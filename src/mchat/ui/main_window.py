@@ -101,6 +101,8 @@ class MainWindow(QMainWindow):
         self._sidebar = Sidebar(font_size=self._font_size)
         self._sidebar.conversation_selected.connect(self._on_conversation_selected)
         self._sidebar.new_chat_requested.connect(self._on_new_chat)
+        self._sidebar.save_requested.connect(self._on_save_conversation)
+        self._sidebar.delete_requested.connect(self._on_delete_conversation)
         main_layout.addWidget(self._sidebar)
 
         # Right panel (chat + input)
@@ -305,6 +307,46 @@ class MainWindow(QMainWindow):
         self._chat.clear_messages()
         self._load_conversations()
         self._sidebar.select_conversation(conv.id)
+
+    def _on_save_conversation(self, conv_id: int) -> None:
+        """Export a conversation to HTML (may differ from the currently viewed one)."""
+        messages = self._db.get_messages(conv_id)
+        if not messages:
+            return
+        convs = self._db.list_conversations()
+        conv = next((c for c in convs if c.id == conv_id), None)
+        title = (conv.title if conv else "chat").replace(" ", "_")[:40]
+
+        # Build a temporary ChatWidget to render the messages as HTML
+        from mchat.ui.chat_widget import ChatWidget
+        tmp = ChatWidget(font_size=self._font_size)
+        for msg in messages:
+            tmp._messages.append(msg)
+            tmp._insert_rendered(msg)
+        html = tmp.export_html()
+        tmp.deleteLater()
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Chat", f"{title}.html", "HTML Files (*.html)"
+        )
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+
+    def _on_delete_conversation(self, conv_id: int) -> None:
+        """Delete a conversation after confirmation."""
+        reply = QMessageBox.question(
+            self, "Delete Chat",
+            "Delete this conversation? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._db.delete_conversation(conv_id)
+        if self._current_conv and self._current_conv.id == conv_id:
+            self._current_conv = None
+            self._chat.clear_messages()
+        self._load_conversations()
 
     # ------------------------------------------------------------------
     # Messaging

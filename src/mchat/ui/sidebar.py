@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QVBoxLayout,
 )
@@ -22,6 +24,7 @@ from mchat.models.conversation import Conversation
 class Sidebar(QFrame):
     conversation_selected = Signal(int)  # conversation id
     new_chat_requested = Signal()
+    save_requested = Signal(int)    # conversation id
     delete_requested = Signal(int)  # conversation id
 
     def __init__(self, font_size: int = 14, parent=None) -> None:
@@ -64,6 +67,8 @@ class Sidebar(QFrame):
 
         # Conversation list
         self._list = QListWidget()
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._show_context_menu)
         self._apply_list_style()
         self._list.currentItemChanged.connect(self._on_item_changed)
         layout.addWidget(self._list)
@@ -99,6 +104,28 @@ class Sidebar(QFrame):
         if current:
             conv_id = current.data(Qt.ItemDataRole.UserRole)
             self.conversation_selected.emit(conv_id)
+
+    def _show_context_menu(self, pos) -> None:
+        item = self._list.itemAt(pos)
+        if not item:
+            return
+        conv_id = item.data(Qt.ItemDataRole.UserRole)
+
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background-color: #333; color: white; padding: 4px; }"
+            "QMenu::item { padding: 6px 24px; }"
+            "QMenu::item:selected { background-color: #555; }"
+        )
+
+        save_action = menu.addAction("Save as HTML...")
+        delete_action = menu.addAction("Delete")
+
+        action = menu.exec(self._list.mapToGlobal(pos))
+        if action == save_action:
+            self.save_requested.emit(conv_id)
+        elif action == delete_action:
+            self.delete_requested.emit(conv_id)
 
     def update_font_size(self, size: int) -> None:
         self._font_size = size
