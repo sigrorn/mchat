@@ -18,6 +18,7 @@ DEFAULTS = {
     "claude_model": "claude-sonnet-4-20250514",
     "openai_model": "gpt-4.1",
     "font_size": 14,
+    "system_prompt": "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.",
 }
 
 MIN_FONT_SIZE = 8

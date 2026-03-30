@@ -46,37 +46,52 @@ class Database:
 
     def _init_schema(self) -> None:
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns that may be missing from older databases."""
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(conversations)")
+        }
+        if "system_prompt" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"
+            )
 
     def close(self) -> None:
         self._conn.close()
 
     # -- Conversations --
 
-    def create_conversation(self, title: str = "New Chat") -> Conversation:
+    def create_conversation(self, title: str = "New Chat", system_prompt: str = "") -> Conversation:
         now = datetime.now(timezone.utc).isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO conversations (title, created_at, updated_at) VALUES (?, ?, ?)",
-            (title, now, now),
+            "INSERT INTO conversations (title, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (title, system_prompt, now, now),
         )
         self._conn.commit()
         return Conversation(
             id=cursor.lastrowid,
             title=title,
+            system_prompt=system_prompt,
             created_at=datetime.fromisoformat(now),
             updated_at=datetime.fromisoformat(now),
         )
 
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+            "SELECT id, title, system_prompt, created_at, updated_at "
+            "FROM conversations ORDER BY updated_at DESC"
         )
         return [
             Conversation(
                 id=row[0],
                 title=row[1],
-                created_at=datetime.fromisoformat(row[2]),
-                updated_at=datetime.fromisoformat(row[3]),
+                system_prompt=row[2] or "",
+                created_at=datetime.fromisoformat(row[3]),
+                updated_at=datetime.fromisoformat(row[4]),
             )
             for row in cursor.fetchall()
         ]

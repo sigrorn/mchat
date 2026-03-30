@@ -268,7 +268,8 @@ class MainWindow(QMainWindow):
             self._chat.add_message(msg)
 
     def _on_new_chat(self) -> None:
-        conv = self._db.create_conversation()
+        system_prompt = self._config.get("system_prompt")
+        conv = self._db.create_conversation(system_prompt=system_prompt)
         self._current_conv = conv
         self._chat.clear_messages()
         self._load_conversations()
@@ -349,7 +350,12 @@ class MainWindow(QMainWindow):
         self._chat.begin_streaming(assistant_msg)
         self._input.set_enabled(False)
 
-        context_messages = list(self._current_conv.messages)
+        context_messages: list[Message] = []
+        if self._current_conv.system_prompt:
+            context_messages.append(
+                Message(role=Role.SYSTEM, content=self._current_conv.system_prompt)
+            )
+        context_messages.extend(self._current_conv.messages)
 
         self._stream_worker = StreamWorker(provider, context_messages, model)
         self._stream_worker.token_received.connect(self._chat.append_token)

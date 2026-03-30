@@ -15,6 +15,7 @@ from mchat.models.message import Message
 class Conversation:
     title: str = "New Chat"
     id: int | None = None
+    system_prompt: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     messages: list[Message] = field(default_factory=list)

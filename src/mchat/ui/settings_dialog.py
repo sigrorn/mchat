@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -72,6 +73,12 @@ class SettingsDialog(QDialog):
         self._openai_model = QComboBox()
         self._populate_model_combo(self._openai_model, "openai", self._config.get("openai_model"))
         form.addRow("OpenAI Model:", self._openai_model)
+
+        # System prompt
+        self._system_prompt = QPlainTextEdit(self._config.get("system_prompt"))
+        self._system_prompt.setMaximumHeight(100)
+        self._system_prompt.setPlaceholderText("System prompt sent at the start of new chats...")
+        form.addRow("System Prompt:", self._system_prompt)
 
         # Font size
         self._font_size = QSpinBox()
@@ -136,6 +143,7 @@ class SettingsDialog(QDialog):
         self._config.set("default_provider", self._default_provider.currentText())
         self._config.set("claude_model", self._claude_model.currentText())
         self._config.set("openai_model", self._openai_model.currentText())
+        self._config.set("system_prompt", self._system_prompt.toPlainText().strip())
         self._config.set("font_size", self._font_size.value())
         self._config.save()
         self.accept()
