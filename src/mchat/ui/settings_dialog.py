@@ -71,7 +71,7 @@ class SettingsDialog(QDialog):
 
         # OpenAI model
         self._openai_model = QComboBox()
-        self._openai_model.addItems(["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"])
+        self._openai_model.addItems(["o3", "o3-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"])
         current_model = self._config.get("openai_model")
         idx = self._openai_model.findText(current_model)
         if idx >= 0:

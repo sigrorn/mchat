@@ -16,7 +16,7 @@ DEFAULTS = {
     "openai_api_key": "",
     "default_provider": "claude",
     "claude_model": "claude-sonnet-4-20250514",
-    "openai_model": "gpt-4o",
+    "openai_model": "gpt-4.1",
     "font_size": 14,
 }
 
