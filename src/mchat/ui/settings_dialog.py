@@ -92,6 +92,15 @@ class SettingsDialog(QDialog):
         self._color_openai_btn = self._make_color_btn(self._config.get("color_openai"))
         form.addRow("GPT colour:", self._color_openai_btn)
 
+        reset_colors_btn = QPushButton("Reset colours to defaults")
+        reset_colors_btn.setStyleSheet(
+            "QPushButton { background: none; border: 1px solid #999; border-radius: 4px; "
+            "padding: 4px 12px; color: #666; }"
+            "QPushButton:hover { background-color: #eee; }"
+        )
+        reset_colors_btn.clicked.connect(self._reset_colors)
+        form.addRow("", reset_colors_btn)
+
         # Font size
         self._font_size = QSpinBox()
         self._font_size.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
@@ -138,6 +147,17 @@ class SettingsDialog(QDialog):
             f"border-radius: 4px; }}"
         )
         btn.setText(hex_color)
+
+    def _reset_colors(self) -> None:
+        from mchat.config import DEFAULTS
+        for btn, key in [
+            (self._color_user_btn, "color_user"),
+            (self._color_claude_btn, "color_claude"),
+            (self._color_openai_btn, "color_openai"),
+        ]:
+            default = DEFAULTS[key]
+            btn.setProperty("hex_color", default)
+            self._apply_color_btn_style(btn, default)
 
     def _pick_color(self, btn: QPushButton) -> None:
         current = QColor(btn.property("hex_color"))
