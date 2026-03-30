@@ -29,6 +29,7 @@ _CHAT_PREFIXES = re.compile(r"^(gpt-|o\d|chatgpt-)")
 
 class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "gpt-4.1") -> None:
+        super().__init__()
         self._client = openai.OpenAI(api_key=api_key)
         self._default_model = default_model
 
@@ -41,16 +42,19 @@ class OpenAIProvider(BaseProvider):
         return "ChatGPT"
 
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
+        self.last_usage = None
         api_messages = self._format_messages(messages)
         response = self._client.chat.completions.create(
             model=model or self._default_model,
             messages=api_messages,
             stream=True,
+            stream_options={"include_usage": True},
         )
         for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+            if chunk.usage:
+                self.last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
 
     def list_models(self) -> list[str]:
         try:

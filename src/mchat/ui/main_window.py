@@ -8,8 +8,10 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -21,6 +23,7 @@ from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
+from mchat.pricing import estimate_cost, format_cost
 from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
 from mchat.providers.openai_provider import OpenAIProvider
@@ -42,8 +45,15 @@ class MainWindow(QMainWindow):
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
 
+        # Session spend tracking (reset when the app restarts)
+        self._session_spend: dict[Provider, float] = {
+            Provider.CLAUDE: 0.0,
+            Provider.OPENAI: 0.0,
+        }
+
         self._init_providers()
         self._build_ui()
+        self._populate_model_combos()
         self._setup_shortcuts()
         self._load_conversations()
 
@@ -66,6 +76,10 @@ class MainWindow(QMainWindow):
 
         default = Provider(self._config.get("default_provider"))
         self._router = Router(providers, default) if providers else None
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
         self.setWindowTitle("mchat")
@@ -91,13 +105,37 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        # Top bar with settings button
+        # ---- Top bar ----
         top_bar = QFrame()
         top_bar.setStyleSheet("background-color: #f5f5f5; border-bottom: 1px solid #ddd;")
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(16, 8, 16, 8)
+        top_bar_layout.setSpacing(8)
+
+        # Claude model combo + spend
+        self._claude_combo = QComboBox()
+        self._claude_combo.setMinimumWidth(180)
+        top_bar_layout.addWidget(self._claude_combo)
+
+        self._claude_spend_label = QLabel("$0.00")
+        self._apply_spend_label_style(self._claude_spend_label)
+        top_bar_layout.addWidget(self._claude_spend_label)
+
+        # Gap
+        top_bar_layout.addSpacing(16)
+
+        # OpenAI model combo + spend
+        self._openai_combo = QComboBox()
+        self._openai_combo.setMinimumWidth(180)
+        top_bar_layout.addWidget(self._openai_combo)
+
+        self._openai_spend_label = QLabel("$0.00")
+        self._apply_spend_label_style(self._openai_spend_label)
+        top_bar_layout.addWidget(self._openai_spend_label)
+
         top_bar_layout.addStretch()
 
+        # Settings button (right-aligned)
         self._settings_btn = QPushButton("⚙ Settings")
         self._apply_settings_btn_style()
         self._settings_btn.clicked.connect(self._open_settings)
@@ -116,12 +154,53 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(right, stretch=1)
 
+    def _populate_model_combos(self) -> None:
+        """Fill model combo boxes from live providers."""
+        providers = self._router._providers if self._router else {}
+        for combo, provider_enum, config_key in [
+            (self._claude_combo, Provider.CLAUDE, "claude_model"),
+            (self._openai_combo, Provider.OPENAI, "openai_model"),
+        ]:
+            combo.blockSignals(True)
+            combo.clear()
+            provider = providers.get(provider_enum)
+            models = provider.list_models() if provider else []
+            current = self._config.get(config_key)
+            if models:
+                combo.addItems(models)
+            if current and combo.findText(current) < 0:
+                combo.insertItem(0, current)
+            if not combo.count() and current:
+                combo.addItem(current)
+            idx = combo.findText(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            combo.setEnabled(provider is not None)
+            combo.blockSignals(False)
+
+    def _apply_spend_label_style(self, label: QLabel) -> None:
+        label.setStyleSheet(
+            f"color: #666; font-size: {self._font_size - 1}px; padding: 0 4px;"
+        )
+
     def _apply_settings_btn_style(self) -> None:
         self._settings_btn.setStyleSheet(
             f"QPushButton {{ background: none; border: 1px solid #ccc; border-radius: 6px; "
             f"padding: 4px 12px; color: #666; font-size: {self._font_size - 1}px; }}"
             f"QPushButton:hover {{ background-color: #eee; }}"
         )
+
+    def _update_spend_labels(self) -> None:
+        for provider, label in [
+            (Provider.CLAUDE, self._claude_spend_label),
+            (Provider.OPENAI, self._openai_spend_label),
+        ]:
+            amount = self._session_spend[provider]
+            label.setText(format_cost(amount) if amount else "$0.00")
+
+    # ------------------------------------------------------------------
+    # Shortcuts
+    # ------------------------------------------------------------------
 
     def _setup_shortcuts(self) -> None:
         zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
@@ -159,6 +238,12 @@ class MainWindow(QMainWindow):
         self._input.update_font_size(self._font_size)
         self._sidebar.update_font_size(self._font_size)
         self._apply_settings_btn_style()
+        self._apply_spend_label_style(self._claude_spend_label)
+        self._apply_spend_label_style(self._openai_spend_label)
+
+    # ------------------------------------------------------------------
+    # Conversations
+    # ------------------------------------------------------------------
 
     def _load_conversations(self) -> None:
         conversations = self._db.list_conversations()
@@ -186,6 +271,16 @@ class MainWindow(QMainWindow):
         self._load_conversations()
         self._sidebar.select_conversation(conv.id)
 
+    # ------------------------------------------------------------------
+    # Messaging
+    # ------------------------------------------------------------------
+
+    def _selected_model(self, provider_id: Provider) -> str:
+        """Return the model currently selected in the top-bar combo."""
+        if provider_id == Provider.CLAUDE:
+            return self._claude_combo.currentText()
+        return self._openai_combo.currentText()
+
     def _on_message_submitted(self, text: str) -> None:
         if not self._router:
             QMessageBox.warning(
@@ -211,7 +306,7 @@ class MainWindow(QMainWindow):
         # Save and display user message
         user_msg = Message(
             role=Role.USER,
-            content=text,  # store original with prefix
+            content=text,
             conversation_id=self._current_conv.id,
         )
         self._db.add_message(user_msg)
@@ -225,9 +320,9 @@ class MainWindow(QMainWindow):
             self._load_conversations()
             self._sidebar.select_conversation(self._current_conv.id)
 
-        # Start streaming response
+        # Use the model selected in the top-bar combo (not just config)
+        model = self._selected_model(provider_id)
         provider = self._router.get_provider(provider_id)
-        model = self._config.get(f"{provider_id.value}_model") if provider_id == Provider.OPENAI else self._config.get("claude_model")
 
         # Create placeholder assistant message
         assistant_msg = Message(
@@ -240,23 +335,38 @@ class MainWindow(QMainWindow):
         self._chat.begin_streaming(assistant_msg)
         self._input.set_enabled(False)
 
-        # Build message list for context (use cleaned text for the current message)
         context_messages = list(self._current_conv.messages)
 
         self._stream_worker = StreamWorker(provider, context_messages, model)
         self._stream_worker.token_received.connect(self._chat.append_token)
         self._stream_worker.stream_complete.connect(
-            lambda full_text: self._on_stream_complete(full_text, provider_id, model)
+            lambda full_text, inp, out: self._on_stream_complete(
+                full_text, provider_id, model, inp, out
+            )
         )
         self._stream_worker.stream_error.connect(self._on_stream_error)
         self._stream_worker.start()
 
-    def _on_stream_complete(self, full_text: str, provider_id: Provider, model: str) -> None:
+    def _on_stream_complete(
+        self,
+        full_text: str,
+        provider_id: Provider,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
         msg = self._chat.end_streaming()
         if msg:
             msg.content = full_text
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
+
+        # Update session spend
+        cost = estimate_cost(model, input_tokens, output_tokens)
+        if cost is not None:
+            self._session_spend[provider_id] += cost
+        self._update_spend_labels()
+
         self._input.set_enabled(True)
         self._stream_worker = None
 
@@ -266,11 +376,16 @@ class MainWindow(QMainWindow):
         self._stream_worker = None
         QMessageBox.critical(self, "Error", f"Streaming failed:\n{error}")
 
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
     def _open_settings(self) -> None:
         providers = self._router._providers if self._router else {}
         dialog = SettingsDialog(self._config, providers=providers, parent=self)
         if dialog.exec():
             self._init_providers()
+            self._populate_model_combos()
             new_size = int(self._config.get("font_size") or 14)
             if new_size != self._font_size:
                 self._font_size = new_size

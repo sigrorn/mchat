@@ -21,6 +21,7 @@ FALLBACK_MODELS = [
 
 class ClaudeProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "claude-sonnet-4-20250514") -> None:
+        super().__init__()
         self._client = anthropic.Anthropic(api_key=api_key)
         self._default_model = default_model
 
@@ -33,6 +34,7 @@ class ClaudeProvider(BaseProvider):
         return "Claude"
 
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
+        self.last_usage = None
         api_messages = self._format_messages(messages)
         with self._client.messages.stream(
             model=model or self._default_model,
@@ -41,6 +43,8 @@ class ClaudeProvider(BaseProvider):
         ) as stream:
             for text in stream.text_stream:
                 yield text
+            final = stream.get_final_message()
+            self.last_usage = (final.usage.input_tokens, final.usage.output_tokens)
 
     def list_models(self) -> list[str]:
         try:

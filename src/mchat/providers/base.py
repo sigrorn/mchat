@@ -14,6 +14,9 @@ from mchat.models.message import Message, Provider
 class BaseProvider(ABC):
     """Abstract base class for LLM providers."""
 
+    def __init__(self) -> None:
+        self.last_usage: tuple[int, int] | None = None  # (input_tokens, output_tokens)
+
     @property
     @abstractmethod
     def provider_id(self) -> Provider:
@@ -26,7 +29,11 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
-        """Stream a response, yielding tokens as they arrive."""
+        """Stream a response, yielding tokens as they arrive.
+
+        After the generator is exhausted, ``last_usage`` should hold
+        the token counts for the request.
+        """
         ...
 
     @abstractmethod
