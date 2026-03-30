@@ -386,11 +386,6 @@ class MainWindow(QMainWindow):
         if cost is not None:
             self._session_spend[provider_id] += cost
         self._update_spend_labels()
-        # Temporary: show last request tokens in title for debugging
-        self.setWindowTitle(
-            f"mchat — last: {provider_id.value} {model} "
-            f"in={input_tokens} out={output_tokens} cost={cost}"
-        )
 
         self._input.set_enabled(True)
         self._update_input_placeholder()
