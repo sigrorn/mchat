@@ -175,6 +175,57 @@ class ChatWidget(QTextEdit):
         self._scroll_to_bottom()
 
     # ------------------------------------------------------------------
+    # HTML export
+    # ------------------------------------------------------------------
+
+    def export_html(self) -> str:
+        """Return a standalone HTML document with all messages."""
+        parts: list[str] = []
+        for msg in self._messages:
+            colour = self._color_for(msg)
+            content = self._render(msg)
+
+            if msg.role == Role.USER:
+                label = "You"
+            elif msg.provider == Provider.CLAUDE:
+                label = f"Claude ({_short_model(msg.model)})" if msg.model else "Claude"
+            elif msg.provider == Provider.OPENAI:
+                label = f"GPT ({_short_model(msg.model)})" if msg.model else "GPT"
+            else:
+                label = "Assistant"
+
+            parts.append(
+                f'<div style="background-color:{colour}; padding:12px 16px; '
+                f'margin:0; border-radius:0;">'
+                f'<div style="font-size:0.85em; color:#444; font-weight:bold; '
+                f'margin-bottom:4px;">{label}</div>'
+                f'{content}'
+                f'</div>'
+            )
+
+        body = "\n".join(parts)
+        return (
+            "<!DOCTYPE html>\n"
+            "<html><head><meta charset='utf-8'>\n"
+            "<style>\n"
+            "  body { font-family: -apple-system, Segoe UI, sans-serif;\n"
+            f"         font-size: {self._font_size}px; margin: 0; padding: 0;\n"
+            "         background: #f5f5f5; color: #1a1a1a; }\n"
+            "  code { background: rgba(0,0,0,0.06); padding: 1px 4px;\n"
+            "         font-family: Consolas, 'Courier New', monospace; }\n"
+            "  pre  { background: rgba(0,0,0,0.06); padding: 8px;\n"
+            "         font-family: Consolas, 'Courier New', monospace;\n"
+            "         white-space: pre-wrap; overflow-x: auto; }\n"
+            "  table { border-collapse: collapse; margin: 4px 0; }\n"
+            "  th, td { border: 1px solid #999; padding: 4px 8px; }\n"
+            "  th { background: rgba(0,0,0,0.08); font-weight: bold; }\n"
+            "</style>\n"
+            "</head><body>\n"
+            f"{body}\n"
+            "</body></html>"
+        )
+
+    # ------------------------------------------------------------------
     # Incremental streaming render
     # ------------------------------------------------------------------
 

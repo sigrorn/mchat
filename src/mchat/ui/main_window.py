@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -217,6 +218,22 @@ class MainWindow(QMainWindow):
 
         zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
         zoom_reset.activated.connect(self._zoom_reset)
+
+        save = QShortcut(QKeySequence("Ctrl+S"), self)
+        save.activated.connect(self._export_chat)
+
+    def _export_chat(self) -> None:
+        if not self._current_conv or not self._current_conv.messages:
+            return
+        title = self._current_conv.title.replace(" ", "_")[:40]
+        default_name = f"{title}.html"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Chat", default_name, "HTML Files (*.html)"
+        )
+        if path:
+            html = self._chat.export_html()
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
 
     def _zoom_in(self) -> None:
         self._set_font_size(self._font_size + 1)
