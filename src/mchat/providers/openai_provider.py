@@ -44,17 +44,32 @@ class OpenAIProvider(BaseProvider):
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
         self.last_usage = None
         api_messages = self._format_messages(messages)
-        response = self._client.chat.completions.create(
-            model=model or self._default_model,
-            messages=api_messages,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=model or self._default_model,
+                messages=api_messages,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except TypeError:
+            # Older SDK versions may not accept stream_options
+            response = self._client.chat.completions.create(
+                model=model or self._default_model,
+                messages=api_messages,
+                stream=True,
+            )
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
-            if chunk.usage:
-                self.last_usage = (chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
+            try:
+                usage = chunk.usage
+                if usage is not None:
+                    self.last_usage = (
+                        usage.prompt_tokens or 0,
+                        usage.completion_tokens or 0,
+                    )
+            except AttributeError:
+                pass
 
     def list_models(self) -> list[str]:
         try:
