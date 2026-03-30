@@ -33,6 +33,7 @@ from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
+from mchat.router import BOTH
 from mchat.workers.stream_worker import StreamWorker
 
 
@@ -43,6 +44,8 @@ class MainWindow(QMainWindow):
         self._db = db
         self._current_conv: Conversation | None = None
         self._stream_worker: StreamWorker | None = None
+        self._both_workers: dict[Provider, StreamWorker] = {}
+        self._both_results: dict[Provider, tuple[str, int, int]] = {}
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
 
@@ -311,15 +314,25 @@ class MainWindow(QMainWindow):
             return
         current = self._router.last_used
         if current == Provider.CLAUDE:
-            self._input.set_placeholder("Message Claude — start with gpt, to switch")
+            self._input.set_placeholder("Message Claude — prefix gpt, or both, to switch")
         else:
-            self._input.set_placeholder("Message GPT — start with claude, to switch")
+            self._input.set_placeholder("Message GPT — prefix claude, or both, to switch")
 
     def _selected_model(self, provider_id: Provider) -> str:
         """Return the model currently selected in the top-bar combo."""
         if provider_id == Provider.CLAUDE:
             return self._claude_combo.currentText()
         return self._openai_combo.currentText()
+
+    def _build_context(self) -> list[Message]:
+        """Build the context message list including system prompt."""
+        context: list[Message] = []
+        if self._current_conv.system_prompt:
+            context.append(
+                Message(role=Role.SYSTEM, content=self._current_conv.system_prompt)
+            )
+        context.extend(self._current_conv.messages)
+        return context
 
     def _on_message_submitted(self, text: str) -> None:
         if not self._router:
@@ -334,14 +347,28 @@ class MainWindow(QMainWindow):
             self._on_new_chat()
 
         # Route message
-        provider_id, cleaned_text = self._router.parse(text)
+        target, cleaned_text = self._router.parse(text)
 
-        if provider_id not in self._router._providers:
-            QMessageBox.warning(
-                self, "Provider Not Configured",
-                f"No API key configured for {provider_id.value}. Check Settings.",
-            )
-            return
+        if target == BOTH:
+            # Need both providers configured
+            missing = [
+                p for p in (Provider.CLAUDE, Provider.OPENAI)
+                if p not in self._router._providers
+            ]
+            if missing:
+                names = ", ".join(p.value for p in missing)
+                QMessageBox.warning(
+                    self, "Provider Not Configured",
+                    f"No API key configured for {names}. Check Settings.",
+                )
+                return
+        else:
+            if target not in self._router._providers:
+                QMessageBox.warning(
+                    self, "Provider Not Configured",
+                    f"No API key configured for {target.value}. Check Settings.",
+                )
+                return
 
         # Save and display user message
         user_msg = Message(
@@ -360,11 +387,18 @@ class MainWindow(QMainWindow):
             self._load_conversations()
             self._sidebar.select_conversation(self._current_conv.id)
 
-        # Use the model selected in the top-bar combo (not just config)
+        self._input.set_enabled(False)
+
+        if target == BOTH:
+            self._send_both()
+        else:
+            self._send_single(target)
+
+    def _send_single(self, provider_id: Provider) -> None:
+        """Send to a single provider with live streaming."""
         model = self._selected_model(provider_id)
         provider = self._router.get_provider(provider_id)
 
-        # Create placeholder assistant message
         assistant_msg = Message(
             role=Role.ASSISTANT,
             content="",
@@ -373,15 +407,8 @@ class MainWindow(QMainWindow):
             conversation_id=self._current_conv.id,
         )
         self._chat.begin_streaming(assistant_msg)
-        self._input.set_enabled(False)
 
-        context_messages: list[Message] = []
-        if self._current_conv.system_prompt:
-            context_messages.append(
-                Message(role=Role.SYSTEM, content=self._current_conv.system_prompt)
-            )
-        context_messages.extend(self._current_conv.messages)
-
+        context_messages = self._build_context()
         self._stream_worker = StreamWorker(provider, context_messages, model)
         self._stream_worker.token_received.connect(self._chat.append_token)
         self._stream_worker.stream_complete.connect(
@@ -391,6 +418,87 @@ class MainWindow(QMainWindow):
         )
         self._stream_worker.stream_error.connect(self._on_stream_error)
         self._stream_worker.start()
+
+    def _send_both(self) -> None:
+        """Send to both providers simultaneously, render when each completes."""
+        self._both_results.clear()
+        self._both_workers.clear()
+        context_messages = self._build_context()
+
+        for provider_id in (Provider.CLAUDE, Provider.OPENAI):
+            model = self._selected_model(provider_id)
+            provider = self._router.get_provider(provider_id)
+
+            worker = StreamWorker(provider, context_messages, model)
+            # No token_received connection — collect silently
+            worker.stream_complete.connect(
+                lambda full_text, inp, out, pid=provider_id, mdl=model: (
+                    self._on_both_single_complete(pid, mdl, full_text, inp, out)
+                )
+            )
+            worker.stream_error.connect(
+                lambda error, pid=provider_id: self._on_both_single_error(pid, error)
+            )
+            self._both_workers[provider_id] = worker
+            worker.start()
+
+    # ------------------------------------------------------------------
+    # "both" mode completion
+    # ------------------------------------------------------------------
+
+    def _on_both_single_complete(
+        self,
+        provider_id: Provider,
+        model: str,
+        full_text: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        self._both_results[provider_id] = (full_text, input_tokens, output_tokens)
+        self._both_workers.pop(provider_id, None)
+
+        # Render this response immediately as a complete message
+        msg = Message(
+            role=Role.ASSISTANT,
+            content=full_text,
+            provider=provider_id,
+            model=model,
+            conversation_id=self._current_conv.id,
+        )
+        self._db.add_message(msg)
+        self._current_conv.messages.append(msg)
+        self._chat.add_message(msg)
+
+        # Update spend
+        cost = estimate_cost(model, input_tokens, output_tokens)
+        if cost is not None:
+            self._session_spend[provider_id] += cost
+        self._update_spend_labels()
+
+        # If both are done, re-enable input
+        if not self._both_workers:
+            self._input.set_enabled(True)
+            self._update_input_placeholder()
+
+    def _on_both_single_error(self, provider_id: Provider, error: str) -> None:
+        self._both_workers.pop(provider_id, None)
+
+        # Show error as a message in chat
+        error_msg = Message(
+            role=Role.ASSISTANT,
+            content=f"[Error from {provider_id.value}: {error}]",
+            provider=provider_id,
+            conversation_id=self._current_conv.id,
+        )
+        self._chat.add_message(error_msg)
+
+        if not self._both_workers:
+            self._input.set_enabled(True)
+            self._update_input_placeholder()
+
+    # ------------------------------------------------------------------
+    # Single-provider completion
+    # ------------------------------------------------------------------
 
     def _on_stream_complete(
         self,

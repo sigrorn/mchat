@@ -11,13 +11,16 @@ from mchat.models.message import Provider
 from mchat.providers.base import BaseProvider
 
 PREFIX_PATTERN = re.compile(
-    r"^(claude|gpt)\s*[,:]\s*",
+    r"^(claude|gpt|both)\s*[,:]\s*",
     re.IGNORECASE,
 )
+
+BOTH = "both"
 
 PREFIX_TO_PROVIDER = {
     "claude": Provider.CLAUDE,
     "gpt": Provider.OPENAI,
+    "both": BOTH,
 }
 
 
@@ -26,15 +29,16 @@ class Router:
         self._providers = providers
         self._last_used = default
 
-    def parse(self, user_input: str) -> tuple[Provider, str]:
-        """Parse user input, returning (target provider, cleaned message)."""
+    def parse(self, user_input: str) -> tuple[Provider | str, str]:
+        """Parse user input, returning (target provider or 'both', cleaned message)."""
         match = PREFIX_PATTERN.match(user_input)
         if match:
             prefix = match.group(1).lower()
-            provider = PREFIX_TO_PROVIDER[prefix]
+            target = PREFIX_TO_PROVIDER[prefix]
             cleaned = user_input[match.end():].strip()
-            self._last_used = provider
-            return provider, cleaned
+            if target != BOTH:
+                self._last_used = target
+            return target, cleaned
         return self._last_used, user_input
 
     def get_provider(self, provider_id: Provider) -> BaseProvider:
