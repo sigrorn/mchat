@@ -49,12 +49,6 @@ class MainWindow(QMainWindow):
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
 
-        # Session spend tracking (reset when the app restarts)
-        self._session_spend: dict[Provider, float] = {
-            Provider.CLAUDE: 0.0,
-            Provider.OPENAI: 0.0,
-        }
-
         self._init_providers()
         self._build_ui()
         self._populate_model_combos()
@@ -205,12 +199,11 @@ class MainWindow(QMainWindow):
         )
 
     def _update_spend_labels(self) -> None:
-        for provider, label in [
-            (Provider.CLAUDE, self._claude_spend_label),
-            (Provider.OPENAI, self._openai_spend_label),
-        ]:
-            amount = self._session_spend[provider]
-            label.setText(format_cost(amount) if amount else "$0.00000")
+        conv = self._current_conv
+        claude_spend = conv.spend_claude if conv else 0.0
+        openai_spend = conv.spend_openai if conv else 0.0
+        self._claude_spend_label.setText(format_cost(claude_spend) if claude_spend else "$0.00000")
+        self._openai_spend_label.setText(format_cost(openai_spend) if openai_spend else "$0.00000")
 
     # ------------------------------------------------------------------
     # Shortcuts
@@ -300,6 +293,7 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     pass
         self._update_input_placeholder()
+        self._update_spend_labels()
 
         self._chat.clear_messages()
         for msg in messages:
@@ -310,6 +304,7 @@ class MainWindow(QMainWindow):
         conv = self._db.create_conversation(system_prompt=system_prompt)
         self._current_conv = conv
         self._chat.clear_messages()
+        self._update_spend_labels()
         self._load_conversations()
         self._sidebar.select_conversation(conv.id)
 
@@ -526,10 +521,16 @@ class MainWindow(QMainWindow):
         self._current_conv.messages.append(msg)
         self._chat.add_message(msg)
 
-        # Update spend
+        # Update per-conversation spend
         cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None:
-            self._session_spend[provider_id] += cost
+        if cost is not None and self._current_conv:
+            if provider_id == Provider.CLAUDE:
+                self._current_conv.spend_claude += cost
+            else:
+                self._current_conv.spend_openai += cost
+            self._db.add_conversation_spend(
+                self._current_conv.id, provider_id.value, cost
+            )
         self._update_spend_labels()
 
         # If both are done, re-enable input and save "both" as last provider
@@ -576,10 +577,16 @@ class MainWindow(QMainWindow):
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
 
-        # Update session spend
+        # Update per-conversation spend
         cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None:
-            self._session_spend[provider_id] += cost
+        if cost is not None and self._current_conv:
+            if provider_id == Provider.CLAUDE:
+                self._current_conv.spend_claude += cost
+            else:
+                self._current_conv.spend_openai += cost
+            self._db.add_conversation_spend(
+                self._current_conv.id, provider_id.value, cost
+            )
         self._update_spend_labels()
 
         # Remember which provider was last used in this conversation

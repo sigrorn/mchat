@@ -63,6 +63,14 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN last_provider TEXT NOT NULL DEFAULT ''"
             )
+        if "spend_claude" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN spend_claude REAL NOT NULL DEFAULT 0.0"
+            )
+        if "spend_openai" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN spend_openai REAL NOT NULL DEFAULT 0.0"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -86,7 +94,8 @@ class Database:
 
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
-            "SELECT id, title, system_prompt, last_provider, created_at, updated_at "
+            "SELECT id, title, system_prompt, last_provider, "
+            "spend_claude, spend_openai, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -95,8 +104,10 @@ class Database:
                 title=row[1],
                 system_prompt=row[2] or "",
                 last_provider=row[3] or "",
-                created_at=datetime.fromisoformat(row[4]),
-                updated_at=datetime.fromisoformat(row[5]),
+                spend_claude=row[4] or 0.0,
+                spend_openai=row[5] or 0.0,
+                created_at=datetime.fromisoformat(row[6]),
+                updated_at=datetime.fromisoformat(row[7]),
             )
             for row in cursor.fetchall()
         ]
@@ -113,6 +124,14 @@ class Database:
         self._conn.execute(
             "UPDATE conversations SET last_provider = ? WHERE id = ?",
             (provider, conv_id),
+        )
+        self._conn.commit()
+
+    def add_conversation_spend(self, conv_id: int, provider: str, amount: float) -> None:
+        col = "spend_claude" if provider == "claude" else "spend_openai"
+        self._conn.execute(
+            f"UPDATE conversations SET {col} = {col} + ? WHERE id = ?",
+            (amount, conv_id),
         )
         self._conn.commit()
 
