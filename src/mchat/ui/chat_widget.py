@@ -164,7 +164,7 @@ class ChatWidget(QTextEdit):
     ) -> None:
         """Apply background colour and role to all blocks and table cells in range."""
         doc = self.document()
-        tables_seen: set[int] = set()
+        tables_seen: set[int] = set()  # keyed by document position of table start
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
             if not block.isValid():
@@ -175,14 +175,16 @@ class ChatWidget(QTextEdit):
 
             # If this block is inside a table, colour all cells
             table = bc.currentTable()
-            if table and id(table) not in tables_seen:
-                tables_seen.add(id(table))
-                for row in range(table.rows()):
-                    for col in range(table.columns()):
-                        cell = table.cellAt(row, col)
-                        fmt = cell.format()
-                        fmt.setBackground(color)
-                        cell.setFormat(fmt)
+            if table:
+                table_pos = table.firstCursorPosition().position()
+                if table_pos not in tables_seen:
+                    tables_seen.add(table_pos)
+                    for row in range(table.rows()):
+                        for col in range(table.columns()):
+                            cell = table.cellAt(row, col)
+                            fmt = cell.format()
+                            fmt.setBackground(color)
+                            cell.setFormat(fmt)
 
     def _insert_rendered(self, message: Message) -> None:
         """Insert a message as rendered HTML with background colour on every block."""
