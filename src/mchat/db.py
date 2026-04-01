@@ -92,6 +92,17 @@ class Database:
                 "ALTER TABLE conversations ADD COLUMN limit_mark TEXT"
             )
 
+        # Migrate spend data from old columns to conversation_spend table
+        if "spend_claude" in cols:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO conversation_spend (conversation_id, provider, amount) "
+                "SELECT id, 'claude', spend_claude FROM conversations WHERE spend_claude > 0"
+            )
+            self._conn.execute(
+                "INSERT OR IGNORE INTO conversation_spend (conversation_id, provider, amount) "
+                "SELECT id, 'openai', spend_openai FROM conversations WHERE spend_openai > 0"
+            )
+
     def close(self) -> None:
         self._conn.close()
 
