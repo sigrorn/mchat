@@ -490,7 +490,7 @@ class MainWindow(QMainWindow):
         if cmd == "//limit":
             return self._handle_limit(arg)
 
-        if cmd == "//list":
+        if cmd == "//marks":
             return self._handle_list()
 
         if cmd == "//incremental":
