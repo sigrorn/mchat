@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -24,6 +25,7 @@ from mchat.models.conversation import Conversation
 class Sidebar(QFrame):
     conversation_selected = Signal(int)  # conversation id
     new_chat_requested = Signal()
+    rename_requested = Signal(int, str)  # conversation id, new title
     save_requested = Signal(int)    # conversation id
     delete_requested = Signal(int)  # conversation id
 
@@ -118,11 +120,19 @@ class Sidebar(QFrame):
             "QMenu::item:selected { background-color: #555; }"
         )
 
+        rename_action = menu.addAction("Rename")
         save_action = menu.addAction("Save as HTML...")
         delete_action = menu.addAction("Delete")
 
         action = menu.exec(self._list.mapToGlobal(pos))
-        if action == save_action:
+        if action == rename_action:
+            current_title = item.text()
+            new_title, ok = QInputDialog.getText(
+                self, "Rename Chat", "New name:", text=current_title
+            )
+            if ok and new_title.strip():
+                self.rename_requested.emit(conv_id, new_title.strip())
+        elif action == save_action:
             self.save_requested.emit(conv_id)
         elif action == delete_action:
             self.delete_requested.emit(conv_id)

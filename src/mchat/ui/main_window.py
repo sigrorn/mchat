@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self._sidebar = Sidebar(font_size=self._font_size)
         self._sidebar.conversation_selected.connect(self._on_conversation_selected)
         self._sidebar.new_chat_requested.connect(self._on_new_chat)
+        self._sidebar.rename_requested.connect(self._on_rename_conversation)
         self._sidebar.save_requested.connect(self._on_save_conversation)
         self._sidebar.delete_requested.connect(self._on_delete_conversation)
         main_layout.addWidget(self._sidebar)
@@ -403,6 +404,12 @@ class MainWindow(QMainWindow):
         self._load_conversations()
         self._sidebar.select_conversation(conv.id)
 
+    def _on_rename_conversation(self, conv_id: int, new_title: str) -> None:
+        self._db.update_conversation_title(conv_id, new_title)
+        if self._current_conv and self._current_conv.id == conv_id:
+            self._current_conv.title = new_title
+        self._load_conversations()
+
     def _on_save_conversation(self, conv_id: int) -> None:
         messages = self._db.get_messages(conv_id)
         if not messages:
@@ -497,6 +504,7 @@ class MainWindow(QMainWindow):
     _HELP_TEXT = (
         "Available commands:\n"
         "  //mark [tagname]      — mark this point in the chat\n"
+        "  //marklast [tagname]  — mark just before the last request\n"
         "  //limit [tagname]     — only send chat from that mark onwards\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
         "  //marks               — list all marks (click to scroll)\n"
@@ -540,6 +548,8 @@ class MainWindow(QMainWindow):
 
         if cmd == "//mark":
             return self._handle_mark(arg)
+        if cmd == "//marklast":
+            return self._handle_marklast(arg)
         if cmd == "//limit":
             return self._handle_limit(arg)
         if cmd == "//marks":
@@ -571,6 +581,31 @@ class MainWindow(QMainWindow):
         self._db.set_mark(self._current_conv.id, name, count)
         label = f"mark '{tag}'" if tag else "mark (unnamed)"
         self._chat.add_note(f"{label} set at message {count}")
+        return True
+
+    def _handle_marklast(self, tag: str) -> bool:
+        if not self._current_conv:
+            self._on_new_chat()
+        if tag.upper() == "ALL":
+            self._chat.add_note("Error: 'ALL' is not allowed as a mark name")
+            return True
+
+        # Find the position just before the last user message
+        messages = self._current_conv.messages
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == Role.USER:
+                last_user_idx = i
+                break
+
+        if last_user_idx is None:
+            self._chat.add_note("Error: no user message found to mark before")
+            return True
+
+        name = tag
+        self._db.set_mark(self._current_conv.id, name, last_user_idx)
+        label = f"mark '{tag}'" if tag else "mark (unnamed)"
+        self._chat.add_note(f"{label} set before last request (message {last_user_idx})")
         return True
 
     def _handle_marks(self) -> bool:
