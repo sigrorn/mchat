@@ -691,31 +691,36 @@ class MainWindow(QMainWindow):
             self._send_multi(targets)
 
     def _send_single(self, provider_id: Provider) -> None:
-        """Send to a single provider with live streaming."""
+        """Send to a single provider."""
         model = self._selected_model(provider_id)
         provider = self._router.get_provider(provider_id)
 
         self._set_combo_waiting(provider_id, True)
-
-        assistant_msg = Message(
-            role=Role.ASSISTANT,
-            content="",
-            provider=provider_id,
-            model=model,
-            conversation_id=self._current_conv.id,
-        )
-        self._chat.begin_streaming(assistant_msg)
-
         context_messages = self._build_context()
-        self._stream_worker = StreamWorker(provider, context_messages, model)
-        self._stream_worker.token_received.connect(self._chat.append_token)
-        self._stream_worker.stream_complete.connect(
-            lambda full_text, inp, out: self._on_stream_complete(
-                full_text, provider_id, model, inp, out
+
+        if self._chat._incremental:
+            # Incremental mode: stream tokens to UI as they arrive
+            assistant_msg = Message(
+                role=Role.ASSISTANT,
+                content="",
+                provider=provider_id,
+                model=model,
+                conversation_id=self._current_conv.id,
             )
-        )
-        self._stream_worker.stream_error.connect(self._on_stream_error)
-        self._stream_worker.start()
+            self._chat.begin_streaming(assistant_msg)
+
+            self._stream_worker = StreamWorker(provider, context_messages, model)
+            self._stream_worker.token_received.connect(self._chat.append_token)
+            self._stream_worker.stream_complete.connect(
+                lambda full_text, inp, out: self._on_stream_complete(
+                    full_text, provider_id, model, inp, out
+                )
+            )
+            self._stream_worker.stream_error.connect(self._on_stream_error)
+            self._stream_worker.start()
+        else:
+            # Batch mode: collect silently, render when complete
+            self._send_multi([provider_id])
 
     def _send_multi(self, targets: list[Provider]) -> None:
         """Send to multiple providers simultaneously, render when each completes."""
