@@ -472,17 +472,21 @@ class ChatWidget(QTextEdit):
     # Copy with //user, //claude (<model>), //gpt (<model>) prefixes
     # ------------------------------------------------------------------
 
+    _COPY_PREFIX = {
+        Provider.CLAUDE: "claude",
+        Provider.OPENAI: "gpt",
+        Provider.GEMINI: "gemini",
+        Provider.PERPLEXITY: "perplexity",
+    }
+
     @staticmethod
     def _prefix_for(role_info: _RoleInfo) -> str:
         role, provider, model = role_info
         short = _short_model(model)
         if role == Role.USER:
             return "//user"
-        if provider == Provider.CLAUDE:
-            return f"//claude ({short})" if short else "//claude"
-        if provider == Provider.OPENAI:
-            return f"//gpt ({short})" if short else "//gpt"
-        return "//assistant"
+        tag = ChatWidget._COPY_PREFIX.get(provider, "assistant")
+        return f"//{tag} ({short})" if short else f"//{tag}"
 
     def createMimeDataFromSelection(self) -> QMimeData:
         cursor = self.textCursor()

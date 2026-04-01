@@ -27,6 +27,7 @@ from mchat.models.message import Message, Provider, Role
 from mchat.pricing import estimate_cost, format_cost
 from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
+from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget
@@ -80,7 +81,14 @@ class MainWindow(QMainWindow):
                 default_model=self._config.get("openai_model"),
             )
 
-        # Gemini and Perplexity will be added here in Phase 2/3
+        gemini_key = self._config.get("gemini_api_key")
+        if gemini_key:
+            providers[Provider.GEMINI] = GeminiProvider(
+                api_key=gemini_key,
+                default_model=self._config.get("gemini_model"),
+            )
+
+        # Perplexity will be added here in Phase 3
 
         default = Provider(self._config.get("default_provider"))
         self._router = Router(providers, default) if providers else None

@@ -26,6 +26,10 @@ _PRICES: dict[str, tuple[float, float]] = {
     # OpenAI o-series
     "o3-mini": (1.10, 4.40),
     "o3":      (2.00, 8.00),
+    # Google Gemini
+    "gemini-2.5-pro":   (1.25, 10.00),
+    "gemini-2.5-flash": (0.15, 0.60),
+    "gemini-2.0-flash": (0.10, 0.40),
 }
 
 
