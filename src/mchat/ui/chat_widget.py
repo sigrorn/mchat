@@ -13,7 +13,7 @@ import re
 import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextTable
 from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role
@@ -139,6 +139,32 @@ class ChatWidget(QTextEdit):
     # Inserting a fully-rendered message
     # ------------------------------------------------------------------
 
+    def _apply_bg_to_range(
+        self, start_block: int, end_block: int,
+        block_fmt: QTextBlockFormat, info: _RoleInfo, color: QColor,
+    ) -> None:
+        """Apply background colour and role to all blocks and table cells in range."""
+        doc = self.document()
+        tables_seen: set[int] = set()
+        for bn in range(start_block, end_block + 1):
+            block = doc.findBlockByNumber(bn)
+            if not block.isValid():
+                continue
+            bc = QTextCursor(block)
+            bc.setBlockFormat(block_fmt)
+            self._block_roles[bn] = info
+
+            # If this block is inside a table, colour all cells
+            table = bc.currentTable()
+            if table and id(table) not in tables_seen:
+                tables_seen.add(id(table))
+                for row in range(table.rows()):
+                    for col in range(table.columns()):
+                        cell = table.cellAt(row, col)
+                        fmt = cell.format()
+                        fmt.setBackground(color)
+                        cell.setFormat(fmt)
+
     def _insert_rendered(self, message: Message) -> None:
         """Insert a message as rendered HTML with background colour on every block."""
         cursor = self.textCursor()
@@ -146,6 +172,7 @@ class ChatWidget(QTextEdit):
 
         block_fmt = self._make_block_fmt(message)
         info = self._role_info(message)
+        color = QColor(self._color_for(message))
 
         # Start a new block (or reuse the initial empty one)
         if self._is_empty:
@@ -160,15 +187,8 @@ class ChatWidget(QTextEdit):
         rendered = self._render(message)
         cursor.insertHtml(rendered)
 
-        # Walk all blocks that were created and apply background + role
         end_block = cursor.block().blockNumber()
-        doc = self.document()
-        for bn in range(start_block, end_block + 1):
-            block = doc.findBlockByNumber(bn)
-            if block.isValid():
-                bc = QTextCursor(block)
-                bc.setBlockFormat(block_fmt)
-                self._block_roles[bn] = info
+        self._apply_bg_to_range(start_block, end_block, block_fmt, info, color)
 
     def _rebuild(self) -> None:
         """Re-render all messages with markdown formatting."""
@@ -261,17 +281,12 @@ class ChatWidget(QTextEdit):
         # Re-insert as rendered markdown HTML
         block_fmt = self._streaming_block_fmt
         info = self._role_info(self._streaming_msg)
+        color = QColor(self._color_for(self._streaming_msg))
         rendered = self._render(self._streaming_msg)
         cursor.insertHtml(rendered)
 
-        # Apply background and role to all new blocks
         end_block = cursor.block().blockNumber()
-        for bn in range(start_block_num, end_block + 1):
-            block = doc.findBlockByNumber(bn)
-            if block.isValid():
-                bc = QTextCursor(block)
-                bc.setBlockFormat(block_fmt)
-                self._block_roles[bn] = info
+        self._apply_bg_to_range(start_block_num, end_block, block_fmt, info, color)
 
         self._streaming_rendered_len = len(self._streaming_msg.content)
         self._scroll_to_bottom()
