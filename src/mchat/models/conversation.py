@@ -19,6 +19,7 @@ class Conversation:
     last_provider: str = ""
     spend_claude: float = 0.0
     spend_openai: float = 0.0
+    limit_mark: str | None = None  # None = no limit; "" = unnamed mark; "name" = named mark
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     messages: list[Message] = field(default_factory=list)

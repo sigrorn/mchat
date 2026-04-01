@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -375,16 +375,124 @@ class MainWindow(QMainWindow):
         return self._openai_combo.currentText()
 
     def _build_context(self) -> list[Message]:
-        """Build the context message list including system prompt."""
+        """Build the context message list including system prompt.
+
+        If a //limit is active, only messages from the mark position
+        onwards are included (system prompt always goes).
+        """
         context: list[Message] = []
         if self._current_conv.system_prompt:
             context.append(
                 Message(role=Role.SYSTEM, content=self._current_conv.system_prompt)
             )
-        context.extend(self._current_conv.messages)
+        messages = self._current_conv.messages
+        limit_mark = self._current_conv.limit_mark
+        if limit_mark is not None:
+            idx = self._db.get_mark(self._current_conv.id, limit_mark)
+            if idx is not None and idx < len(messages):
+                messages = messages[idx:]
+        context.extend(messages)
         return context
 
+    # ------------------------------------------------------------------
+    # // commands
+    # ------------------------------------------------------------------
+
+    _HELP_TEXT = (
+        "Available commands:\n"
+        "  //mark [tagname]      — mark this point in the chat (overwrites previous mark of same name)\n"
+        "  //limit [tagname]     — only send chat from that mark onwards to providers\n"
+        "  //limit ALL           — remove the limit, send full chat history again\n"
+        "  //help                — show this help\n"
+        "\n"
+        "Provider prefixes:\n"
+        "  claude, <message>     — send to Claude\n"
+        "  gpt, <message>        — send to GPT\n"
+        "  both, <message>       — send to both simultaneously\n"
+        "  (no prefix)           — send to last-used provider"
+    )
+
+    def _handle_command(self, text: str) -> bool:
+        """Handle // commands. Returns True if the input was a command."""
+        stripped = text.strip()
+        if not stripped.startswith("//"):
+            return False
+
+        parts = stripped.split(None, 1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if cmd == "//help":
+            self._chat.add_note("Help")
+            # Display help as a note-styled message (not sent to providers)
+            cursor = self._chat.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            fmt = QTextBlockFormat()
+            fmt.setBackground(QColor("#f5f5f5"))
+            for line in self._HELP_TEXT.split("\n"):
+                cursor.insertBlock(fmt)
+                char_fmt = cursor.charFormat()
+                char_fmt.setForeground(QColor("#666"))
+                cursor.insertText(line, char_fmt)
+            self._chat._scroll_to_bottom()
+            return True
+
+        if cmd == "//mark":
+            return self._handle_mark(arg)
+
+        if cmd == "//limit":
+            return self._handle_limit(arg)
+
+        return False
+
+    def _handle_mark(self, tag: str) -> bool:
+        if not self._current_conv:
+            self._on_new_chat()
+
+        if tag.upper() == "ALL":
+            self._chat.add_note("Error: 'ALL' is not allowed as a mark name")
+            return True
+
+        name = tag  # empty string = unnamed/general mark
+        count = len(self._current_conv.messages)
+        self._db.set_mark(self._current_conv.id, name, count)
+
+        label = f"mark '{tag}'" if tag else "mark (unnamed)"
+        self._chat.add_note(f"{label} set at message {count}")
+        return True
+
+    def _handle_limit(self, tag: str) -> bool:
+        if not self._current_conv:
+            self._on_new_chat()
+
+        if tag.upper() == "ALL":
+            self._current_conv.limit_mark = None
+            self._db.set_conversation_limit(self._current_conv.id, None)
+            self._chat.add_note("limit removed — full chat history will be sent")
+            return True
+
+        name = tag  # empty string = unnamed/general mark
+        idx = self._db.get_mark(self._current_conv.id, name)
+        if idx is None:
+            label = f"mark '{tag}'" if tag else "unnamed mark"
+            self._chat.add_note(f"Error: {label} not found")
+            return True
+
+        self._current_conv.limit_mark = name
+        self._db.set_conversation_limit(self._current_conv.id, name)
+
+        label = f"mark '{tag}'" if tag else "unnamed mark"
+        self._chat.add_note(f"limit set to {label} (message {idx}) — earlier context will not be sent")
+        return True
+
+    # ------------------------------------------------------------------
+
     def _on_message_submitted(self, text: str) -> None:
+        # Handle // commands before provider routing
+        if text.strip().startswith("//"):
+            self._handle_command(text)
+            return
+
         if not self._router:
             QMessageBox.warning(
                 self, "No API Keys",

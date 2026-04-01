@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS marks (
+    conversation_id INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    message_count INTEGER NOT NULL,
+    PRIMARY KEY (conversation_id, name),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
 """
 
 
@@ -71,6 +79,10 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN spend_openai REAL NOT NULL DEFAULT 0.0"
             )
+        if "limit_mark" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN limit_mark TEXT"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -95,7 +107,7 @@ class Database:
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "spend_claude, spend_openai, created_at, updated_at "
+            "spend_claude, spend_openai, limit_mark, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -106,8 +118,9 @@ class Database:
                 last_provider=row[3] or "",
                 spend_claude=row[4] or 0.0,
                 spend_openai=row[5] or 0.0,
-                created_at=datetime.fromisoformat(row[6]),
-                updated_at=datetime.fromisoformat(row[7]),
+                limit_mark=row[6],
+                created_at=datetime.fromisoformat(row[7]),
+                updated_at=datetime.fromisoformat(row[8]),
             )
             for row in cursor.fetchall()
         ]
@@ -134,6 +147,31 @@ class Database:
             (amount, conv_id),
         )
         self._conn.commit()
+
+    def set_conversation_limit(self, conv_id: int, limit_mark: str | None) -> None:
+        self._conn.execute(
+            "UPDATE conversations SET limit_mark = ? WHERE id = ?",
+            (limit_mark, conv_id),
+        )
+        self._conn.commit()
+
+    # -- Marks --
+
+    def set_mark(self, conv_id: int, name: str, message_count: int) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO marks (conversation_id, name, message_count) "
+            "VALUES (?, ?, ?)",
+            (conv_id, name, message_count),
+        )
+        self._conn.commit()
+
+    def get_mark(self, conv_id: int, name: str) -> int | None:
+        """Return the message_count stored for a mark, or None if not found."""
+        row = self._conn.execute(
+            "SELECT message_count FROM marks WHERE conversation_id = ? AND name = ?",
+            (conv_id, name),
+        ).fetchone()
+        return row[0] if row else None
 
     def delete_conversation(self, conv_id: int) -> None:
         self._conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))

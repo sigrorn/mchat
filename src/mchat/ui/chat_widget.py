@@ -279,6 +279,25 @@ class ChatWidget(QTextEdit):
     # Public API
     # ------------------------------------------------------------------
 
+    def add_note(self, text: str) -> None:
+        """Insert an ephemeral visual note (not part of _messages, lost on rebuild)."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor("#f5f5f5"))
+
+        if self._is_empty:
+            cursor.setBlockFormat(fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(fmt)
+
+        char_fmt = cursor.charFormat()
+        char_fmt.setForeground(QColor("#888"))
+        cursor.insertText(f"  — {text} —", char_fmt)
+        self._scroll_to_bottom()
+
     def add_message(self, message: Message) -> None:
         self._messages.append(message)
         self._insert_rendered(message)
