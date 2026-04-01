@@ -81,6 +81,7 @@ class ChatWidget(QTextEdit):
         self._streaming_block_fmt: QTextBlockFormat | None = None
         self._streaming_start_pos: int = 0
         self._streaming_rendered_len: int = 0
+        self._incremental = False  # batch mode by default
         self._is_empty = True
         self._md = markdown.Markdown(
             extensions=["tables", "fenced_code", "sane_lists"]
@@ -344,11 +345,12 @@ class ChatWidget(QTextEdit):
 
         self._scroll_to_bottom()
 
-        # Re-render when a paragraph break appears in new content
-        content = self._streaming_msg.content
-        new_text = content[self._streaming_rendered_len:]
-        if "\n\n" in new_text:
-            self._rerender_streaming()
+        # In incremental mode, re-render when a paragraph break appears
+        if self._incremental:
+            content = self._streaming_msg.content
+            new_text = content[self._streaming_rendered_len:]
+            if "\n\n" in new_text:
+                self._rerender_streaming()
 
     def end_streaming(self) -> Message | None:
         """Finish streaming — final render."""

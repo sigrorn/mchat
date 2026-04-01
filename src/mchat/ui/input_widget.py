@@ -35,10 +35,15 @@ class InputWidget(QWidget):
         layout.addWidget(self._send_btn)
 
     def _apply_text_edit_style(self) -> None:
+        bg = getattr(self, "_bg_color", "white")
         self._text_edit.setStyleSheet(
             f"QTextEdit {{ border: 1px solid #ccc; border-radius: 8px; padding: 8px; "
-            f"font-size: {self._font_size}px; background: white; }}"
+            f"font-size: {self._font_size}px; background: {bg}; }}"
         )
+
+    def set_background(self, color: str) -> None:
+        self._bg_color = color
+        self._apply_text_edit_style()
 
     def _apply_send_btn_style(self) -> None:
         self._send_btn.setStyleSheet(

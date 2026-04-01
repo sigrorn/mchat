@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._load_conversations()
         self._update_input_placeholder()
+        self._update_input_color()
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
@@ -198,6 +199,30 @@ class MainWindow(QMainWindow):
             f"QPushButton:hover {{ background-color: #eee; }}"
         )
 
+    def _set_combo_waiting(self, provider_id: Provider, waiting: bool) -> None:
+        """Highlight or unhighlight a provider combo while waiting for a response."""
+        combo = self._claude_combo if provider_id == Provider.CLAUDE else self._openai_combo
+        if waiting:
+            combo.setStyleSheet(
+                "QComboBox { border: 2px solid #e8a020; background-color: #fff8e0; "
+                "font-weight: bold; }"
+            )
+        else:
+            combo.setStyleSheet("")
+
+    def _update_input_color(self) -> None:
+        """Set the input box background to match the target provider colour."""
+        if not self._router:
+            return
+        current = self._router.last_used
+        if current == BOTH:
+            color = self._config.get("color_user")
+        elif current == Provider.CLAUDE:
+            color = self._config.get("color_claude")
+        else:
+            color = self._config.get("color_openai")
+        self._input.set_background(color)
+
     def _update_spend_labels(self) -> None:
         conv = self._current_conv
         claude_spend = conv.spend_claude if conv else 0.0
@@ -293,6 +318,7 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     pass
         self._update_input_placeholder()
+        self._update_input_color()
         self._update_spend_labels()
 
         self._chat.clear_messages()
@@ -403,6 +429,8 @@ class MainWindow(QMainWindow):
         "  //mark [tagname]      — mark this point in the chat (overwrites previous mark of same name)\n"
         "  //limit [tagname]     — only send chat from that mark onwards to providers\n"
         "  //limit ALL           — remove the limit, send full chat history again\n"
+        "  //incremental         — render markdown progressively while streaming\n"
+        "  //batch               — render markdown only when response is complete (default)\n"
         "  //help                — show this help\n"
         "\n"
         "Provider prefixes:\n"
@@ -442,6 +470,16 @@ class MainWindow(QMainWindow):
 
         if cmd == "//limit":
             return self._handle_limit(arg)
+
+        if cmd == "//incremental":
+            self._chat._incremental = True
+            self._chat.add_note("incremental rendering enabled")
+            return True
+
+        if cmd == "//batch":
+            self._chat._incremental = False
+            self._chat.add_note("batch rendering enabled (default)")
+            return True
 
         return False
 
@@ -557,6 +595,8 @@ class MainWindow(QMainWindow):
         model = self._selected_model(provider_id)
         provider = self._router.get_provider(provider_id)
 
+        self._set_combo_waiting(provider_id, True)
+
         assistant_msg = Message(
             role=Role.ASSISTANT,
             content="",
@@ -581,6 +621,8 @@ class MainWindow(QMainWindow):
         """Send to both providers simultaneously, render when each completes."""
         self._both_results.clear()
         self._both_workers.clear()
+        self._set_combo_waiting(Provider.CLAUDE, True)
+        self._set_combo_waiting(Provider.OPENAI, True)
         context_messages = self._build_context()
 
         for provider_id in (Provider.CLAUDE, Provider.OPENAI):
@@ -612,6 +654,7 @@ class MainWindow(QMainWindow):
         input_tokens: int,
         output_tokens: int,
     ) -> None:
+        self._set_combo_waiting(provider_id, False)
         self._both_results[provider_id] = (full_text, input_tokens, output_tokens)
         self._both_workers.pop(provider_id, None)
 
@@ -650,8 +693,10 @@ class MainWindow(QMainWindow):
                 )
             self._input.set_enabled(True)
             self._update_input_placeholder()
+        self._update_input_color()
 
     def _on_both_single_error(self, provider_id: Provider, error: str) -> None:
+        self._set_combo_waiting(provider_id, False)
         self._both_workers.pop(provider_id, None)
 
         # Show error as a message in chat
@@ -666,6 +711,7 @@ class MainWindow(QMainWindow):
         if not self._both_workers:
             self._input.set_enabled(True)
             self._update_input_placeholder()
+        self._update_input_color()
 
     # ------------------------------------------------------------------
     # Single-provider completion
@@ -679,6 +725,7 @@ class MainWindow(QMainWindow):
         input_tokens: int,
         output_tokens: int,
     ) -> None:
+        self._set_combo_waiting(provider_id, False)
         msg = self._chat.end_streaming()
         if msg:
             msg.content = full_text
@@ -706,9 +753,12 @@ class MainWindow(QMainWindow):
 
         self._input.set_enabled(True)
         self._update_input_placeholder()
+        self._update_input_color()
         self._stream_worker = None
 
     def _on_stream_error(self, error: str) -> None:
+        self._set_combo_waiting(Provider.CLAUDE, False)
+        self._set_combo_waiting(Provider.OPENAI, False)
         self._chat.end_streaming()
         self._input.set_enabled(True)
         self._stream_worker = None
@@ -725,6 +775,7 @@ class MainWindow(QMainWindow):
             self._init_providers()
             self._populate_model_combos()
             self._update_input_placeholder()
+        self._update_input_color()
             new_size = int(self._config.get("font_size") or 14)
             if new_size != self._font_size:
                 self._font_size = new_size
