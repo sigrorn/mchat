@@ -18,10 +18,12 @@ from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role
 
-# Background colours per participant
+# Default background colours per participant
 COLOR_USER = "#d4d4d4"
 COLOR_CLAUDE = "#b0b0b0"
 COLOR_OPENAI = "#e8e8e8"
+COLOR_GEMINI = "#c8d8e8"
+COLOR_PERPLEXITY = "#d8c8e8"
 
 # Document-level stylesheet applied to rendered HTML
 _DOC_CSS = """
@@ -67,14 +69,20 @@ class ChatWidget(QTextEdit):
         color_user: str = COLOR_USER,
         color_claude: str = COLOR_CLAUDE,
         color_openai: str = COLOR_OPENAI,
+        color_gemini: str = COLOR_GEMINI,
+        color_perplexity: str = COLOR_PERPLEXITY,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setReadOnly(True)
         self._font_size = font_size
-        self._color_user = color_user
-        self._color_claude = color_claude
-        self._color_openai = color_openai
+        self._colors: dict[str, str] = {
+            "user": color_user,
+            "claude": color_claude,
+            "openai": color_openai,
+            "gemini": color_gemini,
+            "perplexity": color_perplexity,
+        }
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
         self._block_roles: dict[int, _RoleInfo] = {}
@@ -120,12 +128,10 @@ class ChatWidget(QTextEdit):
 
     def _color_for(self, message: Message) -> str:
         if message.role == Role.USER:
-            return self._color_user
-        if message.provider == Provider.CLAUDE:
-            return self._color_claude
-        if message.provider == Provider.OPENAI:
-            return self._color_openai
-        return self._color_user
+            return self._colors["user"]
+        if message.provider:
+            return self._colors.get(message.provider.value, self._colors["user"])
+        return self._colors["user"]
 
     def _make_block_fmt(self, message: Message) -> QTextBlockFormat:
         fmt = QTextBlockFormat()
@@ -454,10 +460,12 @@ class ChatWidget(QTextEdit):
         self._apply_default_font()
         self._rebuild()
 
-    def update_colors(self, color_user: str, color_claude: str, color_openai: str) -> None:
-        self._color_user = color_user
-        self._color_claude = color_claude
-        self._color_openai = color_openai
+    def update_colors(self, **colors: str) -> None:
+        """Update colors by key: color_user, color_claude, etc."""
+        for key, value in colors.items():
+            # Accept both "color_claude" and "claude" forms
+            name = key.removeprefix("color_")
+            self._colors[name] = value
         self._rebuild()
 
     # ------------------------------------------------------------------

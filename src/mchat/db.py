@@ -115,7 +115,7 @@ class Database:
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "spend_claude, spend_openai, limit_mark, created_at, updated_at "
+            "limit_mark, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -124,11 +124,9 @@ class Database:
                 title=row[1],
                 system_prompt=row[2] or "",
                 last_provider=row[3] or "",
-                spend_claude=row[4] or 0.0,
-                spend_openai=row[5] or 0.0,
-                limit_mark=row[6],
-                created_at=datetime.fromisoformat(row[7]),
-                updated_at=datetime.fromisoformat(row[8]),
+                limit_mark=row[4],
+                created_at=datetime.fromisoformat(row[5]),
+                updated_at=datetime.fromisoformat(row[6]),
             )
             for row in cursor.fetchall()
         ]
