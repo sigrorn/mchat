@@ -19,6 +19,8 @@ class Role(Enum):
 class Provider(Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
+    GEMINI = "gemini"
+    PERPLEXITY = "perplexity"
 
 
 @dataclass

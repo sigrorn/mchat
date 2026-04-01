@@ -34,6 +34,14 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS conversation_spend (
+    conversation_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0.0,
+    PRIMARY KEY (conversation_id, provider),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS marks (
     conversation_id INTEGER NOT NULL,
     name TEXT NOT NULL DEFAULT '',
@@ -141,12 +149,21 @@ class Database:
         self._conn.commit()
 
     def add_conversation_spend(self, conv_id: int, provider: str, amount: float) -> None:
-        col = "spend_claude" if provider == "claude" else "spend_openai"
         self._conn.execute(
-            f"UPDATE conversations SET {col} = {col} + ? WHERE id = ?",
-            (amount, conv_id),
+            "INSERT INTO conversation_spend (conversation_id, provider, amount) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(conversation_id, provider) DO UPDATE SET amount = amount + ?",
+            (conv_id, provider, amount, amount),
         )
         self._conn.commit()
+
+    def get_conversation_spend(self, conv_id: int) -> dict[str, float]:
+        """Return {provider: total_spend} for a conversation."""
+        cursor = self._conn.execute(
+            "SELECT provider, amount FROM conversation_spend WHERE conversation_id = ?",
+            (conv_id,),
+        )
+        return {row[0]: row[1] for row in cursor.fetchall()}
 
     def set_conversation_limit(self, conv_id: int, limit_mark: str | None) -> None:
         self._conn.execute(

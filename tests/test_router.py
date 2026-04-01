@@ -30,53 +30,53 @@ def router(mock_providers):
 
 class TestRouter:
     def test_claude_prefix(self, router):
-        provider, text = router.parse("claude, explain this code")
-        assert provider == Provider.CLAUDE
+        targets, text = router.parse("claude, explain this code")
+        assert targets == [Provider.CLAUDE]
         assert text == "explain this code"
 
     def test_gpt_prefix(self, router):
-        provider, text = router.parse("gpt, what do you think?")
-        assert provider == Provider.OPENAI
+        targets, text = router.parse("gpt, what do you think?")
+        assert targets == [Provider.OPENAI]
         assert text == "what do you think?"
 
     def test_gemini_prefix(self, router):
-        provider, text = router.parse("gemini, summarise this")
-        assert provider == Provider.GEMINI
+        targets, text = router.parse("gemini, summarise this")
+        assert targets == [Provider.GEMINI]
         assert text == "summarise this"
 
     def test_perplexity_prefix(self, router):
-        provider, text = router.parse("perplexity, search for this")
-        assert provider == Provider.PERPLEXITY
+        targets, text = router.parse("perplexity, search for this")
+        assert targets == [Provider.PERPLEXITY]
         assert text == "search for this"
 
     def test_pplx_prefix(self, router):
-        provider, text = router.parse("pplx, search for this")
-        assert provider == Provider.PERPLEXITY
+        targets, text = router.parse("pplx, search for this")
+        assert targets == [Provider.PERPLEXITY]
         assert text == "search for this"
 
     def test_claude_prefix_colon(self, router):
-        provider, text = router.parse("claude: hello")
-        assert provider == Provider.CLAUDE
+        targets, text = router.parse("claude: hello")
+        assert targets == [Provider.CLAUDE]
         assert text == "hello"
 
     def test_no_prefix_uses_default(self, router):
-        provider, text = router.parse("just a normal message")
-        assert provider == Provider.CLAUDE
+        targets, text = router.parse("just a normal message")
+        assert targets == [Provider.CLAUDE]
         assert text == "just a normal message"
 
     def test_no_prefix_uses_last_used(self, router):
         router.parse("gpt, first message")
-        provider, text = router.parse("follow up question")
-        assert provider == Provider.OPENAI
+        targets, text = router.parse("follow up question")
+        assert targets == [Provider.OPENAI]
         assert text == "follow up question"
 
     def test_case_insensitive(self, router):
-        provider, text = router.parse("Claude, hello")
-        assert provider == Provider.CLAUDE
+        targets, text = router.parse("Claude, hello")
+        assert targets == [Provider.CLAUDE]
         assert text == "hello"
 
-        provider, text = router.parse("GPT, hello")
-        assert provider == Provider.OPENAI
+        targets, text = router.parse("GPT, hello")
+        assert targets == [Provider.OPENAI]
         assert text == "hello"
 
     def test_get_provider(self, router, mock_providers):
