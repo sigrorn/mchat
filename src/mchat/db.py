@@ -114,6 +114,16 @@ class Database:
                 "ALTER TABLE conversation_spend ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0"
             )
 
+        # Add hidden column to messages if missing
+        msg_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(messages)")
+        }
+        if "hidden" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"
+            )
+
     def close(self) -> None:
         self._conn.close()
 
@@ -254,10 +264,14 @@ class Database:
         msg.id = cursor.lastrowid
         return msg
 
-    def get_messages(self, conversation_id: int) -> list[Message]:
+    def get_messages(self, conversation_id: int, include_hidden: bool = False) -> list[Message]:
+        if include_hidden:
+            where = "conversation_id = ?"
+        else:
+            where = "conversation_id = ? AND (hidden = 0 OR hidden IS NULL)"
         cursor = self._conn.execute(
-            "SELECT id, conversation_id, role, provider, content, model, created_at "
-            "FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
+            f"SELECT id, conversation_id, role, provider, content, model, created_at "
+            f"FROM messages WHERE {where} ORDER BY created_at ASC",
             (conversation_id,),
         )
         return [
@@ -280,5 +294,23 @@ class Database:
         placeholders = ",".join("?" for _ in msg_ids)
         self._conn.execute(
             f"DELETE FROM messages WHERE id IN ({placeholders})", msg_ids
+        )
+        self._conn.commit()
+
+    def hide_messages(self, msg_ids: list[int]) -> None:
+        """Mark messages as hidden."""
+        if not msg_ids:
+            return
+        placeholders = ",".join("?" for _ in msg_ids)
+        self._conn.execute(
+            f"UPDATE messages SET hidden = 1 WHERE id IN ({placeholders})", msg_ids
+        )
+        self._conn.commit()
+
+    def unhide_all_messages(self, conv_id: int) -> None:
+        """Unhide all hidden messages in a conversation."""
+        self._conn.execute(
+            "UPDATE messages SET hidden = 0 WHERE conversation_id = ? AND hidden = 1",
+            (conv_id,),
         )
         self._conn.commit()

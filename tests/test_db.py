@@ -136,3 +136,29 @@ class TestDeleteMessages:
         db.add_message(Message(role=Role.USER, content="q1", conversation_id=conv.id))
         db.delete_messages([])
         assert len(db.get_messages(conv.id)) == 1
+
+
+class TestHideUnhide:
+    def test_hide_messages(self, db):
+        conv = db.create_conversation()
+        m1 = db.add_message(Message(role=Role.USER, content="q1", conversation_id=conv.id))
+        m2 = db.add_message(Message(role=Role.ASSISTANT, content="a1", provider=Provider.CLAUDE, conversation_id=conv.id))
+        m3 = db.add_message(Message(role=Role.USER, content="q2", conversation_id=conv.id))
+
+        db.hide_messages([m1.id, m2.id])
+        visible = db.get_messages(conv.id)
+        assert len(visible) == 1
+        assert visible[0].content == "q2"
+
+        all_msgs = db.get_messages(conv.id, include_hidden=True)
+        assert len(all_msgs) == 3
+
+    def test_unhide_all(self, db):
+        conv = db.create_conversation()
+        m1 = db.add_message(Message(role=Role.USER, content="q1", conversation_id=conv.id))
+        m2 = db.add_message(Message(role=Role.ASSISTANT, content="a1", provider=Provider.CLAUDE, conversation_id=conv.id))
+        db.hide_messages([m1.id, m2.id])
+
+        db.unhide_all_messages(conv.id)
+        visible = db.get_messages(conv.id)
+        assert len(visible) == 2

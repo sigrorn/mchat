@@ -508,6 +508,8 @@ class MainWindow(QMainWindow):
         "  //limit [tagname]     — only send chat from that mark onwards\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
         "  //pop                 — remove the last request and its responses\n"
+        "  //hide                — hide the last request+responses, copy request to input\n"
+        "  //unhide              — unhide all hidden messages\n"
         "  //marks               — list all marks (click to scroll)\n"
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
@@ -555,6 +557,10 @@ class MainWindow(QMainWindow):
             return self._handle_limit(arg)
         if cmd == "//pop":
             return self._handle_pop()
+        if cmd == "//hide":
+            return self._handle_hide()
+        if cmd == "//unhide":
+            return self._handle_unhide()
         if cmd == "//marks":
             return self._handle_marks()
         if cmd == "//select":
@@ -646,6 +652,65 @@ class MainWindow(QMainWindow):
             self._chat.add_message(msg)
 
         self._chat.add_note(f"popped {count} message(s)")
+        return True
+
+    def _handle_hide(self) -> bool:
+        if not self._current_conv or not self._current_conv.messages:
+            self._chat.add_note("Error: nothing to hide")
+            return True
+
+        messages = self._current_conv.messages
+
+        # Find the last visible user message
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == Role.USER:
+                last_user_idx = i
+                break
+
+        if last_user_idx is None:
+            self._chat.add_note("Error: no user message found to hide")
+            return True
+
+        # Collect the user message + all responses after it
+        to_hide = messages[last_user_idx:]
+        ids_to_hide = [m.id for m in to_hide if m.id is not None]
+        user_text = messages[last_user_idx].content
+        count = len(to_hide)
+
+        # Hide in DB
+        self._db.hide_messages(ids_to_hide)
+
+        # Remove from in-memory list (get_messages filters hidden)
+        del self._current_conv.messages[last_user_idx:]
+
+        # Rebuild chat display
+        self._chat.clear_messages()
+        for msg in self._current_conv.messages:
+            self._chat.add_message(msg)
+
+        self._chat.add_note(f"hidden {count} message(s)")
+
+        # Copy the user's request text back into the input box
+        self._input._text_edit.setPlainText(user_text)
+        return True
+
+    def _handle_unhide(self) -> bool:
+        if not self._current_conv:
+            self._chat.add_note("Error: no active conversation")
+            return True
+
+        self._db.unhide_all_messages(self._current_conv.id)
+
+        # Reload all messages (including previously hidden)
+        self._current_conv.messages = self._db.get_messages(self._current_conv.id)
+
+        # Rebuild chat display
+        self._chat.clear_messages()
+        for msg in self._current_conv.messages:
+            self._chat.add_message(msg)
+
+        self._chat.add_note("all hidden messages restored")
         return True
 
     def _handle_marks(self) -> bool:
