@@ -5,8 +5,32 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import re
+
+from PySide6.QtCore import QMimeData, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTextEdit, QWidget
+
+# Matches lines like //user, //claude, //gpt (sonnet-4), //gemini, //perplexity (sonar), etc.
+_SPEAKER_PREFIX = re.compile(
+    r"^//(user|claude|gpt|gemini|perplexity|pplx|assistant)(\s*\(.*\))?\s*$"
+)
+
+
+class _PasteCleanTextEdit(QTextEdit):
+    """QTextEdit that strips //speaker prefix lines on paste."""
+
+    def insertFromMimeData(self, source: QMimeData) -> None:
+        text = source.text()
+        if text and _SPEAKER_PREFIX.search(text):
+            cleaned = "\n".join(
+                line for line in text.split("\n")
+                if not _SPEAKER_PREFIX.match(line)
+            )
+            clean_mime = QMimeData()
+            clean_mime.setText(cleaned)
+            super().insertFromMimeData(clean_mime)
+        else:
+            super().insertFromMimeData(source)
 
 
 class InputWidget(QWidget):
@@ -21,7 +45,7 @@ class InputWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
 
-        self._text_edit = QTextEdit()
+        self._text_edit = _PasteCleanTextEdit()
         self._text_edit.setPlaceholderText("")
         self._text_edit.setMaximumHeight(100)
         self._apply_text_edit_style()
