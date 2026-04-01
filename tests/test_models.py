@@ -21,6 +21,18 @@ class TestMessage:
         assert msg.provider == Provider.CLAUDE
 
 
+class TestProvider:
+    def test_all_providers_exist(self):
+        assert Provider.CLAUDE.value == "claude"
+        assert Provider.OPENAI.value == "openai"
+        assert Provider.GEMINI.value == "gemini"
+        assert Provider.PERPLEXITY.value == "perplexity"
+
+    def test_provider_from_string(self):
+        assert Provider("gemini") == Provider.GEMINI
+        assert Provider("perplexity") == Provider.PERPLEXITY
+
+
 class TestConversation:
     def test_defaults(self):
         conv = Conversation()

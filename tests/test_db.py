@@ -74,3 +74,35 @@ class TestDatabase:
         db.add_message(Message(role=Role.USER, content="test", conversation_id=conv.id))
         db.delete_conversation(conv.id)
         assert db.get_messages(conv.id) == []
+
+
+class TestConversationSpend:
+    def test_add_and_get_spend(self, db):
+        conv = db.create_conversation()
+        db.add_conversation_spend(conv.id, "claude", 0.005)
+        db.add_conversation_spend(conv.id, "claude", 0.003)
+        db.add_conversation_spend(conv.id, "openai", 0.010)
+
+        spend = db.get_conversation_spend(conv.id)
+        assert abs(spend["claude"] - 0.008) < 1e-9
+        assert abs(spend["openai"] - 0.010) < 1e-9
+
+    def test_spend_defaults_to_zero(self, db):
+        conv = db.create_conversation()
+        spend = db.get_conversation_spend(conv.id)
+        assert spend == {}
+
+    def test_spend_for_new_providers(self, db):
+        conv = db.create_conversation()
+        db.add_conversation_spend(conv.id, "gemini", 0.002)
+        db.add_conversation_spend(conv.id, "perplexity", 0.001)
+        spend = db.get_conversation_spend(conv.id)
+        assert abs(spend["gemini"] - 0.002) < 1e-9
+        assert abs(spend["perplexity"] - 0.001) < 1e-9
+
+    def test_spend_deleted_with_conversation(self, db):
+        conv = db.create_conversation()
+        db.add_conversation_spend(conv.id, "claude", 0.005)
+        db.delete_conversation(conv.id)
+        spend = db.get_conversation_spend(conv.id)
+        assert spend == {}

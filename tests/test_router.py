@@ -15,11 +15,12 @@ from mchat.router import Router
 
 @pytest.fixture
 def mock_providers():
-    claude = MagicMock()
-    claude.provider_id = Provider.CLAUDE
-    openai = MagicMock()
-    openai.provider_id = Provider.OPENAI
-    return {Provider.CLAUDE: claude, Provider.OPENAI: openai}
+    providers = {}
+    for p in Provider:
+        mock = MagicMock()
+        mock.provider_id = p
+        providers[p] = mock
+    return providers
 
 
 @pytest.fixture
@@ -37,6 +38,21 @@ class TestRouter:
         provider, text = router.parse("gpt, what do you think?")
         assert provider == Provider.OPENAI
         assert text == "what do you think?"
+
+    def test_gemini_prefix(self, router):
+        provider, text = router.parse("gemini, summarise this")
+        assert provider == Provider.GEMINI
+        assert text == "summarise this"
+
+    def test_perplexity_prefix(self, router):
+        provider, text = router.parse("perplexity, search for this")
+        assert provider == Provider.PERPLEXITY
+        assert text == "search for this"
+
+    def test_pplx_prefix(self, router):
+        provider, text = router.parse("pplx, search for this")
+        assert provider == Provider.PERPLEXITY
+        assert text == "search for this"
 
     def test_claude_prefix_colon(self, router):
         provider, text = router.parse("claude: hello")
@@ -66,3 +82,30 @@ class TestRouter:
     def test_get_provider(self, router, mock_providers):
         assert router.get_provider(Provider.CLAUDE) is mock_providers[Provider.CLAUDE]
         assert router.get_provider(Provider.OPENAI) is mock_providers[Provider.OPENAI]
+
+    def test_select_single(self, router):
+        router.set_selection([Provider.GEMINI])
+        assert router.selection == [Provider.GEMINI]
+        # Unprefixed message should go to selection
+        target, text = router.parse("hello")
+        assert target == [Provider.GEMINI]
+
+    def test_select_multiple(self, router):
+        router.set_selection([Provider.CLAUDE, Provider.OPENAI])
+        assert router.selection == [Provider.CLAUDE, Provider.OPENAI]
+        target, text = router.parse("hello")
+        assert target == [Provider.CLAUDE, Provider.OPENAI]
+
+    def test_prefix_overrides_selection_for_one_message(self, router):
+        router.set_selection([Provider.CLAUDE, Provider.OPENAI])
+        target, text = router.parse("gemini, just this one")
+        assert target == [Provider.GEMINI]
+        assert text == "just this one"
+        # Selection should now be sticky to gemini
+        assert router.selection == [Provider.GEMINI]
+
+    def test_both_prefix_removed(self, router):
+        """'both,' prefix should no longer be recognised."""
+        target, text = router.parse("both, hello")
+        # "both" is not a valid prefix, treated as plain text
+        assert text == "both, hello"
