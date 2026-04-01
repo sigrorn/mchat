@@ -147,8 +147,6 @@ class MainWindow(QMainWindow):
         self._settings_btn.clicked.connect(self._open_settings)
         top_bar_layout.addWidget(self._settings_btn)
 
-        right_layout.addWidget(top_bar)
-
         # Chat area
         self._chat = ChatWidget(
             font_size=self._font_size,
@@ -157,6 +155,10 @@ class MainWindow(QMainWindow):
             color_openai=self._config.get("color_openai"),
         )
         right_layout.addWidget(self._chat, stretch=1)
+
+        # Bar between chat and input
+        top_bar.setStyleSheet("background-color: #f5f5f5; border-top: 1px solid #ddd;")
+        right_layout.addWidget(top_bar)
 
         # Input area
         self._input = InputWidget(font_size=self._font_size)
