@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         self._init_providers()
         self._build_ui()
         self._populate_model_combos()
+        self._apply_combo_provider_style(Provider.CLAUDE)
+        self._apply_combo_provider_style(Provider.OPENAI)
         self._setup_shortcuts()
         self._load_conversations()
         self._update_input_placeholder()
@@ -199,16 +201,30 @@ class MainWindow(QMainWindow):
             f"QPushButton:hover {{ background-color: #eee; }}"
         )
 
+    def _combo_for(self, provider_id: Provider) -> QComboBox:
+        return self._claude_combo if provider_id == Provider.CLAUDE else self._openai_combo
+
+    def _apply_combo_provider_style(self, provider_id: Provider) -> None:
+        """Set a combo's background to its provider colour."""
+        combo = self._combo_for(provider_id)
+        if provider_id == Provider.CLAUDE:
+            color = self._config.get("color_claude")
+        else:
+            color = self._config.get("color_openai")
+        combo.setStyleSheet(
+            f"QComboBox {{ background-color: {color}; }}"
+        )
+
     def _set_combo_waiting(self, provider_id: Provider, waiting: bool) -> None:
         """Highlight or unhighlight a provider combo while waiting for a response."""
-        combo = self._claude_combo if provider_id == Provider.CLAUDE else self._openai_combo
+        combo = self._combo_for(provider_id)
         if waiting:
             combo.setStyleSheet(
                 "QComboBox { border: 2px solid #e8a020; background-color: #fff8e0; "
                 "font-weight: bold; }"
             )
         else:
-            combo.setStyleSheet("")
+            self._apply_combo_provider_style(provider_id)
 
     def _update_input_color(self) -> None:
         """Set the input box background to match the target provider colour."""
@@ -786,6 +802,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self._init_providers()
             self._populate_model_combos()
+            self._apply_combo_provider_style(Provider.CLAUDE)
+            self._apply_combo_provider_style(Provider.OPENAI)
             self._update_input_placeholder()
             self._update_input_color()
             new_size = int(self._config.get("font_size") or 14)
