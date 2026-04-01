@@ -151,23 +151,23 @@ class MainWindow(QMainWindow):
         self._bar_layout.setContentsMargins(16, 8, 16, 8)
         self._bar_layout.setSpacing(8)
 
-        # Build checkbox + combo + spend label for each provider
+        # Build combo + checkbox + spend label for each provider
         providers_list = list(Provider)
         for i, p in enumerate(providers_list):
             if i > 0:
                 self._bar_layout.addSpacing(12)
-
-            cb = QCheckBox()
-            cb.setToolTip(f"Include {_PROVIDER_DISPLAY[p]} in selection")
-            cb.stateChanged.connect(lambda _, pid=p: self._on_checkbox_changed(pid))
-            self._bar_layout.addWidget(cb)
-            self._checkboxes[p] = cb
 
             combo = QComboBox()
             combo.setMinimumWidth(160)
             combo.activated.connect(lambda _, c=combo: c.hidePopup())
             self._bar_layout.addWidget(combo)
             self._combos[p] = combo
+
+            cb = QCheckBox()
+            cb.setToolTip(f"Include {_PROVIDER_DISPLAY[p]} in selection")
+            cb.stateChanged.connect(lambda _, pid=p: self._on_checkbox_changed(pid))
+            self._bar_layout.addWidget(cb)
+            self._checkboxes[p] = cb
 
             label = QLabel("$0.00000")
             self._apply_spend_label_style(label)
