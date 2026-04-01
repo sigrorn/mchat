@@ -13,7 +13,7 @@ import re
 import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextTable
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextLength, QTextTable
 from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role
@@ -32,7 +32,7 @@ _DOC_CSS = """
     pre   { background-color: rgba(0,0,0,0.06); padding: 8px;
             font-family: Consolas, 'Courier New', monospace;
             white-space: pre-wrap; }
-    table { border-collapse: collapse; margin: 4px 0; }
+    table { border-collapse: collapse; margin: 0; }
     th, td { border: 1px solid #999; padding: 4px 8px; }
     th    { background-color: rgba(0,0,0,0.08); font-weight: bold; }
 """
@@ -179,6 +179,15 @@ class ChatWidget(QTextEdit):
                 table_pos = table.firstCursorPosition().position()
                 if table_pos not in tables_seen:
                     tables_seen.add(table_pos)
+
+                    # Set table frame: no margin/spacing, full width, matching bg
+                    tf = table.format()
+                    tf.setMargin(0)
+                    tf.setCellSpacing(0)
+                    tf.setBackground(color)
+                    tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                    table.setFormat(tf)
+
                     for row in range(table.rows()):
                         for col in range(table.columns()):
                             cell = table.cellAt(row, col)
