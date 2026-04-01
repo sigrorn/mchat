@@ -97,18 +97,17 @@ class ChatWidget(QTextEdit):
         self.document().setDefaultStyleSheet(_DOC_CSS)
         self._apply_default_font()
 
-        # Handle clicks on mark links (mchat-mark:<index>)
-        self.setOpenLinks(False)
-        self.anchorClicked.connect(self._on_anchor_clicked)
-
-    def _on_anchor_clicked(self, url) -> None:
-        href = url.toString()
-        if href.startswith("mchat-mark:"):
+    def mousePressEvent(self, event) -> None:
+        """Handle clicks on mark links (mchat-mark:<index>)."""
+        anchor = self.anchorAt(event.pos())
+        if anchor.startswith("mchat-mark:"):
             try:
-                msg_index = int(href.split(":", 1)[1])
+                msg_index = int(anchor.split(":", 1)[1])
                 self.scroll_to_message(msg_index)
             except (ValueError, IndexError):
                 pass
+            return
+        super().mousePressEvent(event)
 
     def _apply_default_font(self) -> None:
         font = self.document().defaultFont()
