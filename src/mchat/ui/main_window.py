@@ -8,6 +8,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self._font_size = int(self._config.get("font_size") or 14)
 
         # Per-provider UI widgets (built dynamically)
+        self._checkboxes: dict[Provider, QCheckBox] = {}
         self._combos: dict[Provider, QComboBox] = {}
         self._spend_labels: dict[Provider, QLabel] = {}
 
@@ -60,6 +62,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._populate_model_combos()
         self._apply_all_combo_styles()
+        self._sync_checkboxes_from_selection()
         self._setup_shortcuts()
         self._load_conversations()
         self._update_input_placeholder()
@@ -147,11 +150,18 @@ class MainWindow(QMainWindow):
         self._bar_layout.setContentsMargins(16, 8, 16, 8)
         self._bar_layout.setSpacing(8)
 
-        # Build combo + spend label for each provider
+        # Build checkbox + combo + spend label for each provider
         providers_list = list(Provider)
         for i, p in enumerate(providers_list):
             if i > 0:
                 self._bar_layout.addSpacing(12)
+
+            cb = QCheckBox()
+            cb.setToolTip(f"Include {_PROVIDER_DISPLAY[p]} in selection")
+            cb.stateChanged.connect(lambda _, pid=p: self._on_checkbox_changed(pid))
+            self._bar_layout.addWidget(cb)
+            self._checkboxes[p] = cb
+
             combo = QComboBox()
             combo.setMinimumWidth(160)
             combo.activated.connect(lambda _, c=combo: c.hidePopup())
@@ -202,6 +212,35 @@ class MainWindow(QMainWindow):
                 combo.setCurrentIndex(idx)
             combo.setEnabled(provider is not None)
             combo.blockSignals(False)
+
+            # Enable/disable checkbox based on provider availability
+            cb = self._checkboxes[p]
+            cb.setEnabled(provider is not None)
+
+    def _sync_checkboxes_from_selection(self) -> None:
+        """Update checkboxes to reflect the router's current selection."""
+        if not self._router:
+            return
+        sel = set(self._router.selection)
+        for p, cb in self._checkboxes.items():
+            cb.blockSignals(True)
+            cb.setChecked(p in sel)
+            cb.blockSignals(False)
+
+    def _on_checkbox_changed(self, provider_id: Provider) -> None:
+        """Handle a checkbox toggle — update the router selection."""
+        if not self._router:
+            return
+        selected = [p for p, cb in self._checkboxes.items() if cb.isChecked()]
+        if not selected:
+            # Don't allow empty selection — revert
+            self._sync_checkboxes_from_selection()
+            self._chat.add_note("Error: at least one provider must be selected")
+            return
+        self._router.set_selection(selected)
+        self._save_selection()
+        self._update_input_placeholder()
+        self._update_input_color()
 
     def _apply_spend_label_style(self, label: QLabel) -> None:
         label.setStyleSheet(
@@ -339,6 +378,7 @@ class MainWindow(QMainWindow):
                     self._router.set_selection(providers)
             except ValueError:
                 pass
+        self._sync_checkboxes_from_selection()
         self._update_input_placeholder()
         self._update_input_color()
         self._update_spend_labels()
@@ -606,6 +646,7 @@ class MainWindow(QMainWindow):
             self._chat.add_note(f"selected: {names}")
 
         self._save_selection()
+        self._sync_checkboxes_from_selection()
         self._update_input_placeholder()
         self._update_input_color()
         return True
@@ -695,6 +736,7 @@ class MainWindow(QMainWindow):
 
         self._input.set_enabled(False)
         self._save_selection()
+        self._sync_checkboxes_from_selection()
 
         if len(targets) == 1:
             self._send_single(targets[0])
