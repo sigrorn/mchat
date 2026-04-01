@@ -693,7 +693,7 @@ class MainWindow(QMainWindow):
                 )
             self._input.set_enabled(True)
             self._update_input_placeholder()
-        self._update_input_color()
+            self._update_input_color()
 
     def _on_both_single_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)
@@ -711,7 +711,7 @@ class MainWindow(QMainWindow):
         if not self._both_workers:
             self._input.set_enabled(True)
             self._update_input_placeholder()
-        self._update_input_color()
+            self._update_input_color()
 
     # ------------------------------------------------------------------
     # Single-provider completion
@@ -775,7 +775,7 @@ class MainWindow(QMainWindow):
             self._init_providers()
             self._populate_model_combos()
             self._update_input_placeholder()
-        self._update_input_color()
+            self._update_input_color()
             new_size = int(self._config.get("font_size") or 14)
             if new_size != self._font_size:
                 self._font_size = new_size
