@@ -54,9 +54,12 @@ class GeminiProvider(BaseProvider):
                 messages=api_messages,
                 stream=True,
             )
+        full_text = ""
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+                token = chunk.choices[0].delta.content
+                full_text += token
+                yield token
             try:
                 usage = chunk.usage
                 if usage is not None:
@@ -66,6 +69,12 @@ class GeminiProvider(BaseProvider):
                     )
             except AttributeError:
                 pass
+
+        # Gemini's OpenAI-compat endpoint may not return usage data.
+        # Fall back to a rough estimate (~4 chars per token).
+        if self.last_usage is None:
+            input_chars = sum(len(m["content"]) for m in api_messages)
+            self.last_usage = (input_chars // 4, len(full_text) // 4)
 
     def list_models(self) -> list[str]:
         try:
