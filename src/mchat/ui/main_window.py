@@ -29,6 +29,7 @@ from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
 from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
+from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.input_widget import InputWidget
@@ -88,7 +89,12 @@ class MainWindow(QMainWindow):
                 default_model=self._config.get("gemini_model"),
             )
 
-        # Perplexity will be added here in Phase 3
+        perplexity_key = self._config.get("perplexity_api_key")
+        if perplexity_key:
+            providers[Provider.PERPLEXITY] = PerplexityProvider(
+                api_key=perplexity_key,
+                default_model=self._config.get("perplexity_model"),
+            )
 
         default = Provider(self._config.get("default_provider"))
         self._router = Router(providers, default) if providers else None

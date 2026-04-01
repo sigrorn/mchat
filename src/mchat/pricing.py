@@ -30,6 +30,11 @@ _PRICES: dict[str, tuple[float, float]] = {
     "gemini-2.5-pro":   (1.25, 10.00),
     "gemini-2.5-flash": (0.15, 0.60),
     "gemini-2.0-flash": (0.10, 0.40),
+    # Perplexity Sonar
+    "sonar-deep-research": (2.00, 8.00),
+    "sonar-reasoning-pro": (2.00, 8.00),
+    "sonar-pro":           (3.00, 15.00),
+    "sonar":               (1.00, 1.00),
 }
 
 
