@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self.setWindowTitle("mchat")
         self.setMinimumSize(900, 600)
-        self.resize(1100, 750)
+        self._restore_geometry()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -940,6 +940,26 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
+
+    def _restore_geometry(self) -> None:
+        geo = self._config.get("window_geometry")
+        if geo:
+            try:
+                x, y, w, h = (int(v) for v in geo.split(","))
+                self.setGeometry(x, y, w, h)
+            except (ValueError, TypeError):
+                self.resize(1100, 750)
+        else:
+            self.resize(1100, 750)
+
+    def _save_geometry(self) -> None:
+        g = self.geometry()
+        self._config.set("window_geometry", f"{g.x()},{g.y()},{g.width()},{g.height()}")
+        self._config.save()
+
+    def closeEvent(self, event) -> None:
+        self._save_geometry()
+        super().closeEvent(event)
 
     def _open_settings(self) -> None:
         providers = self._router._providers if self._router else {}
