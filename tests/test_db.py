@@ -117,3 +117,22 @@ class TestConversationSpend:
         db.delete_conversation(conv.id)
         spend = db.get_conversation_spend(conv.id)
         assert spend == {}
+
+
+class TestDeleteMessages:
+    def test_delete_messages_by_ids(self, db):
+        conv = db.create_conversation()
+        m1 = db.add_message(Message(role=Role.USER, content="q1", conversation_id=conv.id))
+        m2 = db.add_message(Message(role=Role.ASSISTANT, content="a1", provider=Provider.CLAUDE, conversation_id=conv.id))
+        m3 = db.add_message(Message(role=Role.USER, content="q2", conversation_id=conv.id))
+
+        db.delete_messages([m2.id, m3.id])
+        remaining = db.get_messages(conv.id)
+        assert len(remaining) == 1
+        assert remaining[0].content == "q1"
+
+    def test_delete_empty_list(self, db):
+        conv = db.create_conversation()
+        db.add_message(Message(role=Role.USER, content="q1", conversation_id=conv.id))
+        db.delete_messages([])
+        assert len(db.get_messages(conv.id)) == 1

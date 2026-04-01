@@ -272,3 +272,13 @@ class Database:
             )
             for row in cursor.fetchall()
         ]
+
+    def delete_messages(self, msg_ids: list[int]) -> None:
+        """Delete messages by their IDs."""
+        if not msg_ids:
+            return
+        placeholders = ",".join("?" for _ in msg_ids)
+        self._conn.execute(
+            f"DELETE FROM messages WHERE id IN ({placeholders})", msg_ids
+        )
+        self._conn.commit()

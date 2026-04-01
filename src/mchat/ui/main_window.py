@@ -507,6 +507,7 @@ class MainWindow(QMainWindow):
         "  //marklast [tagname]  — mark just before the last request\n"
         "  //limit [tagname]     — only send chat from that mark onwards\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
+        "  //pop                 — remove the last request and its responses\n"
         "  //marks               — list all marks (click to scroll)\n"
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
@@ -552,6 +553,8 @@ class MainWindow(QMainWindow):
             return self._handle_marklast(arg)
         if cmd == "//limit":
             return self._handle_limit(arg)
+        if cmd == "//pop":
+            return self._handle_pop()
         if cmd == "//marks":
             return self._handle_marks()
         if cmd == "//select":
@@ -606,6 +609,43 @@ class MainWindow(QMainWindow):
         self._db.set_mark(self._current_conv.id, name, last_user_idx)
         label = f"mark '{tag}'" if tag else "mark (unnamed)"
         self._chat.add_note(f"{label} set before last request (message {last_user_idx})")
+        return True
+
+    def _handle_pop(self) -> bool:
+        if not self._current_conv or not self._current_conv.messages:
+            self._chat.add_note("Error: nothing to pop")
+            return True
+
+        messages = self._current_conv.messages
+
+        # Find the last user message
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == Role.USER:
+                last_user_idx = i
+                break
+
+        if last_user_idx is None:
+            self._chat.add_note("Error: no user message found to pop")
+            return True
+
+        # Collect IDs of the user message + all responses after it
+        to_remove = messages[last_user_idx:]
+        ids_to_delete = [m.id for m in to_remove if m.id is not None]
+        count = len(to_remove)
+
+        # Delete from DB
+        self._db.delete_messages(ids_to_delete)
+
+        # Remove from in-memory list
+        del self._current_conv.messages[last_user_idx:]
+
+        # Rebuild chat display
+        self._chat.clear_messages()
+        for msg in self._current_conv.messages:
+            self._chat.add_message(msg)
+
+        self._chat.add_note(f"popped {count} message(s)")
         return True
 
     def _handle_marks(self) -> bool:
