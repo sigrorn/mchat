@@ -28,6 +28,10 @@ DEFAULTS = {
     "color_gemini": "#c8d8e8",
     "color_perplexity": "#d8c8e8",
     "system_prompt": "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.",
+    "system_prompt_claude": "",
+    "system_prompt_openai": "",
+    "system_prompt_gemini": "",
+    "system_prompt_perplexity": "",
 }
 
 # Per-provider metadata: (api_key_config, model_config, color_config, display_name)
@@ -36,24 +40,28 @@ PROVIDER_META: dict[str, dict] = {
         "api_key": "anthropic_api_key",
         "model_key": "claude_model",
         "color_key": "color_claude",
+        "system_prompt_key": "system_prompt_claude",
         "display": "Claude",
     },
     "openai": {
         "api_key": "openai_api_key",
         "model_key": "openai_model",
         "color_key": "color_openai",
+        "system_prompt_key": "system_prompt_openai",
         "display": "GPT",
     },
     "gemini": {
         "api_key": "gemini_api_key",
         "model_key": "gemini_model",
         "color_key": "color_gemini",
+        "system_prompt_key": "system_prompt_gemini",
         "display": "Gemini",
     },
     "perplexity": {
         "api_key": "perplexity_api_key",
         "model_key": "perplexity_model",
         "color_key": "color_perplexity",
+        "system_prompt_key": "system_prompt_perplexity",
         "display": "Perplexity",
     },
 }

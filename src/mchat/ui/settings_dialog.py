@@ -46,6 +46,7 @@ class SettingsDialog(QDialog):
         self._api_key_edits: dict[str, QLineEdit] = {}
         self._model_combos: dict[str, QComboBox] = {}
         self._color_btns: dict[str, QPushButton] = {}
+        self._system_prompt_edits: dict[str, QPlainTextEdit] = {}
 
         self._build_ui()
 
@@ -82,6 +83,13 @@ class SettingsDialog(QDialog):
             color_btn = self._make_color_btn(self._config.get(meta["color_key"]))
             form.addRow(f"{display} colour:", color_btn)
             self._color_btns[pv] = color_btn
+
+            # Provider-specific system prompt
+            sp_edit = QPlainTextEdit(self._config.get(meta["system_prompt_key"]))
+            sp_edit.setMaximumHeight(60)
+            sp_edit.setPlaceholderText(f"Additional instructions for {display} (optional)...")
+            form.addRow(f"{display} prompt:", sp_edit)
+            self._system_prompt_edits[pv] = sp_edit
 
         # User colour
         self._color_user_btn = self._make_color_btn(self._config.get("color_user"))
@@ -204,6 +212,7 @@ class SettingsDialog(QDialog):
             self._config.set(meta["api_key"], self._api_key_edits[pv].text().strip())
             self._config.set(meta["model_key"], self._model_combos[pv].currentText())
             self._config.set(meta["color_key"], self._color_btns[pv].property("hex_color"))
+            self._config.set(meta["system_prompt_key"], self._system_prompt_edits[pv].toPlainText().strip())
 
         # General settings
         self._config.set("color_user", self._color_user_btn.property("hex_color"))

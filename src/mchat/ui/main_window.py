@@ -417,12 +417,23 @@ class MainWindow(QMainWindow):
     def _selected_model(self, p: Provider) -> str:
         return self._combos[p].currentText()
 
-    def _build_context(self) -> list[Message]:
+    def _build_context(self, provider_id: Provider) -> list[Message]:
         context: list[Message] = []
+
+        # Provider-specific system prompt + main system prompt
+        parts: list[str] = []
+        provider_prompt = self._config.get(
+            PROVIDER_META[provider_id.value]["system_prompt_key"]
+        )
+        if provider_prompt:
+            parts.append(provider_prompt)
         if self._current_conv.system_prompt:
+            parts.append(self._current_conv.system_prompt)
+        if parts:
             context.append(
-                Message(role=Role.SYSTEM, content=self._current_conv.system_prompt)
+                Message(role=Role.SYSTEM, content="\n\n".join(parts))
             )
+
         messages = self._current_conv.messages
         limit_mark = self._current_conv.limit_mark
         if limit_mark is not None:
@@ -696,9 +707,9 @@ class MainWindow(QMainWindow):
         provider = self._router.get_provider(provider_id)
 
         self._set_combo_waiting(provider_id, True)
-        context_messages = self._build_context()
 
         if self._chat._incremental:
+            context_messages = self._build_context(provider_id)
             # Incremental mode: stream tokens to UI as they arrive
             assistant_msg = Message(
                 role=Role.ASSISTANT,
@@ -725,12 +736,12 @@ class MainWindow(QMainWindow):
     def _send_multi(self, targets: list[Provider]) -> None:
         """Send to multiple providers simultaneously, render when each completes."""
         self._multi_workers.clear()
-        context_messages = self._build_context()
 
         for provider_id in targets:
             model = self._selected_model(provider_id)
             provider = self._router.get_provider(provider_id)
             self._set_combo_waiting(provider_id, True)
+            context_messages = self._build_context(provider_id)
 
             worker = StreamWorker(provider, context_messages, model)
             worker.stream_complete.connect(
