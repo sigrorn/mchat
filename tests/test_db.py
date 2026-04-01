@@ -84,8 +84,9 @@ class TestConversationSpend:
         db.add_conversation_spend(conv.id, "openai", 0.010)
 
         spend = db.get_conversation_spend(conv.id)
-        assert abs(spend["claude"] - 0.008) < 1e-9
-        assert abs(spend["openai"] - 0.010) < 1e-9
+        assert abs(spend["claude"][0] - 0.008) < 1e-9
+        assert spend["claude"][1] is False
+        assert abs(spend["openai"][0] - 0.010) < 1e-9
 
     def test_spend_defaults_to_zero(self, db):
         conv = db.create_conversation()
@@ -94,11 +95,21 @@ class TestConversationSpend:
 
     def test_spend_for_new_providers(self, db):
         conv = db.create_conversation()
-        db.add_conversation_spend(conv.id, "gemini", 0.002)
+        db.add_conversation_spend(conv.id, "gemini", 0.002, estimated=True)
         db.add_conversation_spend(conv.id, "perplexity", 0.001)
         spend = db.get_conversation_spend(conv.id)
-        assert abs(spend["gemini"] - 0.002) < 1e-9
-        assert abs(spend["perplexity"] - 0.001) < 1e-9
+        assert abs(spend["gemini"][0] - 0.002) < 1e-9
+        assert spend["gemini"][1] is True
+        assert abs(spend["perplexity"][0] - 0.001) < 1e-9
+        assert spend["perplexity"][1] is False
+
+    def test_estimated_flag_sticky(self, db):
+        """Once any contribution is estimated, the flag stays True."""
+        conv = db.create_conversation()
+        db.add_conversation_spend(conv.id, "gemini", 0.001, estimated=False)
+        db.add_conversation_spend(conv.id, "gemini", 0.002, estimated=True)
+        spend = db.get_conversation_spend(conv.id)
+        assert spend["gemini"][1] is True
 
     def test_spend_deleted_with_conversation(self, db):
         conv = db.create_conversation()

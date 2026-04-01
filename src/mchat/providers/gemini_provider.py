@@ -40,6 +40,7 @@ class GeminiProvider(BaseProvider):
 
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
         self.last_usage = None
+        self.last_usage_estimated = False
         api_messages = self._format_messages(messages)
         try:
             response = self._client.chat.completions.create(
@@ -75,6 +76,7 @@ class GeminiProvider(BaseProvider):
         if self.last_usage is None:
             input_chars = sum(len(m["content"]) for m in api_messages)
             self.last_usage = (input_chars // 4, len(full_text) // 4)
+            self.last_usage_estimated = True
 
     def list_models(self) -> list[str]:
         try:

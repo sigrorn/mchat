@@ -13,7 +13,8 @@ from mchat.providers.base import BaseProvider
 
 class StreamWorker(QThread):
     token_received = Signal(str)
-    stream_complete = Signal(str, int, int)  # full text, input_tokens, output_tokens
+    # full text, input_tokens, output_tokens, estimated
+    stream_complete = Signal(str, int, int, bool)
     stream_error = Signal(str)
 
     def __init__(
@@ -35,6 +36,7 @@ class StreamWorker(QThread):
                 full_text += token
                 self.token_received.emit(token)
             usage = self._provider.last_usage or (0, 0)
-            self.stream_complete.emit(full_text, usage[0], usage[1])
+            estimated = self._provider.last_usage_estimated
+            self.stream_complete.emit(full_text, usage[0], usage[1], estimated)
         except Exception as e:
             self.stream_error.emit(str(e))

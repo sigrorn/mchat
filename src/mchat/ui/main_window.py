@@ -297,10 +297,17 @@ class MainWindow(QMainWindow):
         else:
             spend = {}
         for p in Provider:
-            amount = spend.get(p.value, 0.0)
-            self._spend_labels[p].setText(
-                format_cost(amount) if amount else "$0.00000"
-            )
+            label = self._spend_labels[p]
+            entry = spend.get(p.value)
+            if entry:
+                amount, estimated = entry
+                text = format_cost(amount) if amount else "$0.00000"
+                if estimated:
+                    label.setText(f"<i>{text}</i>")
+                else:
+                    label.setText(text)
+            else:
+                label.setText("$0.00000")
 
     # ------------------------------------------------------------------
     # Shortcuts
@@ -765,8 +772,8 @@ class MainWindow(QMainWindow):
             self._stream_worker = StreamWorker(provider, context_messages, model)
             self._stream_worker.token_received.connect(self._chat.append_token)
             self._stream_worker.stream_complete.connect(
-                lambda full_text, inp, out: self._on_stream_complete(
-                    full_text, provider_id, model, inp, out
+                lambda full_text, inp, out, est: self._on_stream_complete(
+                    full_text, provider_id, model, inp, out, est
                 )
             )
             self._stream_worker.stream_error.connect(self._on_stream_error)
@@ -787,8 +794,8 @@ class MainWindow(QMainWindow):
 
             worker = StreamWorker(provider, context_messages, model)
             worker.stream_complete.connect(
-                lambda full_text, inp, out, pid=provider_id, mdl=model: (
-                    self._on_multi_complete(pid, mdl, full_text, inp, out)
+                lambda full_text, inp, out, est, pid=provider_id, mdl=model: (
+                    self._on_multi_complete(pid, mdl, full_text, inp, out, est)
                 )
             )
             worker.stream_error.connect(
@@ -808,6 +815,7 @@ class MainWindow(QMainWindow):
         full_text: str,
         input_tokens: int,
         output_tokens: int,
+        estimated: bool = False,
     ) -> None:
         self._set_combo_waiting(provider_id, False)
         self._multi_workers.pop(provider_id, None)
@@ -828,7 +836,7 @@ class MainWindow(QMainWindow):
         cost = estimate_cost(model, input_tokens, output_tokens)
         if cost is not None and self._current_conv:
             self._db.add_conversation_spend(
-                self._current_conv.id, provider_id.value, cost
+                self._current_conv.id, provider_id.value, cost, estimated
             )
         self._update_spend_labels()
 
@@ -865,6 +873,7 @@ class MainWindow(QMainWindow):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        estimated: bool = False,
     ) -> None:
         self._set_combo_waiting(provider_id, False)
         msg = self._chat.end_streaming()
@@ -876,7 +885,7 @@ class MainWindow(QMainWindow):
         cost = estimate_cost(model, input_tokens, output_tokens)
         if cost is not None and self._current_conv:
             self._db.add_conversation_spend(
-                self._current_conv.id, provider_id.value, cost
+                self._current_conv.id, provider_id.value, cost, estimated
             )
         self._update_spend_labels()
 

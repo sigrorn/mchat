@@ -16,6 +16,7 @@ class BaseProvider(ABC):
 
     def __init__(self) -> None:
         self.last_usage: tuple[int, int] | None = None  # (input_tokens, output_tokens)
+        self.last_usage_estimated: bool = False
 
     @property
     @abstractmethod

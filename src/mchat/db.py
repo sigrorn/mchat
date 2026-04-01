@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS conversation_spend (
     conversation_id INTEGER NOT NULL,
     provider TEXT NOT NULL,
     amount REAL NOT NULL DEFAULT 0.0,
+    estimated INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conversation_id, provider),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
@@ -103,6 +104,16 @@ class Database:
                 "SELECT id, 'openai', spend_openai FROM conversations WHERE spend_openai > 0"
             )
 
+        # Add estimated column to conversation_spend if missing
+        spend_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(conversation_spend)")
+        }
+        if spend_cols and "estimated" not in spend_cols:
+            self._conn.execute(
+                "ALTER TABLE conversation_spend ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0"
+            )
+
     def close(self) -> None:
         self._conn.close()
 
@@ -157,22 +168,28 @@ class Database:
         )
         self._conn.commit()
 
-    def add_conversation_spend(self, conv_id: int, provider: str, amount: float) -> None:
+    def add_conversation_spend(
+        self, conv_id: int, provider: str, amount: float, estimated: bool = False
+    ) -> None:
+        # If any contribution is estimated, mark the whole row as estimated
+        est = 1 if estimated else 0
         self._conn.execute(
-            "INSERT INTO conversation_spend (conversation_id, provider, amount) "
-            "VALUES (?, ?, ?) "
-            "ON CONFLICT(conversation_id, provider) DO UPDATE SET amount = amount + ?",
-            (conv_id, provider, amount, amount),
+            "INSERT INTO conversation_spend (conversation_id, provider, amount, estimated) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(conversation_id, provider) DO UPDATE SET "
+            "amount = amount + ?, estimated = MAX(estimated, ?)",
+            (conv_id, provider, amount, est, amount, est),
         )
         self._conn.commit()
 
-    def get_conversation_spend(self, conv_id: int) -> dict[str, float]:
-        """Return {provider: total_spend} for a conversation."""
+    def get_conversation_spend(self, conv_id: int) -> dict[str, tuple[float, bool]]:
+        """Return {provider: (total_spend, estimated)} for a conversation."""
         cursor = self._conn.execute(
-            "SELECT provider, amount FROM conversation_spend WHERE conversation_id = ?",
+            "SELECT provider, amount, estimated FROM conversation_spend "
+            "WHERE conversation_id = ?",
             (conv_id,),
         )
-        return {row[0]: row[1] for row in cursor.fetchall()}
+        return {row[0]: (row[1], bool(row[2])) for row in cursor.fetchall()}
 
     def set_conversation_limit(self, conv_id: int, limit_mark: str | None) -> None:
         self._conn.execute(
