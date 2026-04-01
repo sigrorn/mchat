@@ -76,6 +76,7 @@ class ChatWidget(QTextEdit):
         self._color_claude = color_claude
         self._color_openai = color_openai
         self._messages: list[Message] = []
+        self._message_positions: list[int] = []  # document position of each message start
         self._block_roles: dict[int, _RoleInfo] = {}
         self._streaming_msg: Message | None = None
         self._streaming_block_fmt: QTextBlockFormat | None = None
@@ -95,6 +96,19 @@ class ChatWidget(QTextEdit):
         self.document().setDocumentMargin(16)
         self.document().setDefaultStyleSheet(_DOC_CSS)
         self._apply_default_font()
+
+        # Handle clicks on mark links (mchat-mark:<index>)
+        self.setOpenLinks(False)
+        self.anchorClicked.connect(self._on_anchor_clicked)
+
+    def _on_anchor_clicked(self, url) -> None:
+        href = url.toString()
+        if href.startswith("mchat-mark:"):
+            try:
+                msg_index = int(href.split(":", 1)[1])
+                self.scroll_to_message(msg_index)
+            except (ValueError, IndexError):
+                pass
 
     def _apply_default_font(self) -> None:
         font = self.document().defaultFont()
@@ -181,6 +195,8 @@ class ChatWidget(QTextEdit):
         else:
             cursor.insertBlock(block_fmt)
 
+        # Record document position for scroll-to-message
+        self._message_positions.append(cursor.position())
         start_block = cursor.block().blockNumber()
 
         # Insert HTML content
@@ -195,6 +211,7 @@ class ChatWidget(QTextEdit):
         saved = list(self._messages)
         self.clear()
         self._messages.clear()
+        self._message_positions.clear()
         self._block_roles.clear()
         self._is_empty = True
         for msg in saved:
@@ -295,6 +312,50 @@ class ChatWidget(QTextEdit):
     # Public API
     # ------------------------------------------------------------------
 
+    def scroll_to_message(self, index: int) -> None:
+        """Scroll the view so that message at the given index is visible."""
+        if 0 <= index < len(self._message_positions):
+            pos = self._message_positions[index]
+            cursor = self.textCursor()
+            cursor.setPosition(pos)
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
+
+    def add_mark_list(self, marks: list[tuple[str, int]]) -> None:
+        """Insert a clickable list of marks. Each mark name is a link."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor("#f5f5f5"))
+
+        if self._is_empty:
+            cursor.setBlockFormat(fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(fmt)
+
+        char_fmt = cursor.charFormat()
+        char_fmt.setForeground(QColor("#888"))
+        cursor.insertText("  — Marks —", char_fmt)
+
+        if not marks:
+            cursor.insertBlock(fmt)
+            cursor.insertText("    (no marks set)", char_fmt)
+        else:
+            for name, msg_count in marks:
+                cursor.insertBlock(fmt)
+                label = name if name else "(unnamed)"
+                cursor.insertHtml(
+                    f'&nbsp;&nbsp;&nbsp;&nbsp;'
+                    f'<a href="mchat-mark:{msg_count}" '
+                    f'style="color: #4a90d9; text-decoration: underline;">'
+                    f'{label}</a>'
+                    f'<span style="color: #888;"> — at message {msg_count}</span>'
+                )
+
+        self._scroll_to_bottom()
+
     def add_note(self, text: str) -> None:
         """Insert an ephemeral visual note (not part of _messages, lost on rebuild)."""
         cursor = self.textCursor()
@@ -381,6 +442,7 @@ class ChatWidget(QTextEdit):
     def clear_messages(self) -> None:
         self.clear()
         self._messages.clear()
+        self._message_positions.clear()
         self._block_roles.clear()
         self._streaming_msg = None
         self._streaming_block_fmt = None

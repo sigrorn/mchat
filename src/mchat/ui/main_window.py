@@ -429,6 +429,7 @@ class MainWindow(QMainWindow):
         "  //mark [tagname]      — mark this point in the chat (overwrites previous mark of same name)\n"
         "  //limit [tagname]     — only send chat from that mark onwards to providers\n"
         "  //limit ALL           — remove the limit, send full chat history again\n"
+        "  //list                — list all marks (click a mark to scroll to it)\n"
         "  //incremental         — render markdown progressively while streaming\n"
         "  //batch               — render markdown only when response is complete (default)\n"
         "  //help                — show this help\n"
@@ -471,6 +472,9 @@ class MainWindow(QMainWindow):
         if cmd == "//limit":
             return self._handle_limit(arg)
 
+        if cmd == "//list":
+            return self._handle_list()
+
         if cmd == "//incremental":
             self._chat._incremental = True
             self._chat.add_note("incremental rendering enabled")
@@ -497,6 +501,14 @@ class MainWindow(QMainWindow):
 
         label = f"mark '{tag}'" if tag else "mark (unnamed)"
         self._chat.add_note(f"{label} set at message {count}")
+        return True
+
+    def _handle_list(self) -> bool:
+        if not self._current_conv:
+            self._chat.add_note("No active conversation")
+            return True
+        marks = self._db.list_marks(self._current_conv.id)
+        self._chat.add_mark_list(marks)
         return True
 
     def _handle_limit(self, tag: str) -> bool:

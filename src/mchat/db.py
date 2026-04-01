@@ -173,6 +173,15 @@ class Database:
         ).fetchone()
         return row[0] if row else None
 
+    def list_marks(self, conv_id: int) -> list[tuple[str, int]]:
+        """Return all marks for a conversation as (name, message_count) pairs."""
+        cursor = self._conn.execute(
+            "SELECT name, message_count FROM marks WHERE conversation_id = ? "
+            "ORDER BY message_count ASC",
+            (conv_id,),
+        )
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+
     def delete_conversation(self, conv_id: int) -> None:
         self._conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
         self._conn.commit()
