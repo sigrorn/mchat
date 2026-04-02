@@ -410,6 +410,47 @@ class ChatWidget(QTextEdit):
         self._insert_rendered(message)
         self._scroll_to_bottom()
 
+    def _insert_column_table(self, table_html: str, providers: list, main_window) -> None:
+        """Insert a pre-built HTML table for column-mode multi-provider responses."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor("#f5f5f5"))
+
+        if self._is_empty:
+            cursor.setBlockFormat(fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(fmt)
+
+        start_block = cursor.block().blockNumber()
+        cursor.insertHtml(table_html)
+        end_block = cursor.block().blockNumber()
+
+        # Apply background and colour table cells
+        doc = self.document()
+        tables_seen: set[int] = set()
+        for bn in range(start_block, end_block + 1):
+            block = doc.findBlockByNumber(bn)
+            if not block.isValid():
+                continue
+            bc = QTextCursor(block)
+            bc.setBlockFormat(fmt)
+
+            table = bc.currentTable()
+            if table:
+                table_pos = table.firstCursorPosition().position()
+                if table_pos not in tables_seen:
+                    tables_seen.add(table_pos)
+                    tf = table.format()
+                    tf.setMargin(0)
+                    tf.setCellSpacing(0)
+                    tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                    table.setFormat(tf)
+
+        self._scroll_to_bottom()
+
     def load_messages(self, messages: list[Message]) -> None:
         """Bulk-load messages with suppressed layout updates for speed."""
         self.clear_messages()

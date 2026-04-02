@@ -58,6 +58,10 @@ class MainWindow(QMainWindow):
         self._combos: dict[Provider, QComboBox] = {}
         self._spend_labels: dict[Provider, QLabel] = {}
 
+        # Column mode buffer — accumulates multi-provider results for table rendering
+        self._column_buffer: dict[Provider, tuple[str, str, str, int, int, bool]] = {}
+        # maps provider -> (display_label, full_text, model, input_tokens, output_tokens, estimated)
+
         # Retry stash — cleared when user sends a new regular message
         self._retry_contexts: dict[Provider, list[Message]] = {}
         self._retry_models: dict[Provider, str] = {}
@@ -185,6 +189,19 @@ class MainWindow(QMainWindow):
             self._spend_labels[p] = label
 
         self._bar_layout.addStretch()
+
+        # Column/list mode toggle
+        self._column_mode = False
+        self._column_btn = QPushButton("⫏ List")
+        self._column_btn.setToolTip("Toggle between list and column layout for multi-provider responses")
+        self._column_btn.setFixedWidth(70)
+        self._column_btn.setStyleSheet(
+            "QPushButton { background: none; border: 1px solid #ccc; border-radius: 6px; "
+            "padding: 4px 8px; color: #666; font-size: 12px; }"
+            "QPushButton:hover { background-color: #eee; }"
+        )
+        self._column_btn.clicked.connect(self._toggle_column_mode)
+        self._bar_layout.addWidget(self._column_btn)
 
         # Settings button (right-aligned)
         self._settings_btn = QPushButton("⚙ Settings")
@@ -923,6 +940,13 @@ class MainWindow(QMainWindow):
         self._chat._scroll_to_bottom()
         return True
 
+    def _toggle_column_mode(self) -> None:
+        self._column_mode = not self._column_mode
+        if self._column_mode:
+            self._column_btn.setText("⫐ Cols")
+        else:
+            self._column_btn.setText("⫏ List")
+
     def _clear_retry_stash(self) -> None:
         self._retry_contexts.clear()
         self._retry_models.clear()
@@ -1040,6 +1064,7 @@ class MainWindow(QMainWindow):
     def _send_multi(self, targets: list[Provider], context_override: dict[Provider, list[Message]] | None = None) -> None:
         """Send to multiple providers simultaneously, render when each completes."""
         self._multi_workers.clear()
+        self._column_buffer.clear()
 
         for provider_id in targets:
             model = self._selected_model(provider_id)
@@ -1085,19 +1110,7 @@ class MainWindow(QMainWindow):
         self._set_combo_waiting(provider_id, False)
         self._multi_workers.pop(provider_id, None)
 
-        label = f"{_PROVIDER_DISPLAY[provider_id]}'s take"
-        prefixed = f"**{label}:**\n\n{full_text}"
-        msg = Message(
-            role=Role.ASSISTANT,
-            content=prefixed,
-            provider=provider_id,
-            model=model,
-            conversation_id=self._current_conv.id,
-        )
-        self._db.add_message(msg)
-        self._current_conv.messages.append(msg)
-        self._chat.add_message(msg)
-
+        # Update spend regardless of display mode
         cost = estimate_cost(model, input_tokens, output_tokens)
         if cost is not None and self._current_conv:
             self._db.add_conversation_spend(
@@ -1105,10 +1118,98 @@ class MainWindow(QMainWindow):
             )
         self._update_spend_labels()
 
+        if self._column_mode and self._multi_workers:
+            # Column mode: buffer until all providers are done
+            label = _PROVIDER_DISPLAY[provider_id]
+            self._column_buffer[provider_id] = (
+                label, full_text, model, input_tokens, output_tokens, estimated
+            )
+            return
+
+        if self._column_mode and not self._multi_workers:
+            # Last provider arrived — add this one to buffer too, then render table
+            label = _PROVIDER_DISPLAY[provider_id]
+            self._column_buffer[provider_id] = (
+                label, full_text, model, input_tokens, output_tokens, estimated
+            )
+            self._render_column_responses()
+        else:
+            # List mode: render immediately as before
+            label = f"{_PROVIDER_DISPLAY[provider_id]}'s take"
+            prefixed = f"**{label}:**\n\n{full_text}"
+            msg = Message(
+                role=Role.ASSISTANT,
+                content=prefixed,
+                provider=provider_id,
+                model=model,
+                conversation_id=self._current_conv.id,
+            )
+            self._db.add_message(msg)
+            self._current_conv.messages.append(msg)
+            self._chat.add_message(msg)
+
         if not self._multi_workers:
             self._input.set_enabled(True)
             self._update_input_placeholder()
             self._update_input_color()
+
+    def _render_column_responses(self) -> None:
+        """Render buffered multi-provider responses as a side-by-side table."""
+        import html as html_mod
+        import markdown as md_lib
+
+        md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
+
+        # Build table HTML — one column per provider
+        providers = list(self._column_buffer.keys())
+        header_cells = []
+        body_cells = []
+        for p in providers:
+            label, full_text, model, inp, out, est = self._column_buffer[p]
+            color = self._provider_color(p)
+            md.reset()
+            rendered = md.convert(full_text)
+            header_cells.append(
+                f'<th style="background-color:{color}; padding:8px; '
+                f'text-align:left; vertical-align:top;">{label}</th>'
+            )
+            body_cells.append(
+                f'<td style="background-color:{color}; padding:8px; '
+                f'vertical-align:top;">{rendered}</td>'
+            )
+
+        table_html = (
+            f'<table style="width:100%; border-collapse:collapse;">'
+            f'<tr>{"".join(header_cells)}</tr>'
+            f'<tr>{"".join(body_cells)}</tr>'
+            f'</table>'
+        )
+
+        # Save each response as a separate DB message (for persistence)
+        # but display as a single combined message
+        for p in providers:
+            label, full_text, model, inp, out, est = self._column_buffer[p]
+            msg = Message(
+                role=Role.ASSISTANT,
+                content=f"**{label}'s take:**\n\n{full_text}",
+                provider=p,
+                model=model,
+                conversation_id=self._current_conv.id,
+            )
+            self._db.add_message(msg)
+            self._current_conv.messages.append(msg)
+
+        # Insert the table as a visual element
+        # Use a dummy message with the combined content for display
+        combined = Message(
+            role=Role.ASSISTANT,
+            content=table_html,
+            provider=providers[0],
+            conversation_id=self._current_conv.id,
+        )
+        self._chat._insert_column_table(table_html, providers, self)
+
+        self._column_buffer.clear()
 
     def _on_multi_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)
