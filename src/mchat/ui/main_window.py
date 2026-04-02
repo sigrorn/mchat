@@ -58,6 +58,12 @@ class MainWindow(QMainWindow):
         self._combos: dict[Provider, QComboBox] = {}
         self._spend_labels: dict[Provider, QLabel] = {}
 
+        # Retry stash — cleared when user sends a new regular message
+        self._retry_contexts: dict[Provider, list[Message]] = {}
+        self._retry_models: dict[Provider, str] = {}
+        self._retry_failed: dict[Provider, tuple[str, bool]] = {}  # provider -> (error, transient)
+        self._retry_error_msg_ids: dict[Provider, int | None] = {}  # provider -> message DB id
+
         self._init_providers()
         self._build_ui()
         self._populate_model_combos_fast()  # config defaults only, no API calls
@@ -571,6 +577,7 @@ class MainWindow(QMainWindow):
         "  //pop                 — remove the last request and its responses\n"
         "  //hide                — hide the last request+responses, copy request to input\n"
         "  //unhide              — unhide all hidden messages\n"
+        "  //retry               — re-attempt the last failed request\n"
         "  //marks               — list all marks (click to scroll)\n"
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
@@ -645,6 +652,8 @@ class MainWindow(QMainWindow):
             return self._handle_limit(arg)
         if cmd == "//pop":
             return self._handle_pop()
+        if cmd == "//retry":
+            return self._handle_retry()
         if cmd == "//hide":
             return self._handle_hide()
         if cmd == "//unhide":
@@ -789,6 +798,49 @@ class MainWindow(QMainWindow):
         self._chat.add_note("all hidden messages restored")
         return True
 
+    def _handle_retry(self) -> bool:
+        if not self._retry_failed:
+            self._chat.add_note("Error: nothing to retry")
+            return True
+
+        # Warn about non-transient errors
+        for pid, (error, transient) in self._retry_failed.items():
+            if not transient:
+                name = _PROVIDER_DISPLAY[pid]
+                self._chat.add_note(
+                    f"Warning: {name} error was non-transient ({error[:60]}) — retrying anyway"
+                )
+
+        # Hide the error messages from the chat
+        error_ids = [mid for mid in self._retry_error_msg_ids.values() if mid is not None]
+        if error_ids:
+            self._db.hide_messages(error_ids)
+            # Remove from in-memory list
+            hidden_set = set(error_ids)
+            self._current_conv.messages = [
+                m for m in self._current_conv.messages if m.id not in hidden_set
+            ]
+            self._chat.load_messages(self._current_conv.messages)
+
+        # Re-send to failed providers using stashed contexts
+        failed_providers = list(self._retry_failed.keys())
+        context_override = {
+            pid: self._retry_contexts[pid]
+            for pid in failed_providers
+            if pid in self._retry_contexts
+        }
+
+        self._retry_failed.clear()
+        self._retry_error_msg_ids.clear()
+
+        self._input.set_enabled(False)
+        self._send_multi(failed_providers, context_override=context_override)
+
+        self._chat.add_note(
+            f"retrying {', '.join(_PROVIDER_DISPLAY[p] for p in failed_providers)}..."
+        )
+        return True
+
     def _handle_marks(self) -> bool:
         if not self._current_conv:
             self._chat.add_note("No active conversation")
@@ -897,6 +949,12 @@ class MainWindow(QMainWindow):
         self._chat._scroll_to_bottom()
         return True
 
+    def _clear_retry_stash(self) -> None:
+        self._retry_contexts.clear()
+        self._retry_models.clear()
+        self._retry_failed.clear()
+        self._retry_error_msg_ids.clear()
+
     def _save_selection(self) -> None:
         """Persist the current selection to the conversation."""
         if self._current_conv and self._router:
@@ -960,6 +1018,7 @@ class MainWindow(QMainWindow):
         self._input.set_enabled(False)
         self._save_selection()
         self._sync_checkboxes_from_selection()
+        self._clear_retry_stash()
 
         if len(targets) == 1:
             self._send_single(targets[0])
@@ -975,6 +1034,9 @@ class MainWindow(QMainWindow):
 
         if self._chat._incremental:
             context_messages = self._build_context(provider_id)
+            # Stash for //retry
+            self._retry_contexts[provider_id] = context_messages
+            self._retry_models[provider_id] = model
             # Incremental mode: stream tokens to UI as they arrive
             assistant_msg = Message(
                 role=Role.ASSISTANT,
@@ -1001,7 +1063,7 @@ class MainWindow(QMainWindow):
             # Batch mode: collect silently, render when complete
             self._send_multi([provider_id])
 
-    def _send_multi(self, targets: list[Provider]) -> None:
+    def _send_multi(self, targets: list[Provider], context_override: dict[Provider, list[Message]] | None = None) -> None:
         """Send to multiple providers simultaneously, render when each completes."""
         self._multi_workers.clear()
 
@@ -1009,7 +1071,14 @@ class MainWindow(QMainWindow):
             model = self._selected_model(provider_id)
             provider = self._router.get_provider(provider_id)
             self._set_combo_waiting(provider_id, True)
-            context_messages = self._build_context(provider_id)
+            if context_override and provider_id in context_override:
+                context_messages = context_override[provider_id]
+            else:
+                context_messages = self._build_context(provider_id)
+
+            # Stash for //retry
+            self._retry_contexts[provider_id] = context_messages
+            self._retry_models[provider_id] = model
 
             worker = StreamWorker(provider, context_messages, model)
             worker.stream_complete.connect(
@@ -1069,7 +1138,8 @@ class MainWindow(QMainWindow):
 
     def _on_multi_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)
-        self._multi_workers.pop(provider_id, None)
+        worker = self._multi_workers.pop(provider_id, None)
+        transient = worker.last_error_transient if worker else False
 
         error_msg = Message(
             role=Role.ASSISTANT,
@@ -1077,7 +1147,13 @@ class MainWindow(QMainWindow):
             provider=provider_id,
             conversation_id=self._current_conv.id,
         )
+        self._db.add_message(error_msg)
+        self._current_conv.messages.append(error_msg)
         self._chat.add_message(error_msg)
+
+        # Stash for //retry
+        self._retry_failed[provider_id] = (error, transient)
+        self._retry_error_msg_ids[provider_id] = error_msg.id
 
         if not self._multi_workers:
             self._input.set_enabled(True)
@@ -1120,9 +1196,28 @@ class MainWindow(QMainWindow):
         for p in Provider:
             self._set_combo_waiting(p, False)
         self._chat.end_streaming()
+
+        # Determine which provider failed (from the single-provider path)
+        worker = self._stream_worker
+        if worker:
+            pid = worker._provider.provider_id
+            transient = worker.last_error_transient
+
+            error_msg = Message(
+                role=Role.ASSISTANT,
+                content=f"[Error from {pid.value}: {error}]",
+                provider=pid,
+                conversation_id=self._current_conv.id,
+            )
+            self._db.add_message(error_msg)
+            self._current_conv.messages.append(error_msg)
+            self._chat.add_message(error_msg)
+
+            self._retry_failed[pid] = (error, transient)
+            self._retry_error_msg_ids[pid] = error_msg.id
+
         self._input.set_enabled(True)
         self._stream_worker = None
-        QMessageBox.critical(self, "Error", f"Streaming failed:\n{error}")
 
     # ------------------------------------------------------------------
     # Settings
