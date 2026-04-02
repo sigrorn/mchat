@@ -412,8 +412,9 @@ class ChatWidget(QTextEdit):
         else:
             cursor.insertBlock(fmt)
 
-        char_fmt = cursor.charFormat()
+        char_fmt = QTextCharFormat()
         char_fmt.setForeground(QColor("#888"))
+        char_fmt.setBackground(QColor("#f5f5f5"))
         cursor.insertText(f"  — {text} —", char_fmt)
         self._scroll_to_bottom()
 
