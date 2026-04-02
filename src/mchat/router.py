@@ -11,9 +11,11 @@ from mchat.models.message import Provider
 from mchat.providers.base import BaseProvider
 
 PREFIX_PATTERN = re.compile(
-    r"^(claude|gpt|gemini|perplexity|pplx)\s*[,:]\s*",
+    r"^(claude|gpt|gemini|perplexity|pplx|all)\s*[,:]\s*",
     re.IGNORECASE,
 )
+
+ALL = "all"
 
 PREFIX_TO_PROVIDER = {
     "claude": Provider.CLAUDE,
@@ -38,9 +40,14 @@ class Router:
         match = PREFIX_PATTERN.match(user_input)
         if match:
             prefix = match.group(1).lower()
-            provider = PREFIX_TO_PROVIDER[prefix]
             cleaned = user_input[match.end():].strip()
-            self._selection = [provider]
+            if prefix == ALL:
+                configured = [p for p in Provider if p in self._providers]
+                if configured:
+                    self._selection = configured
+            else:
+                provider = PREFIX_TO_PROVIDER[prefix]
+                self._selection = [provider]
             return list(self._selection), cleaned
         return list(self._selection), user_input
 

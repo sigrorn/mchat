@@ -579,6 +579,7 @@ class MainWindow(QMainWindow):
         ("gpt, <message>", "send to GPT", Provider.OPENAI),
         ("gemini, <message>", "send to Gemini", Provider.GEMINI),
         ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
+        ("all, <message>", "send to all configured providers", None),
         ("(no prefix)", "send to current selection", None),
     ]
 

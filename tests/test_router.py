@@ -109,3 +109,16 @@ class TestRouter:
         target, text = router.parse("both, hello")
         # "both" is not a valid prefix, treated as plain text
         assert text == "both, hello"
+
+    def test_all_prefix(self, router, mock_providers):
+        """'all,' selects all configured providers."""
+        targets, text = router.parse("all, compare these")
+        assert text == "compare these"
+        assert set(targets) == set(mock_providers.keys())
+
+    def test_all_prefix_sticky(self, router, mock_providers):
+        """'all,' selection is sticky."""
+        router.parse("all, first question")
+        targets, text = router.parse("follow up")
+        assert set(targets) == set(mock_providers.keys())
+        assert text == "follow up"
