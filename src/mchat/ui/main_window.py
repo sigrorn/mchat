@@ -66,6 +66,18 @@ _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
 # Stable display order for multi-provider responses
 _PROVIDER_ORDER = [Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI, Provider.PERPLEXITY]
 
+# Patterns the LLMs may echo at the start of their response
+import re as _re
+_TAKE_ECHO_RE = _re.compile(
+    r"^\*{0,2}(?:Claude|GPT|Gemini|Perplexity)(?:'s|'s)\s+take:?\*{0,2}\s*\n*",
+    _re.IGNORECASE,
+)
+
+
+def _strip_echoed_heading(text: str) -> str:
+    """Remove any LLM-echoed 'X's take:' heading from the start of a response."""
+    return _TAKE_ECHO_RE.sub("", text)
+
 
 class MainWindow(QMainWindow):
     def __init__(self, config: Config, db: Database) -> None:
@@ -1178,7 +1190,7 @@ class MainWindow(QMainWindow):
                             color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
                             provider_colors.append(color)
                             md.reset()
-                            rendered = md.convert(m.content)
+                            rendered = md.convert(_strip_echoed_heading(m.content))
                             header_cells.append(
                                 f'<th style="background-color:{color}; padding:8px; '
                                 f'text-align:left; vertical-align:top;">{label}\'s take</th>'
@@ -1200,9 +1212,10 @@ class MainWindow(QMainWindow):
                         # List mode with headings
                         for m in ordered:
                             label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
+                            clean = _strip_echoed_heading(m.content)
                             display_msg = Message(
                                 role=m.role,
-                                content=f"**{label}'s take:**\n\n{m.content}",
+                                content=f"**{label}'s take:**\n\n{clean}",
                                 provider=m.provider, model=m.model,
                                 conversation_id=m.conversation_id, id=m.id,
                             )
@@ -1223,6 +1236,7 @@ class MainWindow(QMainWindow):
         ordered = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
         for p in ordered:
             label, full_text, model, inp, out, est = self._column_buffer[p]
+            full_text = _strip_echoed_heading(full_text)
             # Store raw content — heading is added at display time only
             msg = Message(
                 role=Role.ASSISTANT,
@@ -1257,6 +1271,7 @@ class MainWindow(QMainWindow):
         body_cells = []
         for p in providers:
             label, full_text, model, inp, out, est = self._column_buffer[p]
+            full_text = _strip_echoed_heading(full_text)
             color = self._provider_color(p)
             md.reset()
             rendered = md.convert(full_text)
@@ -1282,7 +1297,7 @@ class MainWindow(QMainWindow):
             label, full_text, model, inp, out, est = self._column_buffer[p]
             msg = Message(
                 role=Role.ASSISTANT,
-                content=full_text,
+                content=_strip_echoed_heading(full_text),
                 provider=p,
                 model=model,
                 conversation_id=self._current_conv.id,
