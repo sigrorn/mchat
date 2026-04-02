@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
         self._load_conversations()
         self._update_input_placeholder()
         self._update_input_color()
+        self._input._text_edit.setFocus()
 
         # Fetch live model lists in background after window is shown
         from PySide6.QtCore import QTimer
