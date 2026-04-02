@@ -570,16 +570,13 @@ class MainWindow(QMainWindow):
 
     _HELP_COMMANDS = (
         "Available commands:\n"
-        "  //mark [tagname]      — mark this point in the chat\n"
-        "  //marklast [tagname]  — mark just before the last request\n"
-        "  //limit [tagname|N]   — only send chat from that mark or message N onwards\n"
+        "  //limit <N>           — only send chat from message N onwards\n"
         "  //limit last          — limit to the last request sent to providers\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
         "  //pop                 — remove the last request and its responses\n"
         "  //hide                — hide the last request+responses, copy request to input\n"
         "  //unhide              — unhide all hidden messages\n"
         "  //retry               — re-attempt the last failed request\n"
-        "  //marks               — list all marks (click to scroll)\n"
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
         "  //providers           — list available providers and config status\n"
@@ -645,10 +642,6 @@ class MainWindow(QMainWindow):
             self._chat._scroll_to_bottom()
             return True
 
-        if cmd == "//mark":
-            return self._handle_mark(arg)
-        if cmd == "//marklast":
-            return self._handle_marklast(arg)
         if cmd == "//limit":
             return self._handle_limit(arg)
         if cmd == "//pop":
@@ -659,8 +652,6 @@ class MainWindow(QMainWindow):
             return self._handle_hide()
         if cmd == "//unhide":
             return self._handle_unhide()
-        if cmd == "//marks":
-            return self._handle_marks()
         if cmd == "//select":
             return self._handle_select(arg)
         if cmd == "//providers":
@@ -676,44 +667,6 @@ class MainWindow(QMainWindow):
             return True
 
         return False
-
-    def _handle_mark(self, tag: str) -> bool:
-        if not self._current_conv:
-            self._on_new_chat()
-        if tag.upper() == "ALL":
-            self._chat.add_note("Error: 'ALL' is not allowed as a mark name")
-            return True
-        name = tag
-        count = len(self._current_conv.messages)
-        self._db.set_mark(self._current_conv.id, name, count)
-        label = f"mark '{tag}'" if tag else "mark (unnamed)"
-        self._chat.add_note(f"{label} set at message {count}")
-        return True
-
-    def _handle_marklast(self, tag: str) -> bool:
-        if not self._current_conv:
-            self._on_new_chat()
-        if tag.upper() == "ALL":
-            self._chat.add_note("Error: 'ALL' is not allowed as a mark name")
-            return True
-
-        # Find the position just before the last user message
-        messages = self._current_conv.messages
-        last_user_idx = None
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == Role.USER:
-                last_user_idx = i
-                break
-
-        if last_user_idx is None:
-            self._chat.add_note("Error: no user message found to mark before")
-            return True
-
-        name = tag
-        self._db.set_mark(self._current_conv.id, name, last_user_idx)
-        label = f"mark '{tag}'" if tag else "mark (unnamed)"
-        self._chat.add_note(f"{label} set before last request (message {last_user_idx})")
-        return True
 
     def _handle_pop(self) -> bool:
         if not self._current_conv or not self._current_conv.messages:
@@ -842,17 +795,12 @@ class MainWindow(QMainWindow):
         )
         return True
 
-    def _handle_marks(self) -> bool:
-        if not self._current_conv:
-            self._chat.add_note("No active conversation")
-            return True
-        marks = self._db.list_marks(self._current_conv.id)
-        self._chat.add_mark_list(marks)
-        return True
-
     def _handle_limit(self, tag: str) -> bool:
         if not self._current_conv:
             self._on_new_chat()
+        if not tag:
+            self._chat.add_note("Error: //limit requires a message number, 'last', or 'ALL'")
+            return True
         if tag.upper() == "ALL":
             self._current_conv.limit_mark = None
             self._db.set_conversation_limit(self._current_conv.id, None)
@@ -892,16 +840,7 @@ class MainWindow(QMainWindow):
             self._chat.add_note(f"limit set to message {idx} — earlier context will not be sent")
             return True
 
-        name = tag
-        idx = self._db.get_mark(self._current_conv.id, name)
-        if idx is None:
-            label = f"mark '{tag}'" if tag else "unnamed mark"
-            self._chat.add_note(f"Error: {label} not found")
-            return True
-        self._current_conv.limit_mark = name
-        self._db.set_conversation_limit(self._current_conv.id, name)
-        label = f"mark '{tag}'" if tag else "unnamed mark"
-        self._chat.add_note(f"limit set to {label} (message {idx}) — earlier context will not be sent")
+        self._chat.add_note(f"Error: '{tag}' is not a valid message number — use //limit <N>, //limit last, or //limit ALL")
         return True
 
     def _handle_select(self, arg: str) -> bool:
