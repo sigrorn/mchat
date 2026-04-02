@@ -5,6 +5,8 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import (
@@ -37,6 +39,26 @@ from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
+
+def _get_version() -> str:
+    """Get version from last git commit timestamp (vYYYYMMDDHHMMSS)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d%H%M%S"],
+            capture_output=True, text=True, timeout=3,
+            cwd=str(Path(__file__).parent),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"v{result.stdout.strip()}"
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version as pkg_version
+        return f"v{pkg_version('mchat')}"
+    except Exception:
+        return "vdev"
+
 
 # Display names for provider labels in "X's take:" prefixes
 _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
@@ -123,12 +145,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        try:
-            from importlib.metadata import version as pkg_version
-            ver = pkg_version("mchat")
-        except Exception:
-            ver = "dev"
-        self.setWindowTitle(f"mchat v{ver}")
+        self.setWindowTitle(f"mchat {_get_version()}")
         self.setMinimumSize(900, 600)
         self._restore_geometry()
 

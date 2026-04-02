@@ -124,6 +124,17 @@ class Database:
                 "ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"
             )
 
+        # Strip legacy "**X's take:**\n\n" prefix from assistant messages
+        # (one-time migration — these were stored with the heading before the
+        # display-time heading fix)
+        for display_name in ("Claude", "GPT", "Gemini", "Perplexity"):
+            prefix = f"**{display_name}'s take:**\n\n"
+            self._conn.execute(
+                "UPDATE messages SET content = SUBSTR(content, ?) "
+                "WHERE role = 'assistant' AND content LIKE ?",
+                (len(prefix) + 1, f"**{display_name}'s take:**%"),
+            )
+
     def close(self) -> None:
         self._conn.close()
 
