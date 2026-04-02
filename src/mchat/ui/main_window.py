@@ -633,6 +633,7 @@ class MainWindow(QMainWindow):
         ("gemini, <message>", "send to Gemini", Provider.GEMINI),
         ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
         ("all, <message>", "send to all configured providers", None),
+        ("flipped, <message>", "send to non-selected providers", None),
         ("(no prefix)", "send to current selection", None),
     ]
 

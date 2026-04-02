@@ -121,4 +121,26 @@ class TestRouter:
         router.parse("all, first question")
         targets, text = router.parse("follow up")
         assert set(targets) == set(mock_providers.keys())
-        assert text == "follow up"
+
+    def test_flipped_prefix(self, router, mock_providers):
+        """'flipped,' inverts the selection."""
+        router.set_selection([Provider.CLAUDE])
+        targets, text = router.parse("flipped, hello")
+        assert text == "hello"
+        assert Provider.CLAUDE not in targets
+        assert len(targets) == len(mock_providers) - 1
+
+    def test_flipped_sticky(self, router, mock_providers):
+        """Flipped selection is sticky."""
+        router.set_selection([Provider.CLAUDE])
+        router.parse("flipped, first")
+        targets, text = router.parse("follow up")
+        assert Provider.CLAUDE not in targets
+
+    def test_flipped_all_selected_noop(self, router, mock_providers):
+        """Flipping when all are selected does nothing."""
+        router.parse("all, setup")
+        original = set(router.selection)
+        targets, text = router.parse("flipped, hello")
+        assert text == "hello"
+        assert set(targets) == original

@@ -11,11 +11,12 @@ from mchat.models.message import Provider
 from mchat.providers.base import BaseProvider
 
 PREFIX_PATTERN = re.compile(
-    r"^(claude|gpt|gemini|perplexity|pplx|all)\s*[,:]\s*",
+    r"^(claude|gpt|gemini|perplexity|pplx|all|flipped)\s*[,:]\s*",
     re.IGNORECASE,
 )
 
 ALL = "all"
+FLIPPED = "flipped"
 
 PREFIX_TO_PROVIDER = {
     "claude": Provider.CLAUDE,
@@ -45,6 +46,13 @@ class Router:
                 configured = [p for p in Provider if p in self._providers]
                 if configured:
                     self._selection = configured
+            elif prefix == FLIPPED:
+                configured = set(p for p in Provider if p in self._providers)
+                current = set(self._selection)
+                flipped = [p for p in Provider if p in configured and p not in current]
+                if flipped and current != configured:
+                    self._selection = flipped
+                # else: all selected or flip is empty — keep current selection
             else:
                 provider = PREFIX_TO_PROVIDER[prefix]
                 self._selection = [provider]
