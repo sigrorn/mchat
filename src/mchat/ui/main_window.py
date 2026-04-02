@@ -1118,7 +1118,7 @@ class MainWindow(QMainWindow):
     def _display_messages(self, messages: list[Message]) -> None:
         """Load messages into chat, grouping multi-provider responses as columns if in column mode."""
         if not self._column_mode:
-            self._display_messages(messages)
+            self._chat.load_messages(messages)
             return
 
         # Column mode: detect groups of consecutive assistant messages from
