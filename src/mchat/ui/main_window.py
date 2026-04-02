@@ -339,6 +339,13 @@ class MainWindow(QMainWindow):
         else:
             self._apply_combo_provider_style(p)
 
+    def _set_combo_retrying(self, p: Provider) -> None:
+        combo = self._combos[p]
+        combo.setStyleSheet(
+            "QComboBox { border: 2px solid #d04040; background-color: #ffe0e0; "
+            "font-weight: bold; }"
+        )
+
     def _update_input_color(self) -> None:
         if not self._router:
             return
@@ -986,6 +993,9 @@ class MainWindow(QMainWindow):
                 )
             )
             self._stream_worker.stream_error.connect(self._on_stream_error)
+            self._stream_worker.retrying.connect(
+                lambda attempt, mx, pid=provider_id: self._set_combo_retrying(pid)
+            )
             self._stream_worker.start()
         else:
             # Batch mode: collect silently, render when complete
@@ -1009,6 +1019,9 @@ class MainWindow(QMainWindow):
             )
             worker.stream_error.connect(
                 lambda error, pid=provider_id: self._on_multi_error(pid, error)
+            )
+            worker.retrying.connect(
+                lambda attempt, mx, pid=provider_id: self._set_combo_retrying(pid)
             )
             self._multi_workers[provider_id] = worker
             worker.start()

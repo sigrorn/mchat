@@ -5,10 +5,32 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QThread, Signal
 
 from mchat.models.message import Message, Provider
 from mchat.providers.base import BaseProvider
+
+# HTTP status codes considered transient (worth retrying)
+_TRANSIENT_CODES = {429, 503, 529}
+
+MAX_RETRIES = 3
+RETRY_DELAY_S = 5
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Check if an exception is a transient/retryable error."""
+    exc_str = str(exc).lower()
+    # Check for HTTP status codes in the exception
+    for code in _TRANSIENT_CODES:
+        if str(code) in str(exc):
+            return True
+    # Connection / timeout errors
+    for keyword in ("timeout", "connection", "temporarily", "overloaded", "rate limit", "rate_limit", "too many requests"):
+        if keyword in exc_str:
+            return True
+    return False
 
 
 class StreamWorker(QThread):
@@ -16,6 +38,8 @@ class StreamWorker(QThread):
     # full text, input_tokens, output_tokens, estimated
     stream_complete = Signal(str, int, int, bool)
     stream_error = Signal(str)
+    # Emitted when entering retry mode (attempt number, max retries)
+    retrying = Signal(int, int)
 
     def __init__(
         self,
@@ -28,15 +52,31 @@ class StreamWorker(QThread):
         self._provider = provider
         self._messages = messages
         self._model = model
+        self.last_error_transient: bool = False
 
     def run(self) -> None:
-        full_text = ""
-        try:
-            for token in self._provider.stream(self._messages, self._model):
-                full_text += token
-                self.token_received.emit(token)
-            usage = self._provider.last_usage or (0, 0)
-            estimated = self._provider.last_usage_estimated
-            self.stream_complete.emit(full_text, usage[0], usage[1], estimated)
-        except Exception as e:
-            self.stream_error.emit(str(e))
+        last_exc: Exception | None = None
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            full_text = ""
+            try:
+                for token in self._provider.stream(self._messages, self._model):
+                    full_text += token
+                    self.token_received.emit(token)
+                usage = self._provider.last_usage or (0, 0)
+                estimated = self._provider.last_usage_estimated
+                self.stream_complete.emit(full_text, usage[0], usage[1], estimated)
+                return  # success
+            except Exception as e:
+                last_exc = e
+                if _is_transient(e) and attempt < MAX_RETRIES:
+                    self.last_error_transient = True
+                    self.retrying.emit(attempt, MAX_RETRIES)
+                    time.sleep(RETRY_DELAY_S)
+                    continue
+                else:
+                    break
+
+        # All retries exhausted or non-transient error
+        self.last_error_transient = _is_transient(last_exc) if last_exc else False
+        self.stream_error.emit(str(last_exc))
