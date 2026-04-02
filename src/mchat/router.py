@@ -10,7 +10,8 @@ import re
 from mchat.models.message import Provider
 from mchat.providers.base import BaseProvider
 
-PREFIX_PATTERN = re.compile(
+# Single-word prefix pattern (used for iterative parsing)
+_WORD_PREFIX = re.compile(
     r"^(claude|gpt|gemini|perplexity|pplx|all|flipped)\s*[,:]\s*",
     re.IGNORECASE,
 )
@@ -26,6 +27,9 @@ PREFIX_TO_PROVIDER = {
     "pplx": Provider.PERPLEXITY,
 }
 
+# Special prefixes that are not combinable with others
+_SPECIAL_PREFIXES = {ALL, FLIPPED}
+
 
 class Router:
     def __init__(self, providers: dict[Provider, BaseProvider], default: Provider = Provider.CLAUDE) -> None:
@@ -35,28 +39,54 @@ class Router:
     def parse(self, user_input: str) -> tuple[list[Provider], str]:
         """Parse user input, returning (target provider list, cleaned message).
 
-        A provider prefix like ``claude,`` switches selection to that single
-        provider (sticky).  Without a prefix the current selection is used.
+        Supports multiple provider prefixes:
+            ``claude, gemini, what's your take?``
+        Parses provider names from the start until a non-provider word,
+        then everything after is the message.
+
+        ``all,`` and ``flipped,`` are special — not combinable with others.
         """
-        match = PREFIX_PATTERN.match(user_input)
-        if match:
+        remaining = user_input
+        collected: list[Provider] = []
+
+        # Try to match one or more provider prefixes
+        while True:
+            match = _WORD_PREFIX.match(remaining)
+            if not match:
+                break
             prefix = match.group(1).lower()
-            cleaned = user_input[match.end():].strip()
-            if prefix == ALL:
-                configured = [p for p in Provider if p in self._providers]
-                if configured:
-                    self._selection = configured
-            elif prefix == FLIPPED:
-                configured = set(p for p in Provider if p in self._providers)
-                current = set(self._selection)
-                flipped = [p for p in Provider if p in configured and p not in current]
-                if flipped and current != configured:
-                    self._selection = flipped
-                # else: all selected or flip is empty — keep current selection
-            else:
-                provider = PREFIX_TO_PROVIDER[prefix]
-                self._selection = [provider]
-            return list(self._selection), cleaned
+
+            # Special prefixes: handle alone, stop parsing
+            if prefix in _SPECIAL_PREFIXES:
+                if collected:
+                    # Hit 'all'/'flipped' after real providers — stop,
+                    # treat 'all'/'flipped' as part of the message
+                    break
+                cleaned = remaining[match.end():].strip()
+                if prefix == ALL:
+                    configured = [p for p in Provider if p in self._providers]
+                    if configured:
+                        self._selection = configured
+                elif prefix == FLIPPED:
+                    configured = set(p for p in Provider if p in self._providers)
+                    current = set(self._selection)
+                    flipped = [p for p in Provider if p in configured and p not in current]
+                    if flipped and current != configured:
+                        self._selection = flipped
+                return list(self._selection), cleaned
+
+            # Regular provider prefix
+            provider = PREFIX_TO_PROVIDER[prefix]
+            if provider not in collected:
+                collected.append(provider)
+            remaining = remaining[match.end():]
+
+        if collected:
+            message = remaining.strip()
+            self._selection = collected
+            return list(self._selection), message
+
+        # No prefix matched — use current selection
         return list(self._selection), user_input
 
     def set_selection(self, providers: list[Provider]) -> None:

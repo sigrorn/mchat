@@ -144,3 +144,50 @@ class TestRouter:
         targets, text = router.parse("flipped, hello")
         assert text == "hello"
         assert set(targets) == original
+
+    # --- Multi-provider prefix tests ---
+
+    def test_multi_provider_prefix(self, router):
+        targets, text = router.parse("claude, gemini, what's your take?")
+        assert targets == [Provider.CLAUDE, Provider.GEMINI]
+        assert text == "what's your take?"
+
+    def test_multi_provider_sticky(self, router):
+        router.parse("claude, gemini, first question")
+        targets, text = router.parse("follow up")
+        assert targets == [Provider.CLAUDE, Provider.GEMINI]
+        assert text == "follow up"
+
+    def test_multi_provider_three(self, router):
+        targets, text = router.parse("gpt, claude, pplx, compare these")
+        assert set(targets) == {Provider.OPENAI, Provider.CLAUDE, Provider.PERPLEXITY}
+        assert text == "compare these"
+
+    def test_multi_provider_no_message(self, router):
+        """All words are providers, no message — selection changes but message is empty."""
+        targets, text = router.parse("claude, gemini,")
+        assert targets == [Provider.CLAUDE, Provider.GEMINI]
+        assert text == ""
+
+    def test_all_not_combinable(self, router, mock_providers):
+        """'all,' at the start is not combinable — handles alone."""
+        targets, text = router.parse("all, claude, hello")
+        assert set(targets) == set(mock_providers.keys())
+        assert text == "claude, hello"
+
+    def test_provider_then_all_in_message(self, router):
+        """'all' after real providers is treated as message text."""
+        targets, text = router.parse("claude, all, hello")
+        assert targets == [Provider.CLAUDE]
+        assert text == "all, hello"
+
+    def test_mid_sentence_provider_not_parsed(self, router):
+        """Provider names mid-sentence are not parsed as prefixes."""
+        targets, text = router.parse("gpt, what about claude, do you agree?")
+        assert targets == [Provider.OPENAI]
+        assert text == "what about claude, do you agree?"
+
+    def test_duplicate_provider_deduplicated(self, router):
+        targets, text = router.parse("claude, claude, hello")
+        assert targets == [Provider.CLAUDE]
+        assert text == "hello"

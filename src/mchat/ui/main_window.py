@@ -1022,6 +1022,16 @@ class MainWindow(QMainWindow):
         # Route message
         targets, cleaned_text = self._router.parse(text)
 
+        # If provider prefixes consumed everything, treat as selection change
+        if not cleaned_text.strip() and targets != self._router.selection:
+            self._sync_checkboxes_from_selection()
+            self._update_input_placeholder()
+            self._update_input_color()
+            self._save_selection()
+            names = ", ".join(_PROVIDER_DISPLAY[p] for p in targets)
+            self._chat.add_note(f"selected: {names}")
+            return
+
         # Validate all targets are configured
         configured = set(self._router._providers.keys())
         missing = [p for p in targets if p not in configured]
