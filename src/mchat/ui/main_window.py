@@ -41,6 +41,9 @@ from mchat.workers.stream_worker import StreamWorker
 # Display names for provider labels in "X's take:" prefixes
 _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
 
+# Stable display order for multi-provider responses
+_PROVIDER_ORDER = [Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI, Provider.PERPLEXITY]
+
 
 class MainWindow(QMainWindow):
     def __init__(self, config: Config, db: Database) -> None:
@@ -1110,7 +1113,7 @@ class MainWindow(QMainWindow):
         self._set_combo_waiting(provider_id, False)
         self._multi_workers.pop(provider_id, None)
 
-        # Update spend regardless of display mode
+        # Update spend
         cost = estimate_cost(model, input_tokens, output_tokens)
         if cost is not None and self._current_conv:
             self._db.add_conversation_spend(
@@ -1118,40 +1121,39 @@ class MainWindow(QMainWindow):
             )
         self._update_spend_labels()
 
-        if self._column_mode and self._multi_workers:
-            # Column mode: buffer until all providers are done
-            label = _PROVIDER_DISPLAY[provider_id]
-            self._column_buffer[provider_id] = (
-                label, full_text, model, input_tokens, output_tokens, estimated
-            )
-            return
+        # Always buffer — render in stable order when all are done
+        label = _PROVIDER_DISPLAY[provider_id]
+        self._column_buffer[provider_id] = (
+            label, full_text, model, input_tokens, output_tokens, estimated
+        )
 
-        if self._column_mode and not self._multi_workers:
-            # Last provider arrived — add this one to buffer too, then render table
-            label = _PROVIDER_DISPLAY[provider_id]
-            self._column_buffer[provider_id] = (
-                label, full_text, model, input_tokens, output_tokens, estimated
-            )
-            self._render_column_responses()
-        else:
-            # List mode: render immediately as before
-            label = f"{_PROVIDER_DISPLAY[provider_id]}'s take"
-            prefixed = f"**{label}:**\n\n{full_text}"
+        if not self._multi_workers:
+            # All providers done — render in stable order
+            if self._column_mode:
+                self._render_column_responses()
+            else:
+                self._render_list_responses()
+            self._column_buffer.clear()
+            self._input.set_enabled(True)
+            self._update_input_placeholder()
+            self._update_input_color()
+
+    def _render_list_responses(self) -> None:
+        """Render buffered multi-provider responses as a vertical list in stable order."""
+        ordered = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
+        for p in ordered:
+            label, full_text, model, inp, out, est = self._column_buffer[p]
+            prefixed = f"**{label}'s take:**\n\n{full_text}"
             msg = Message(
                 role=Role.ASSISTANT,
                 content=prefixed,
-                provider=provider_id,
+                provider=p,
                 model=model,
                 conversation_id=self._current_conv.id,
             )
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
             self._chat.add_message(msg)
-
-        if not self._multi_workers:
-            self._input.set_enabled(True)
-            self._update_input_placeholder()
-            self._update_input_color()
 
     def _render_column_responses(self) -> None:
         """Render buffered multi-provider responses as a side-by-side table."""
@@ -1160,8 +1162,8 @@ class MainWindow(QMainWindow):
 
         md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
 
-        # Build table HTML — one column per provider
-        providers = list(self._column_buffer.keys())
+        # Build table HTML — one column per provider, in stable order
+        providers = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
         header_cells = []
         body_cells = []
         for p in providers:
@@ -1208,8 +1210,6 @@ class MainWindow(QMainWindow):
             conversation_id=self._current_conv.id,
         )
         self._chat._insert_column_table(table_html, providers, self)
-
-        self._column_buffer.clear()
 
     def _on_multi_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)
