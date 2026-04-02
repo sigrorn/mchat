@@ -600,6 +600,8 @@ class MainWindow(QMainWindow):
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
         "  //providers           — list available providers and config status\n"
+        "  //columns (//cols)    — show multi-provider responses side by side\n"
+        "  //lines               — show multi-provider responses as a list (default)\n"
         "  //incremental         — render markdown progressively while streaming\n"
         "  //batch               — render on completion (default)\n"
         "  //help                — show this help"
@@ -676,6 +678,17 @@ class MainWindow(QMainWindow):
             return self._handle_select(arg)
         if cmd == "//providers":
             return self._handle_providers()
+
+        if cmd in ("//columns", "//cols"):
+            if not self._column_mode:
+                self._toggle_column_mode()
+            self._chat.add_note("column layout enabled")
+            return True
+        if cmd == "//lines":
+            if self._column_mode:
+                self._toggle_column_mode()
+            self._chat.add_note("list layout enabled")
+            return True
 
         if cmd == "//incremental":
             self._chat._incremental = True
