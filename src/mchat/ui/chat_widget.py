@@ -105,51 +105,10 @@ class ChatWidget(QTextEdit):
         self.document().setDefaultStyleSheet(_DOC_CSS)
         self._apply_default_font()
 
-    def paintEvent(self, event) -> None:
-        """Paint block backgrounds manually before Qt renders text.
-
-        Qt's default block format background rendering is unreliable —
-        it doesn't always cover the full line width for wrapped text and
-        paragraph endings. We paint coloured rectangles for each visible
-        block ourselves.
-        """
-        from PySide6.QtCore import QPointF
-        from PySide6.QtGui import QPainter
-
-        painter = QPainter(self.viewport())
-        doc = self.document()
-        viewport_rect = self.viewport().rect()
-
-        # QTextEdit doesn't have contentOffset() — compute from scrollbars
-        offset = QPointF(
-            -self.horizontalScrollBar().value(),
-            -self.verticalScrollBar().value(),
-        )
-
-        block = doc.begin()
-        while block.isValid():
-            layout = block.layout()
-            if layout:
-                block_rect = doc.documentLayout().blockBoundingRect(block)
-                block_rect.translate(offset)
-
-                # Only paint visible blocks
-                if block_rect.top() > viewport_rect.bottom():
-                    break
-                if block_rect.bottom() >= viewport_rect.top():
-                    bg = block.blockFormat().background()
-                    if bg.style() != 0:  # not NoBrush
-                        # Extend to full viewport width
-                        fill_rect = block_rect.toRect()
-                        fill_rect.setLeft(0)
-                        fill_rect.setRight(viewport_rect.width())
-                        painter.fillRect(fill_rect, bg)
-            block = block.next()
-
-        painter.end()
-
-        # Now let Qt render the text on top
-        super().paintEvent(event)
+    def resizeEvent(self, event) -> None:
+        """Keep document width matching viewport so block backgrounds span full width."""
+        super().resizeEvent(event)
+        self.document().setTextWidth(self.viewport().width())
 
     def mousePressEvent(self, event) -> None:
         """Handle clicks on mark links (mchat-mark:<index>)."""
