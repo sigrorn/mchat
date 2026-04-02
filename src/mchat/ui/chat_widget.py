@@ -13,7 +13,7 @@ import re
 import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextLength, QTextTable
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextLength
 from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role

@@ -5,18 +5,23 @@ A multi-provider LLM chat application with a desktop UI. Chat with Claude, GPT, 
 ## Features
 
 - **4 providers** — Claude, GPT, Gemini, and Perplexity, all in one chat
-- **Multi-provider targeting** — `//select claude, gpt, gemini` sends to multiple providers simultaneously
+- **Flexible targeting** — prefix a message with a provider name, use `//select` for multi-provider, or `all,` for everyone
 - **Shared context** — each provider sees the full conversation transcript, including other providers' responses
-- **Streaming responses** — tokens appear in real-time with optional incremental markdown rendering
+- **Batch rendering** — responses appear fully formatted when complete
 - **Markdown formatting** — tables, code blocks, bold, lists rendered inline
+- **Column or list layout** — multi-provider responses side by side or stacked
 - **Persistent chat history** — conversations saved locally in SQLite
-- **Per-conversation cost tracking** — estimated spend shown per provider in the status bar
+- **Per-conversation cost tracking** — estimated spend shown per provider
 - **Dynamic model selection** — model lists fetched from APIs, switchable from the status bar
-- **Context marks** — `//mark` and `//limit` to control how much history is sent to providers
-- **Configurable system prompt** — snapshotted per conversation at creation time
+- **Context control** — `//limit` to restrict how much history is sent to providers
+- **Message management** — `//pop` to remove, `//hide`/`//unhide` to temporarily suppress messages
+- **Auto-retry** — transient provider errors automatically retried up to 3 times
+- **Manual retry** — `//retry` to re-attempt failed requests
+- **Configurable system prompt** — per-conversation and per-provider
 - **HTML export** — save any conversation as a formatted HTML file (Ctrl+S or right-click)
 - **Font zoom** — Ctrl+/- to resize, Ctrl+0 to reset
 - **Customisable colours** — per-provider background colours editable in Settings
+- **Message numbers** — user messages show their position for easy reference with `//limit`
 
 ## Setup
 
@@ -45,7 +50,8 @@ Settings (gear icon or via config file):
 - **API keys** — one per provider
 - **Default provider** — which provider receives messages by default
 - **Default model** — per provider, also switchable from the status bar
-- **System prompt** — sent at the start of new chats (does not affect existing conversations)
+- **System prompt** — sent at the start of new chats (snapshotted per conversation)
+- **Provider-specific prompts** — additional instructions per provider (always uses current config)
 - **Font size** — also adjustable with Ctrl+/- shortcuts
 - **Background colours** — per-provider and user message colours
 
@@ -63,21 +69,27 @@ mchat
 - `gpt, <message>` — send to GPT
 - `gemini, <message>` — send to Gemini
 - `perplexity, <message>` — send to Perplexity (also: `pplx,`)
+- `all, <message>` — send to all configured providers
 - No prefix — send to current selection (sticky per conversation)
+
+Use the checkboxes in the status bar to select multiple providers, or `//select`.
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `//select <providers>` | Set target providers (e.g. `//select gpt, claude, gemini`) |
+| `//limit <N>` | Only send chat from message N onwards |
+| `//limit last` | Limit to the last request sent to providers |
+| `//limit ALL` | Remove the limit, send full history |
+| `//pop` | Remove the last request and its responses |
+| `//hide` | Hide the last request+responses, copy request to input |
+| `//unhide` | Unhide all hidden messages |
+| `//retry` | Re-attempt the last failed request |
+| `//select <providers>` | Set target providers (e.g. `//select gpt, claude`) |
 | `//select all` | Target all configured providers |
 | `//providers` | List available providers and config status |
-| `//mark [tagname]` | Mark this point in the chat |
-| `//limit [tagname]` | Only send chat from that mark onwards |
-| `//limit ALL` | Remove the limit, send full history |
-| `//marks` | List all marks (click to scroll) |
-| `//incremental` | Render markdown progressively while streaming |
-| `//batch` | Render on completion (default) |
+| `//columns` (`//cols`) | Show multi-provider responses side by side |
+| `//lines` | Show multi-provider responses as a list (default) |
 | `//help` | Show all commands |
 
 ### Keyboard shortcuts
@@ -88,6 +100,13 @@ mchat
 | Ctrl+= / Ctrl++ | Increase font size |
 | Ctrl+- | Decrease font size |
 | Ctrl+0 | Reset font size to default |
+
+### Sidebar
+
+Right-click a conversation for:
+- **Rename** — change the conversation title
+- **Save as HTML** — export to a formatted HTML file
+- **Delete** — remove the conversation
 
 ### Copying text
 
@@ -100,6 +119,8 @@ The capital of France is Paris.
 //gemini (2.5-flash)
 Paris is the capital of France.
 ```
+
+Pasting text with these prefixes into the input box automatically strips them.
 
 ## Development
 
