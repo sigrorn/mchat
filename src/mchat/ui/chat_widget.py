@@ -106,50 +106,56 @@ class ChatWidget(QTextEdit):
         self._apply_default_font()
 
     def paintEvent(self, event) -> None:
-        """Paint block backgrounds manually before Qt renders text.
+        """Let Qt render normally, then extend block backgrounds to full width.
 
-        Qt's default block format background rendering is unreliable —
-        it doesn't always cover the full line width for wrapped text and
-        paragraph endings. We paint coloured rectangles for each visible
-        block ourselves.
+        Qt renders block backgrounds only within the text layout area.
+        We paint over the right margin to extend each block's background
+        colour to the full viewport width.
         """
+        # Let Qt render everything first (text + its block backgrounds)
+        super().paintEvent(event)
+
         from PySide6.QtCore import QPointF
         from PySide6.QtGui import QPainter
 
         painter = QPainter(self.viewport())
         doc = self.document()
-        viewport_rect = self.viewport().rect()
+        viewport_width = self.viewport().width()
 
-        # QTextEdit doesn't have contentOffset() — compute from scrollbars
+        # Compute scroll offset
         offset = QPointF(
             -self.horizontalScrollBar().value(),
             -self.verticalScrollBar().value(),
         )
 
         block = doc.begin()
+        vp_bottom = self.viewport().rect().bottom()
         while block.isValid():
             layout = block.layout()
             if layout:
                 block_rect = doc.documentLayout().blockBoundingRect(block)
                 block_rect.translate(offset)
 
-                # Only paint visible blocks
-                if block_rect.top() > viewport_rect.bottom():
+                if block_rect.top() > vp_bottom:
                     break
-                if block_rect.bottom() >= viewport_rect.top():
+                if block_rect.bottom() >= 0:
                     bg = block.blockFormat().background()
                     if bg.style() != 0:  # not NoBrush
-                        # Extend to full viewport width
-                        fill_rect = block_rect.toRect()
-                        fill_rect.setLeft(0)
-                        fill_rect.setRight(viewport_rect.width())
-                        painter.fillRect(fill_rect, bg)
+                        r = block_rect.toRect()
+                        # Fill the right margin (from where Qt's bg ends to viewport edge)
+                        text_right = r.right()
+                        if text_right < viewport_width:
+                            from PySide6.QtCore import QRect
+                            margin_rect = QRect(text_right, r.top(),
+                                                viewport_width - text_right, r.height())
+                            painter.fillRect(margin_rect, bg)
+                        # Also fill left margin
+                        if r.left() > 0:
+                            left_rect = QRect(0, r.top(), r.left(), r.height())
+                            painter.fillRect(left_rect, bg)
             block = block.next()
 
         painter.end()
-
-        # Now let Qt render the text on top
-        super().paintEvent(event)
 
     def mousePressEvent(self, event) -> None:
         """Handle clicks on mark links (mchat-mark:<index>)."""
