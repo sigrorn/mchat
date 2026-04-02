@@ -113,12 +113,18 @@ class ChatWidget(QTextEdit):
         paragraph endings. We paint coloured rectangles for each visible
         block ourselves.
         """
+        from PySide6.QtCore import QPointF
         from PySide6.QtGui import QPainter
 
         painter = QPainter(self.viewport())
         doc = self.document()
         viewport_rect = self.viewport().rect()
-        offset = self.contentOffset()
+
+        # QTextEdit doesn't have contentOffset() — compute from scrollbars
+        offset = QPointF(
+            -self.horizontalScrollBar().value(),
+            -self.verticalScrollBar().value(),
+        )
 
         block = doc.begin()
         while block.isValid():
