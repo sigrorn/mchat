@@ -13,7 +13,7 @@ import re
 import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor, QTextLength
+from PySide6.QtGui import QBrush, QColor, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextLength
 from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role
@@ -160,6 +160,11 @@ class ChatWidget(QTextEdit):
         """Apply background colour and role to all blocks and table cells in range."""
         doc = self.document()
         tables_seen: set[int] = set()  # keyed by document position of table start
+
+        # Char format to clear background on all text fragments
+        clear_bg = QTextCharFormat()
+        clear_bg.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
             if not block.isValid():
@@ -167,6 +172,11 @@ class ChatWidget(QTextEdit):
             bc = QTextCursor(block)
             bc.setBlockFormat(block_fmt)
             self._block_roles[bn] = info
+
+            # Clear char-level backgrounds so block background shows through
+            bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            bc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            bc.mergeCharFormat(clear_bg)
 
             # If this block is inside a table, colour all cells
             table = bc.currentTable()
