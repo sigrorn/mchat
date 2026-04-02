@@ -60,13 +60,17 @@ class MainWindow(QMainWindow):
 
         self._init_providers()
         self._build_ui()
-        self._populate_model_combos()
+        self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
         self._setup_shortcuts()
         self._load_conversations()
         self._update_input_placeholder()
         self._update_input_color()
+
+        # Fetch live model lists in background after window is shown
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._populate_model_combos_async)
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
@@ -191,32 +195,85 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(right, stretch=1)
 
+    def _set_combo_models(self, p: Provider, models: list[str]) -> None:
+        """Set a combo's model list, preserving the current selection."""
+        combo = self._combos[p]
+        meta = PROVIDER_META[p.value]
+        current = combo.currentText() or self._config.get(meta["model_key"])
+        combo.blockSignals(True)
+        combo.clear()
+        if models:
+            combo.addItems(models)
+        if current and combo.findText(current) < 0:
+            combo.insertItem(0, current)
+        if not combo.count() and current:
+            combo.addItem(current)
+        idx = combo.findText(current)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        providers = self._router._providers if self._router else {}
+        combo.setEnabled(p in providers)
+        combo.blockSignals(False)
+
+        cb = self._checkboxes[p]
+        cb.setEnabled(p in providers)
+
+    def _populate_model_combos_fast(self) -> None:
+        """Fill combos with config defaults only — no API calls."""
+        for p in Provider:
+            meta = PROVIDER_META[p.value]
+            current = self._config.get(meta["model_key"])
+            self._set_combo_models(p, [current] if current else [])
+
+    def _populate_model_combos_async(self) -> None:
+        """Fetch live model lists in a background thread, update combos when done."""
+        import concurrent.futures
+
+        providers = self._router._providers if self._router else {}
+        if not providers:
+            return
+
+        def fetch_all() -> dict[Provider, list[str]]:
+            results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                futures = {
+                    pool.submit(prov.list_models): pid
+                    for pid, prov in providers.items()
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    pid = futures[future]
+                    try:
+                        results[pid] = future.result()
+                    except Exception:
+                        results[pid] = []
+            return results
+
+        from PySide6.QtCore import QThread, Signal
+
+        class _ModelFetcher(QThread):
+            done = Signal(dict)
+
+            def run(self_inner):
+                self_inner.done.emit(fetch_all())
+
+        self._model_fetcher = _ModelFetcher()
+        self._model_fetcher.done.connect(self._on_models_fetched)
+        self._model_fetcher.start()
+
+    def _on_models_fetched(self, results: dict) -> None:
+        """Called on main thread when background model fetch completes."""
+        for p, models in results.items():
+            if models:
+                self._set_combo_models(p, models)
+        self._model_fetcher = None
+
     def _populate_model_combos(self) -> None:
-        """Fill model combo boxes from live providers."""
+        """Full synchronous populate — used when opening Settings."""
         providers = self._router._providers if self._router else {}
         for p in Provider:
-            combo = self._combos[p]
-            meta = PROVIDER_META[p.value]
-            combo.blockSignals(True)
-            combo.clear()
             provider = providers.get(p)
             models = provider.list_models() if provider else []
-            current = self._config.get(meta["model_key"])
-            if models:
-                combo.addItems(models)
-            if current and combo.findText(current) < 0:
-                combo.insertItem(0, current)
-            if not combo.count() and current:
-                combo.addItem(current)
-            idx = combo.findText(current)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            combo.setEnabled(provider is not None)
-            combo.blockSignals(False)
-
-            # Enable/disable checkbox based on provider availability
-            cb = self._checkboxes[p]
-            cb.setEnabled(provider is not None)
+            self._set_combo_models(p, models)
 
     def _sync_checkboxes_from_selection(self) -> None:
         """Update checkboxes to reflect the router's current selection."""
