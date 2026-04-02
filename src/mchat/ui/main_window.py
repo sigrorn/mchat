@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QThread, Signal
 
         class _ModelFetcher(QThread):
-            done = Signal(dict)
+            done = Signal(object)
 
             def run(self_inner):
                 self_inner.done.emit(fetch_all())
