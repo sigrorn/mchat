@@ -144,6 +144,26 @@ class Database:
             updated_at=datetime.fromisoformat(now),
         )
 
+    def get_conversation(self, conv_id: int) -> Conversation | None:
+        """Fetch a single conversation by ID."""
+        row = self._conn.execute(
+            "SELECT id, title, system_prompt, last_provider, "
+            "limit_mark, created_at, updated_at "
+            "FROM conversations WHERE id = ?",
+            (conv_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return Conversation(
+            id=row[0],
+            title=row[1],
+            system_prompt=row[2] or "",
+            last_provider=row[3] or "",
+            limit_mark=row[4],
+            created_at=datetime.fromisoformat(row[5]),
+            updated_at=datetime.fromisoformat(row[6]),
+        )
+
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "

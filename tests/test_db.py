@@ -28,6 +28,16 @@ class TestDatabase:
         assert convs[0].title == "Test Chat"
         assert convs[0].id == conv.id
 
+    def test_get_conversation(self, db):
+        conv = db.create_conversation("Test Chat")
+        fetched = db.get_conversation(conv.id)
+        assert fetched is not None
+        assert fetched.title == "Test Chat"
+        assert fetched.id == conv.id
+
+    def test_get_conversation_missing(self, db):
+        assert db.get_conversation(9999) is None
+
     def test_delete_conversation(self, db):
         conv = db.create_conversation("To Delete")
         db.delete_conversation(conv.id)

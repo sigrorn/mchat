@@ -230,9 +230,13 @@ class ChatWidget(QTextEdit):
         self._message_positions.clear()
         self._block_roles.clear()
         self._is_empty = True
-        for msg in saved:
-            self._messages.append(msg)
-            self._insert_rendered(msg)
+        self.setUpdatesEnabled(False)
+        try:
+            for msg in saved:
+                self._messages.append(msg)
+                self._insert_rendered(msg)
+        finally:
+            self.setUpdatesEnabled(True)
         self._scroll_to_bottom()
 
     # ------------------------------------------------------------------
@@ -394,6 +398,18 @@ class ChatWidget(QTextEdit):
     def add_message(self, message: Message) -> None:
         self._messages.append(message)
         self._insert_rendered(message)
+        self._scroll_to_bottom()
+
+    def load_messages(self, messages: list[Message]) -> None:
+        """Bulk-load messages with suppressed layout updates for speed."""
+        self.clear_messages()
+        self.setUpdatesEnabled(False)
+        try:
+            for msg in messages:
+                self._messages.append(msg)
+                self._insert_rendered(msg)
+        finally:
+            self.setUpdatesEnabled(True)
         self._scroll_to_bottom()
 
     def begin_streaming(self, message: Message) -> None:

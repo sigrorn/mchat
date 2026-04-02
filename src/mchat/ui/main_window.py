@@ -427,11 +427,10 @@ class MainWindow(QMainWindow):
             self._sidebar.select_conversation(conversations[0].id)
 
     def _on_conversation_selected(self, conv_id: int) -> None:
-        messages = self._db.get_messages(conv_id)
-        convs = self._db.list_conversations()
-        conv = next((c for c in convs if c.id == conv_id), None)
+        conv = self._db.get_conversation(conv_id)
         if not conv:
             return
+        messages = self._db.get_messages(conv_id)
         self._current_conv = conv
         self._current_conv.messages = messages
 
@@ -448,9 +447,7 @@ class MainWindow(QMainWindow):
         self._update_input_color()
         self._update_spend_labels()
 
-        self._chat.clear_messages()
-        for msg in messages:
-            self._chat.add_message(msg)
+        self._chat.load_messages(messages)
 
     def _on_new_chat(self) -> None:
         system_prompt = self._config.get("system_prompt")
@@ -729,11 +726,7 @@ class MainWindow(QMainWindow):
         # Remove from in-memory list
         del self._current_conv.messages[last_user_idx:]
 
-        # Rebuild chat display
-        self._chat.clear_messages()
-        for msg in self._current_conv.messages:
-            self._chat.add_message(msg)
-
+        self._chat.load_messages(self._current_conv.messages)
         self._chat.add_note(f"popped {count} message(s)")
         return True
 
@@ -767,11 +760,7 @@ class MainWindow(QMainWindow):
         # Remove from in-memory list (get_messages filters hidden)
         del self._current_conv.messages[last_user_idx:]
 
-        # Rebuild chat display
-        self._chat.clear_messages()
-        for msg in self._current_conv.messages:
-            self._chat.add_message(msg)
-
+        self._chat.load_messages(self._current_conv.messages)
         self._chat.add_note(f"hidden {count} message(s)")
 
         # Copy the user's request text back into the input box
@@ -788,11 +777,7 @@ class MainWindow(QMainWindow):
         # Reload all messages (including previously hidden)
         self._current_conv.messages = self._db.get_messages(self._current_conv.id)
 
-        # Rebuild chat display
-        self._chat.clear_messages()
-        for msg in self._current_conv.messages:
-            self._chat.add_message(msg)
-
+        self._chat.load_messages(self._current_conv.messages)
         self._chat.add_note("all hidden messages restored")
         return True
 
