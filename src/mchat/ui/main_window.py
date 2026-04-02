@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
         self._update_input_color()
         self._update_spend_labels()
 
-        self._chat.load_messages(messages)
+        self._display_messages(messages)
 
     def _on_new_chat(self) -> None:
         system_prompt = self._config.get("system_prompt")
@@ -724,7 +724,7 @@ class MainWindow(QMainWindow):
         # Remove from in-memory list
         del self._current_conv.messages[last_user_idx:]
 
-        self._chat.load_messages(self._current_conv.messages)
+        self._display_messages(self._current_conv.messages)
         self._chat.add_note(f"popped {count} message(s)")
         return True
 
@@ -758,7 +758,7 @@ class MainWindow(QMainWindow):
         # Remove from in-memory list (get_messages filters hidden)
         del self._current_conv.messages[last_user_idx:]
 
-        self._chat.load_messages(self._current_conv.messages)
+        self._display_messages(self._current_conv.messages)
         self._chat.add_note(f"hidden {count} message(s)")
 
         # Copy the user's request text back into the input box
@@ -775,7 +775,7 @@ class MainWindow(QMainWindow):
         # Reload all messages (including previously hidden)
         self._current_conv.messages = self._db.get_messages(self._current_conv.id)
 
-        self._chat.load_messages(self._current_conv.messages)
+        self._display_messages(self._current_conv.messages)
         self._chat.add_note("all hidden messages restored")
         return True
 
@@ -801,7 +801,7 @@ class MainWindow(QMainWindow):
             self._current_conv.messages = [
                 m for m in self._current_conv.messages if m.id not in hidden_set
             ]
-            self._chat.load_messages(self._current_conv.messages)
+            self._display_messages(self._current_conv.messages)
 
         # Re-send to failed providers using stashed contexts
         failed_providers = list(self._retry_failed.keys())
@@ -1114,6 +1114,79 @@ class MainWindow(QMainWindow):
             self._input.set_enabled(True)
             self._update_input_placeholder()
             self._update_input_color()
+
+    def _display_messages(self, messages: list[Message]) -> None:
+        """Load messages into chat, grouping multi-provider responses as columns if in column mode."""
+        if not self._column_mode:
+            self._display_messages(messages)
+            return
+
+        # Column mode: detect groups of consecutive assistant messages from
+        # different providers and render them as column tables
+        import markdown as md_lib
+        self._chat.clear_messages()
+        self._chat.setUpdatesEnabled(False)
+        try:
+            i = 0
+            while i < len(messages):
+                msg = messages[i]
+                if msg.role != Role.ASSISTANT:
+                    self._chat._messages.append(msg)
+                    self._chat._insert_rendered(msg)
+                    i += 1
+                    continue
+
+                # Collect consecutive assistant messages from different providers
+                group: list[Message] = [msg]
+                seen_providers = {msg.provider}
+                j = i + 1
+                while j < len(messages):
+                    nxt = messages[j]
+                    if nxt.role != Role.ASSISTANT or nxt.provider in seen_providers:
+                        break
+                    group.append(nxt)
+                    seen_providers.add(nxt.provider)
+                    j += 1
+
+                if len(group) > 1:
+                    # Multi-provider group — render as column table
+                    md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
+                    ordered = sorted(group, key=lambda m: _PROVIDER_ORDER.index(m.provider) if m.provider in _PROVIDER_ORDER else 99)
+                    header_cells = []
+                    body_cells = []
+                    provider_colors = []
+                    for m in ordered:
+                        label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
+                        color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
+                        provider_colors.append(color)
+                        md.reset()
+                        rendered = md.convert(m.content)
+                        header_cells.append(
+                            f'<th style="background-color:{color}; padding:8px; '
+                            f'text-align:left; vertical-align:top;">{label}</th>'
+                        )
+                        body_cells.append(
+                            f'<td style="background-color:{color}; padding:8px; '
+                            f'vertical-align:top;">{rendered}</td>'
+                        )
+                    table_html = (
+                        f'<table style="width:100%; border-collapse:collapse;">'
+                        f'<tr>{"".join(header_cells)}</tr>'
+                        f'<tr>{"".join(body_cells)}</tr>'
+                        f'</table>'
+                    )
+                    for m in ordered:
+                        self._chat._messages.append(m)
+                    self._chat._insert_column_table(table_html, provider_colors)
+                else:
+                    # Single assistant message — render normally
+                    self._chat._messages.append(msg)
+                    self._chat._insert_rendered(msg)
+
+                i = j
+        finally:
+            self._chat.setUpdatesEnabled(True)
+        self._chat._scroll_to_bottom()
 
     def _render_list_responses(self) -> None:
         """Render buffered multi-provider responses as a vertical list in stable order."""
