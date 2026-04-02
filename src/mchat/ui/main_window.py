@@ -1116,13 +1116,11 @@ class MainWindow(QMainWindow):
             self._update_input_color()
 
     def _display_messages(self, messages: list[Message]) -> None:
-        """Load messages into chat, grouping multi-provider responses as columns if in column mode."""
-        if not self._column_mode:
-            self._chat.load_messages(messages)
-            return
+        """Load messages into chat, detecting multi-provider groups.
 
-        # Column mode: detect groups of consecutive assistant messages from
-        # different providers and render them as column tables
+        In list mode: adds 'X's take:' heading for multi-provider groups.
+        In column mode: renders multi-provider groups as column tables.
+        """
         import markdown as md_lib
         self._chat.clear_messages()
         self._chat.setUpdatesEnabled(False)
@@ -1149,37 +1147,51 @@ class MainWindow(QMainWindow):
                     j += 1
 
                 if len(group) > 1:
-                    # Multi-provider group — render as column table
-                    md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
                     ordered = sorted(group, key=lambda m: _PROVIDER_ORDER.index(m.provider) if m.provider in _PROVIDER_ORDER else 99)
-                    header_cells = []
-                    body_cells = []
-                    provider_colors = []
-                    for m in ordered:
-                        label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
-                        color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
-                        provider_colors.append(color)
-                        md.reset()
-                        rendered = md.convert(m.content)
-                        header_cells.append(
-                            f'<th style="background-color:{color}; padding:8px; '
-                            f'text-align:left; vertical-align:top;">{label}\'s take</th>'
+
+                    if self._column_mode:
+                        # Column table
+                        md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
+                        header_cells = []
+                        body_cells = []
+                        provider_colors = []
+                        for m in ordered:
+                            label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
+                            color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
+                            provider_colors.append(color)
+                            md.reset()
+                            rendered = md.convert(m.content)
+                            header_cells.append(
+                                f'<th style="background-color:{color}; padding:8px; '
+                                f'text-align:left; vertical-align:top;">{label}\'s take</th>'
+                            )
+                            body_cells.append(
+                                f'<td style="background-color:{color}; padding:8px; '
+                                f'vertical-align:top;">{rendered}</td>'
+                            )
+                        table_html = (
+                            f'<table style="width:100%; border-collapse:collapse;">'
+                            f'<tr>{"".join(header_cells)}</tr>'
+                            f'<tr>{"".join(body_cells)}</tr>'
+                            f'</table>'
                         )
-                        body_cells.append(
-                            f'<td style="background-color:{color}; padding:8px; '
-                            f'vertical-align:top;">{rendered}</td>'
-                        )
-                    table_html = (
-                        f'<table style="width:100%; border-collapse:collapse;">'
-                        f'<tr>{"".join(header_cells)}</tr>'
-                        f'<tr>{"".join(body_cells)}</tr>'
-                        f'</table>'
-                    )
-                    for m in ordered:
-                        self._chat._messages.append(m)
-                    self._chat._insert_column_table(table_html, provider_colors)
+                        for m in ordered:
+                            self._chat._messages.append(m)
+                        self._chat._insert_column_table(table_html, provider_colors)
+                    else:
+                        # List mode with headings
+                        for m in ordered:
+                            label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
+                            display_msg = Message(
+                                role=m.role,
+                                content=f"**{label}'s take:**\n\n{m.content}",
+                                provider=m.provider, model=m.model,
+                                conversation_id=m.conversation_id, id=m.id,
+                            )
+                            self._chat._messages.append(m)
+                            self._chat._insert_rendered(display_msg)
                 else:
-                    # Single assistant message — render normally
+                    # Single assistant message — render as-is
                     self._chat._messages.append(msg)
                     self._chat._insert_rendered(msg)
 
@@ -1193,16 +1205,23 @@ class MainWindow(QMainWindow):
         ordered = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
         for p in ordered:
             label, full_text, model, inp, out, est = self._column_buffer[p]
-            prefixed = f"**{label}'s take:**\n\n{full_text}"
+            # Store raw content — heading is added at display time only
             msg = Message(
                 role=Role.ASSISTANT,
-                content=prefixed,
+                content=full_text,
                 provider=p,
                 model=model,
                 conversation_id=self._current_conv.id,
             )
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
+            # Display with heading
+            display_msg = Message(
+                role=msg.role, content=f"**{label}'s take:**\n\n{full_text}",
+                provider=msg.provider, model=msg.model,
+                conversation_id=msg.conversation_id, id=msg.id,
+            )
+            self._chat.add_message(display_msg)
             self._chat.add_message(msg)
 
     def _render_column_responses(self) -> None:
@@ -1243,7 +1262,7 @@ class MainWindow(QMainWindow):
             label, full_text, model, inp, out, est = self._column_buffer[p]
             msg = Message(
                 role=Role.ASSISTANT,
-                content=f"**{label}'s take:**\n\n{full_text}",
+                content=full_text,
                 provider=p,
                 model=model,
                 conversation_id=self._current_conv.id,

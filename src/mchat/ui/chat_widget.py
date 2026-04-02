@@ -397,6 +397,8 @@ class ChatWidget(QTextEdit):
 
         # Apply backgrounds programmatically — Qt ignores most inline CSS
         doc = self.document()
+        clear_bg = QTextCharFormat()
+        clear_bg.setBackground(QBrush(Qt.BrushStyle.NoBrush))
         tables_seen: set[int] = set()
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
@@ -404,6 +406,11 @@ class ChatWidget(QTextEdit):
                 continue
             bc = QTextCursor(block)
             bc.setBlockFormat(fmt)
+
+            # Clear char-level backgrounds
+            bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            bc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            bc.mergeCharFormat(clear_bg)
 
             table = bc.currentTable()
             if table:
@@ -428,6 +435,14 @@ class ChatWidget(QTextEdit):
                             if col < len(provider_colors):
                                 cell_fmt.setBackground(QColor(provider_colors[col]))
                             cell.setFormat(cell_fmt)
+
+                            # Clear char backgrounds inside cell too
+                            cell_cursor = cell.firstCursorPosition()
+                            cell_cursor.setPosition(
+                                cell.lastCursorPosition().position(),
+                                QTextCursor.MoveMode.KeepAnchor,
+                            )
+                            cell_cursor.mergeCharFormat(clear_bg)
 
         self._scroll_to_bottom()
 
