@@ -13,7 +13,7 @@ import re
 import markdown
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextLength
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextLength
 from PySide6.QtWidgets import QTextEdit
 
 from mchat.models.message import Message, Provider, Role
@@ -161,9 +161,9 @@ class ChatWidget(QTextEdit):
         doc = self.document()
         tables_seen: set[int] = set()  # keyed by document position of table start
 
-        # Char format to clear background on all text fragments
-        clear_bg = QTextCharFormat()
-        clear_bg.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        # Char format to set background matching the block colour
+        match_bg = QTextCharFormat()
+        match_bg.setBackground(color)
 
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
@@ -173,10 +173,10 @@ class ChatWidget(QTextEdit):
             bc.setBlockFormat(block_fmt)
             self._block_roles[bn] = info
 
-            # Clear char-level backgrounds so block background shows through
+            # Set char-level backgrounds to match block background
             bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
             bc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            bc.mergeCharFormat(clear_bg)
+            bc.mergeCharFormat(match_bg)
 
             # If this block is inside a table, colour all cells
             table = bc.currentTable()
@@ -397,8 +397,6 @@ class ChatWidget(QTextEdit):
 
         # Apply backgrounds programmatically — Qt ignores most inline CSS
         doc = self.document()
-        clear_bg = QTextCharFormat()
-        clear_bg.setBackground(QBrush(Qt.BrushStyle.NoBrush))
         tables_seen: set[int] = set()
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
@@ -406,11 +404,6 @@ class ChatWidget(QTextEdit):
                 continue
             bc = QTextCursor(block)
             bc.setBlockFormat(fmt)
-
-            # Clear char-level backgrounds
-            bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-            bc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            bc.mergeCharFormat(clear_bg)
 
             table = bc.currentTable()
             if table:
@@ -432,17 +425,19 @@ class ChatWidget(QTextEdit):
                         for col in range(table.columns()):
                             cell = table.cellAt(row, col)
                             cell_fmt = cell.format()
-                            if col < len(provider_colors):
-                                cell_fmt.setBackground(QColor(provider_colors[col]))
+                            cell_color = QColor(provider_colors[col]) if col < len(provider_colors) else QColor("#f5f5f5")
+                            cell_fmt.setBackground(cell_color)
                             cell.setFormat(cell_fmt)
 
-                            # Clear char backgrounds inside cell too
+                            # Set char backgrounds inside cell to match
+                            char_bg = QTextCharFormat()
+                            char_bg.setBackground(cell_color)
                             cell_cursor = cell.firstCursorPosition()
                             cell_cursor.setPosition(
                                 cell.lastCursorPosition().position(),
                                 QTextCursor.MoveMode.KeepAnchor,
                             )
-                            cell_cursor.mergeCharFormat(clear_bg)
+                            cell_cursor.mergeCharFormat(char_bg)
 
         self._scroll_to_bottom()
 
