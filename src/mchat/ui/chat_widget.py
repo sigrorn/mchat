@@ -86,11 +86,6 @@ class ChatWidget(QTextEdit):
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
         self._block_roles: dict[int, _RoleInfo] = {}
-        self._streaming_msg: Message | None = None
-        self._streaming_block_fmt: QTextBlockFormat | None = None
-        self._streaming_start_pos: int = 0
-        self._streaming_rendered_len: int = 0
-        self._incremental = False  # batch mode by default
         self._is_empty = True
         self._md = markdown.Markdown(
             extensions=["tables", "fenced_code", "sane_lists"]
@@ -301,44 +296,6 @@ class ChatWidget(QTextEdit):
         )
 
     # ------------------------------------------------------------------
-    # Incremental streaming render (paragraph-based)
-    # ------------------------------------------------------------------
-
-    def _rerender_streaming(self) -> None:
-        """Replace the streaming message's blocks with markdown-rendered HTML."""
-        if not self._streaming_msg or not self._streaming_msg.content:
-            return
-
-        doc = self.document()
-        start_block_num = doc.findBlock(self._streaming_start_pos).blockNumber()
-
-        # Clear stale role entries for streaming blocks
-        for bn in list(self._block_roles):
-            if bn >= start_block_num:
-                del self._block_roles[bn]
-
-        # Delete current streaming content
-        cursor = self.textCursor()
-        cursor.setPosition(self._streaming_start_pos)
-        cursor.movePosition(
-            QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor
-        )
-        cursor.removeSelectedText()
-
-        # Re-insert as rendered markdown HTML
-        block_fmt = self._streaming_block_fmt
-        info = self._role_info(self._streaming_msg)
-        color = QColor(self._color_for(self._streaming_msg))
-        rendered = self._render(self._streaming_msg)
-        cursor.insertHtml(rendered)
-
-        end_block = cursor.block().blockNumber()
-        self._apply_bg_to_range(start_block_num, end_block, block_fmt, info, color)
-
-        self._streaming_rendered_len = len(self._streaming_msg.content)
-        self._scroll_to_bottom()
-
-    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -476,74 +433,11 @@ class ChatWidget(QTextEdit):
             self.setUpdatesEnabled(True)
         self._scroll_to_bottom()
 
-    def begin_streaming(self, message: Message) -> None:
-        """Start streaming — re-renders on paragraph breaks."""
-        self._streaming_msg = message
-        self._streaming_block_fmt = self._make_block_fmt(message)
-        info = self._role_info(message)
-        self._messages.append(message)
-        self._streaming_rendered_len = 0
-
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        if self._is_empty:
-            cursor.setBlockFormat(self._streaming_block_fmt)
-            self._is_empty = False
-        else:
-            cursor.insertBlock(self._streaming_block_fmt)
-
-        self._streaming_start_pos = cursor.position()
-        self._block_roles[cursor.block().blockNumber()] = info
-        self._scroll_to_bottom()
-
-    def append_token(self, token: str) -> None:
-        if not self._streaming_msg:
-            return
-        self._streaming_msg.content += token
-
-        # Append plain text for immediate feedback
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        info = self._role_info(self._streaming_msg)
-        parts = token.split("\n")
-        for i, part in enumerate(parts):
-            if i > 0:
-                cursor.insertBlock(self._streaming_block_fmt)
-                self._block_roles[cursor.block().blockNumber()] = info
-            if part:
-                cursor.insertText(part)
-
-        self._scroll_to_bottom()
-
-        # In incremental mode, re-render when a paragraph break appears
-        if self._incremental:
-            content = self._streaming_msg.content
-            new_text = content[self._streaming_rendered_len:]
-            if "\n\n" in new_text:
-                self._rerender_streaming()
-
-    def end_streaming(self) -> Message | None:
-        """Finish streaming — final render."""
-        if self._streaming_msg:
-            msg = self._streaming_msg
-            self._streaming_msg = None
-            self._streaming_block_fmt = None
-            self._streaming_rendered_len = 0
-            self._rebuild()
-            return msg
-        return None
-
     def clear_messages(self) -> None:
         self.clear()
         self._messages.clear()
         self._message_positions.clear()
         self._block_roles.clear()
-        self._streaming_msg = None
-        self._streaming_block_fmt = None
-        self._streaming_start_pos = 0
-        self._streaming_rendered_len = 0
         self._is_empty = True
 
     def update_font_size(self, size: int) -> None:

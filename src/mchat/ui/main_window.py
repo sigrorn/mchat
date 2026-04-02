@@ -51,7 +51,6 @@ class MainWindow(QMainWindow):
         self._config = config
         self._db = db
         self._current_conv: Conversation | None = None
-        self._stream_worker: StreamWorker | None = None
         self._multi_workers: dict[Provider, StreamWorker] = {}
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
@@ -602,8 +601,6 @@ class MainWindow(QMainWindow):
         "  //providers           — list available providers and config status\n"
         "  //columns (//cols)    — show multi-provider responses side by side\n"
         "  //lines               — show multi-provider responses as a list (default)\n"
-        "  //incremental         — render markdown progressively while streaming\n"
-        "  //batch               — render on completion (default)\n"
         "  //help                — show this help"
     )
 
@@ -690,14 +687,6 @@ class MainWindow(QMainWindow):
             self._chat.add_note("list layout enabled")
             return True
 
-        if cmd == "//incremental":
-            self._chat._incremental = True
-            self._chat.add_note("incremental rendering enabled")
-            return True
-        if cmd == "//batch":
-            self._chat._incremental = False
-            self._chat.add_note("batch rendering enabled (default)")
-            return True
 
         return False
 
@@ -1045,37 +1034,7 @@ class MainWindow(QMainWindow):
         provider = self._router.get_provider(provider_id)
 
         self._set_combo_waiting(provider_id, True)
-
-        if self._chat._incremental:
-            context_messages = self._build_context(provider_id)
-            # Stash for //retry
-            self._retry_contexts[provider_id] = context_messages
-            self._retry_models[provider_id] = model
-            # Incremental mode: stream tokens to UI as they arrive
-            assistant_msg = Message(
-                role=Role.ASSISTANT,
-                content="",
-                provider=provider_id,
-                model=model,
-                conversation_id=self._current_conv.id,
-            )
-            self._chat.begin_streaming(assistant_msg)
-
-            self._stream_worker = StreamWorker(provider, context_messages, model)
-            self._stream_worker.token_received.connect(self._chat.append_token)
-            self._stream_worker.stream_complete.connect(
-                lambda full_text, inp, out, est: self._on_stream_complete(
-                    full_text, provider_id, model, inp, out, est
-                )
-            )
-            self._stream_worker.stream_error.connect(self._on_stream_error)
-            self._stream_worker.retrying.connect(
-                lambda attempt, mx, pid=provider_id: self._set_combo_retrying(pid)
-            )
-            self._stream_worker.start()
-        else:
-            # Batch mode: collect silently, render when complete
-            self._send_multi([provider_id])
+        self._send_multi([provider_id])
 
     def _send_multi(self, targets: list[Provider], context_override: dict[Provider, list[Message]] | None = None) -> None:
         """Send to multiple providers simultaneously, render when each completes."""
@@ -1248,65 +1207,6 @@ class MainWindow(QMainWindow):
             self._input.set_enabled(True)
             self._update_input_placeholder()
             self._update_input_color()
-
-    # ------------------------------------------------------------------
-    # Single-provider completion
-    # ------------------------------------------------------------------
-
-    def _on_stream_complete(
-        self,
-        full_text: str,
-        provider_id: Provider,
-        model: str,
-        input_tokens: int,
-        output_tokens: int,
-        estimated: bool = False,
-    ) -> None:
-        self._set_combo_waiting(provider_id, False)
-        msg = self._chat.end_streaming()
-        if msg:
-            msg.content = full_text
-            self._db.add_message(msg)
-            self._current_conv.messages.append(msg)
-
-        cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None and self._current_conv:
-            self._db.add_conversation_spend(
-                self._current_conv.id, provider_id.value, cost, estimated
-            )
-        self._update_spend_labels()
-
-        self._input.set_enabled(True)
-        self._update_input_placeholder()
-        self._update_input_color()
-        self._stream_worker = None
-
-    def _on_stream_error(self, error: str) -> None:
-        for p in Provider:
-            self._set_combo_waiting(p, False)
-        self._chat.end_streaming()
-
-        # Determine which provider failed (from the single-provider path)
-        worker = self._stream_worker
-        if worker:
-            pid = worker._provider.provider_id
-            transient = worker.last_error_transient
-
-            error_msg = Message(
-                role=Role.ASSISTANT,
-                content=f"[Error from {pid.value}: {error}]",
-                provider=pid,
-                conversation_id=self._current_conv.id,
-            )
-            self._db.add_message(error_msg)
-            self._current_conv.messages.append(error_msg)
-            self._chat.add_message(error_msg)
-
-            self._retry_failed[pid] = (error, transient)
-            self._retry_error_msg_ids[pid] = error_msg.id
-
-        self._input.set_enabled(True)
-        self._stream_worker = None
 
     # ------------------------------------------------------------------
     # Settings
