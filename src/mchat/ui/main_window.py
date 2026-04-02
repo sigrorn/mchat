@@ -1163,7 +1163,7 @@ class MainWindow(QMainWindow):
                         rendered = md.convert(m.content)
                         header_cells.append(
                             f'<th style="background-color:{color}; padding:8px; '
-                            f'text-align:left; vertical-align:top;">{label}</th>'
+                            f'text-align:left; vertical-align:top;">{label}\'s take</th>'
                         )
                         body_cells.append(
                             f'<td style="background-color:{color}; padding:8px; '
@@ -1223,7 +1223,7 @@ class MainWindow(QMainWindow):
             rendered = md.convert(full_text)
             header_cells.append(
                 f'<th style="background-color:{color}; padding:8px; '
-                f'text-align:left; vertical-align:top;">{label}</th>'
+                f'text-align:left; vertical-align:top;">{label}\'s take</th>'
             )
             body_cells.append(
                 f'<td style="background-color:{color}; padding:8px; '
