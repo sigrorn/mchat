@@ -123,7 +123,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("mchat")
+        try:
+            from importlib.metadata import version as pkg_version
+            ver = pkg_version("mchat")
+        except Exception:
+            ver = "dev"
+        self.setWindowTitle(f"mchat v{ver}")
         self.setMinimumSize(900, 600)
         self._restore_geometry()
 
