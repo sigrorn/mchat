@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
         "Available commands:\n"
         "  //mark [tagname]      — mark this point in the chat\n"
         "  //marklast [tagname]  — mark just before the last request\n"
-        "  //limit [tagname]     — only send chat from that mark onwards\n"
+        "  //limit [tagname|N]   — only send chat from that mark or message N onwards\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
         "  //pop                 — remove the last request and its responses\n"
         "  //hide                — hide the last request+responses, copy request to input\n"
@@ -857,6 +857,21 @@ class MainWindow(QMainWindow):
             self._db.set_conversation_limit(self._current_conv.id, None)
             self._chat.add_note("limit removed — full chat history will be sent")
             return True
+
+        # Accept a plain message number — use it directly as a message index
+        if tag.isdigit():
+            idx = int(tag)
+            if idx < 1 or idx > len(self._current_conv.messages):
+                self._chat.add_note(f"Error: message {idx} out of range")
+                return True
+            # Store as a special numeric mark name (prefixed with #)
+            mark_name = f"#{idx}"
+            self._db.set_mark(self._current_conv.id, mark_name, idx - 1)
+            self._current_conv.limit_mark = mark_name
+            self._db.set_conversation_limit(self._current_conv.id, mark_name)
+            self._chat.add_note(f"limit set to message {idx} — earlier context will not be sent")
+            return True
+
         name = tag
         idx = self._db.get_mark(self._current_conv.id, name)
         if idx is None:

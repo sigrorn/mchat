@@ -215,6 +215,16 @@ class ChatWidget(QTextEdit):
         self._message_positions.append(cursor.position())
         start_block = cursor.block().blockNumber()
 
+        # Prefix user messages with message number
+        if message.role == Role.USER:
+            msg_num = len(self._messages)  # 1-based (appended before _insert_rendered)
+            char_fmt = cursor.charFormat()
+            char_fmt.setForeground(QColor("#888"))
+            cursor.insertText(f"{msg_num} — ", char_fmt)
+            # Reset to default colour for the actual content
+            char_fmt.setForeground(QColor("#1a1a1a"))
+            cursor.setCharFormat(char_fmt)
+
         # Insert HTML content
         rendered = self._render(message)
         cursor.insertHtml(rendered)
