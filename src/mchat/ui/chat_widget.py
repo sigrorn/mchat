@@ -230,9 +230,13 @@ class ChatWidget(QTextEdit):
             char_fmt.setForeground(QColor("#1a1a1a"))
             cursor.setCharFormat(char_fmt)
 
-        # Insert HTML content
+        # Insert HTML content, wrapping with background colour so Qt's
+        # HTML parser sets it on all blocks it creates from the markup
+        color_hex = self._color_for(message)
         rendered = self._render(message)
-        cursor.insertHtml(rendered)
+        cursor.insertHtml(
+            f'<div style="background-color:{color_hex};">{rendered}</div>'
+        )
 
         end_block = cursor.block().blockNumber()
         self._apply_bg_to_range(start_block, end_block, block_fmt, info, color)
