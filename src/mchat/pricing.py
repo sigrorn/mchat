@@ -40,6 +40,8 @@ _PRICES: dict[str, tuple[float, float]] = {
 
 def _lookup_rates(model: str) -> tuple[float, float] | None:
     """Find pricing for a model by prefix match (longest key wins)."""
+    # Gemini API returns model IDs like "models/gemini-2.5-pro"
+    model = model.removeprefix("models/")
     for key, rates in sorted(_PRICES.items(), key=lambda kv: -len(kv[0])):
         if model.startswith(key):
             return rates
