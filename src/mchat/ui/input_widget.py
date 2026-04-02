@@ -22,13 +22,17 @@ class _PasteCleanTextEdit(QTextEdit):
     def insertFromMimeData(self, source: QMimeData) -> None:
         text = source.text()
         if text and _SPEAKER_PREFIX.search(text):
+            # Normalize line endings and strip prefix lines
+            lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
             cleaned = "\n".join(
-                line for line in text.split("\n")
+                line for line in lines
                 if not _SPEAKER_PREFIX.match(line)
-            )
-            clean_mime = QMimeData()
-            clean_mime.setText(cleaned)
-            super().insertFromMimeData(clean_mime)
+            ).strip()
+            if cleaned:
+                clean_mime = QMimeData()
+                clean_mime.setText(cleaned)
+                super().insertFromMimeData(clean_mime)
+            # else: all lines were prefixes — paste nothing
         else:
             super().insertFromMimeData(source)
 
