@@ -1209,7 +1209,8 @@ class MainWindow(QMainWindow):
             provider=providers[0],
             conversation_id=self._current_conv.id,
         )
-        self._chat._insert_column_table(table_html, providers, self)
+        provider_colors = [self._provider_color(p) for p in providers]
+        self._chat._insert_column_table(table_html, provider_colors)
 
     def _on_multi_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)

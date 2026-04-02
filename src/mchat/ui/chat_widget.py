@@ -410,7 +410,7 @@ class ChatWidget(QTextEdit):
         self._insert_rendered(message)
         self._scroll_to_bottom()
 
-    def _insert_column_table(self, table_html: str, providers: list, main_window) -> None:
+    def _insert_column_table(self, table_html: str, provider_colors: list[str]) -> None:
         """Insert a pre-built HTML table for column-mode multi-provider responses."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -428,7 +428,7 @@ class ChatWidget(QTextEdit):
         cursor.insertHtml(table_html)
         end_block = cursor.block().blockNumber()
 
-        # Apply background and colour table cells
+        # Apply backgrounds programmatically — Qt ignores most inline CSS
         doc = self.document()
         tables_seen: set[int] = set()
         for bn in range(start_block, end_block + 1):
@@ -443,11 +443,24 @@ class ChatWidget(QTextEdit):
                 table_pos = table.firstCursorPosition().position()
                 if table_pos not in tables_seen:
                     tables_seen.add(table_pos)
+
+                    # Table frame: no gaps, full width
                     tf = table.format()
                     tf.setMargin(0)
                     tf.setCellSpacing(0)
+                    tf.setCellPadding(8)
                     tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                    tf.setBackground(QColor("#f5f5f5"))
                     table.setFormat(tf)
+
+                    # Per-cell background: each column gets its provider colour
+                    for row in range(table.rows()):
+                        for col in range(table.columns()):
+                            cell = table.cellAt(row, col)
+                            cell_fmt = cell.format()
+                            if col < len(provider_colors):
+                                cell_fmt.setBackground(QColor(provider_colors[col]))
+                            cell.setFormat(cell_fmt)
 
         self._scroll_to_bottom()
 
