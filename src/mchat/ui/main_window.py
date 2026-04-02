@@ -1232,14 +1232,16 @@ class MainWindow(QMainWindow):
             )
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
-            # Display with heading
+            # Display with heading — use _insert_rendered directly since
+            # the raw msg is already in _current_conv.messages
             display_msg = Message(
                 role=msg.role, content=f"**{label}'s take:**\n\n{full_text}",
                 provider=msg.provider, model=msg.model,
                 conversation_id=msg.conversation_id, id=msg.id,
             )
-            self._chat.add_message(display_msg)
-            self._chat.add_message(msg)
+            self._chat._messages.append(msg)
+            self._chat._insert_rendered(display_msg)
+            self._chat._scroll_to_bottom()
 
     def _render_column_responses(self) -> None:
         """Render buffered multi-provider responses as a side-by-side table."""
