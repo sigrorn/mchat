@@ -573,6 +573,7 @@ class MainWindow(QMainWindow):
         "  //mark [tagname]      — mark this point in the chat\n"
         "  //marklast [tagname]  — mark just before the last request\n"
         "  //limit [tagname|N]   — only send chat from that mark or message N onwards\n"
+        "  //limit last          — limit to the last request sent to providers\n"
         "  //limit ALL           — remove the limit, send full chat history\n"
         "  //pop                 — remove the last request and its responses\n"
         "  //hide                — hide the last request+responses, copy request to input\n"
@@ -856,6 +857,25 @@ class MainWindow(QMainWindow):
             self._current_conv.limit_mark = None
             self._db.set_conversation_limit(self._current_conv.id, None)
             self._chat.add_note("limit removed — full chat history will be sent")
+            return True
+
+        # //limit last — find the last user message sent to providers
+        if tag.lower() == "last":
+            messages = self._current_conv.messages
+            last_user_idx = None
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].role == Role.USER:
+                    last_user_idx = i
+                    break
+            if last_user_idx is None:
+                self._chat.add_note("Error: no user message found")
+                return True
+            msg_num = last_user_idx + 1  # 1-based
+            mark_name = f"#{msg_num}"
+            self._db.set_mark(self._current_conv.id, mark_name, last_user_idx)
+            self._current_conv.limit_mark = mark_name
+            self._db.set_conversation_limit(self._current_conv.id, mark_name)
+            self._chat.add_note(f"limit set to last request (message {msg_num}) — earlier context will not be sent")
             return True
 
         # Accept a plain message number — use it directly as a message index
