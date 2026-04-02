@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
     # // commands
     # ------------------------------------------------------------------
 
-    _HELP_TEXT = (
+    _HELP_COMMANDS = (
         "Available commands:\n"
         "  //mark [tagname]      — mark this point in the chat\n"
         "  //marklast [tagname]  — mark just before the last request\n"
@@ -516,15 +516,17 @@ class MainWindow(QMainWindow):
         "  //providers           — list available providers and config status\n"
         "  //incremental         — render markdown progressively while streaming\n"
         "  //batch               — render on completion (default)\n"
-        "  //help                — show this help\n"
-        "\n"
-        "Provider prefixes:\n"
-        "  claude, <message>     — send to Claude\n"
-        "  gpt, <message>        — send to GPT\n"
-        "  gemini, <message>     — send to Gemini\n"
-        "  perplexity, <message> — send to Perplexity (also: pplx,)\n"
-        "  (no prefix)           — send to current selection"
+        "  //help                — show this help"
     )
+
+    # (prefix_text, description, provider_enum_or_None)
+    _HELP_PROVIDERS = [
+        ("claude, <message>", "send to Claude", Provider.CLAUDE),
+        ("gpt, <message>", "send to GPT", Provider.OPENAI),
+        ("gemini, <message>", "send to Gemini", Provider.GEMINI),
+        ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
+        ("(no prefix)", "send to current selection", None),
+    ]
 
     def _handle_command(self, text: str) -> bool:
         stripped = text.strip()
@@ -541,11 +543,35 @@ class MainWindow(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.End)
             fmt = QTextBlockFormat()
             fmt.setBackground(QColor("#f5f5f5"))
-            for line in self._HELP_TEXT.split("\n"):
+
+            # Commands section (plain text)
+            for line in self._HELP_COMMANDS.split("\n"):
                 cursor.insertBlock(fmt)
                 char_fmt = cursor.charFormat()
                 char_fmt.setForeground(QColor("#666"))
                 cursor.insertText(line, char_fmt)
+
+            # Blank line + header
+            cursor.insertBlock(fmt)
+            cursor.insertBlock(fmt)
+            char_fmt = cursor.charFormat()
+            char_fmt.setForeground(QColor("#666"))
+            cursor.insertText("Provider prefixes:", char_fmt)
+
+            # Provider lines — italicise if no API key
+            configured = set(self._router._providers.keys()) if self._router else set()
+            for prefix_text, desc, provider in self._HELP_PROVIDERS:
+                cursor.insertBlock(fmt)
+                line = f"  {prefix_text:24s}— {desc}"
+                if provider is not None and provider not in configured:
+                    cursor.insertHtml(
+                        f'<span style="color:#666; font-style:italic;">{line}</span>'
+                    )
+                else:
+                    char_fmt = cursor.charFormat()
+                    char_fmt.setForeground(QColor("#666"))
+                    cursor.insertText(line, char_fmt)
+
             self._chat._scroll_to_bottom()
             return True
 
