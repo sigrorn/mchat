@@ -94,8 +94,13 @@ class ChatWidget(QTextEdit):
 
     def _build_ui(self) -> None:
         self.setStyleSheet(
-            "QTextEdit { border: none; background-color: #f5f5f5; }"
+            "QTextEdit { border: none; }"
         )
+        # Set viewport background so block format backgrounds are the
+        # primary colour source — no white bleeding through
+        pal = self.palette()
+        pal.setColor(pal.ColorRole.Base, QColor("#f5f5f5"))
+        self.setPalette(pal)
         self.document().setDocumentMargin(16)
         self.document().setDefaultStyleSheet(_DOC_CSS)
         self._apply_default_font()
@@ -230,13 +235,9 @@ class ChatWidget(QTextEdit):
             char_fmt.setForeground(QColor("#1a1a1a"))
             cursor.setCharFormat(char_fmt)
 
-        # Insert HTML content, wrapping with background colour so Qt's
-        # HTML parser sets it on all blocks it creates from the markup
-        color_hex = self._color_for(message)
+        # Insert HTML content
         rendered = self._render(message)
-        cursor.insertHtml(
-            f'<div style="background-color:{color_hex};">{rendered}</div>'
-        )
+        cursor.insertHtml(rendered)
 
         end_block = cursor.block().blockNumber()
         self._apply_bg_to_range(start_block, end_block, block_fmt, info, color)
