@@ -12,7 +12,8 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTextEdit, QWidget
 
 # Matches lines like //user, //claude, //gpt (sonnet-4), //gemini, //perplexity (sonar), etc.
 _SPEAKER_PREFIX = re.compile(
-    r"^//(user|claude|gpt|gemini|perplexity|pplx|assistant)(\s*\(.*\))?\s*$"
+    r"^//(user|claude|gpt|gemini|perplexity|pplx|assistant)(\s*\(.*\))?\s*$",
+    re.MULTILINE,
 )
 
 
