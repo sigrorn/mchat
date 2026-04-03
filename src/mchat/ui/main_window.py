@@ -150,7 +150,13 @@ class MainWindow(QMainWindow):
                 default_model=self._config.get("perplexity_model"),
             )
 
-        default = Provider(self._config.get("default_provider"))
+        try:
+            default = Provider(self._config.get("default_provider"))
+        except ValueError:
+            default = Provider.CLAUDE
+        # Fall back to first configured provider if default is unconfigured
+        if default not in providers and providers:
+            default = next(iter(providers))
         self._router = Router(providers, default) if providers else None
 
     # ------------------------------------------------------------------
