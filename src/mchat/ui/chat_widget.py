@@ -292,10 +292,10 @@ class ChatWidget(QTextEdit):
 
             if msg.role == Role.USER:
                 label = "You"
-            elif msg.provider == Provider.CLAUDE:
-                label = f"Claude ({_short_model(msg.model)})" if msg.model else "Claude"
-            elif msg.provider == Provider.OPENAI:
-                label = f"GPT ({_short_model(msg.model)})" if msg.model else "GPT"
+            elif msg.provider:
+                from mchat.config import PROVIDER_META
+                display = PROVIDER_META.get(msg.provider.value, {}).get("display", msg.provider.value)
+                label = f"{display} ({_short_model(msg.model)})" if msg.model else display
             else:
                 label = "Assistant"
 
