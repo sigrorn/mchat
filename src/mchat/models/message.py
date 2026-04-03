@@ -31,4 +31,5 @@ class Message:
     model: str | None = None
     conversation_id: int | None = None
     id: int | None = None
+    display_mode: str | None = None  # "cols", "lines", or None (single/legacy)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

@@ -865,7 +865,11 @@ class MainWindow(QMainWindow):
                 if len(group) > 1:
                     ordered = sorted(group, key=lambda m: _PROVIDER_ORDER.index(m.provider) if m.provider in _PROVIDER_ORDER else 99)
 
-                    if self._column_mode:
+                    # Use stored display_mode if available, else fall back to global toggle
+                    stored_mode = group[0].display_mode
+                    use_cols = stored_mode == "cols" if stored_mode else self._column_mode
+
+                    if use_cols:
                         # Column table
                         md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
                         header_cells = []
@@ -923,18 +927,18 @@ class MainWindow(QMainWindow):
         for p in ordered:
             label, full_text, model, inp, out, est = self._column_buffer[p]
             full_text = _strip_echoed_heading(full_text)
-            # Store raw content — heading is added at display time only
+            # Store raw content with display mode
             msg = Message(
                 role=Role.ASSISTANT,
                 content=full_text,
                 provider=p,
                 model=model,
+                display_mode="lines",
                 conversation_id=self._current_conv.id,
             )
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
-            # Display with heading — use _insert_rendered directly since
-            # the raw msg is already in _current_conv.messages
+            # Display with heading
             display_msg = Message(
                 role=msg.role, content=f"**{label}'s take:**\n\n{full_text}",
                 provider=msg.provider, model=msg.model,
@@ -986,6 +990,7 @@ class MainWindow(QMainWindow):
                 content=_strip_echoed_heading(full_text),
                 provider=p,
                 model=model,
+                display_mode="cols",
                 conversation_id=self._current_conv.id,
             )
             self._db.add_message(msg)

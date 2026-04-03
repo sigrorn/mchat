@@ -123,6 +123,10 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"
             )
+        if "display_mode" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN display_mode TEXT"
+            )
 
         # Strip legacy "**X's take:**\n\n" prefix from assistant messages
         # (one-time migration — these were stored with the heading before the
@@ -275,14 +279,15 @@ class Database:
     def add_message(self, msg: Message) -> Message:
         now = msg.created_at.isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO messages (conversation_id, role, provider, content, model, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 msg.conversation_id,
                 msg.role.value,
                 msg.provider.value if msg.provider else None,
                 msg.content,
                 msg.model,
+                msg.display_mode,
                 now,
             ),
         )
@@ -301,7 +306,7 @@ class Database:
         else:
             where = "conversation_id = ? AND (hidden = 0 OR hidden IS NULL)"
         cursor = self._conn.execute(
-            f"SELECT id, conversation_id, role, provider, content, model, created_at "
+            f"SELECT id, conversation_id, role, provider, content, model, display_mode, created_at "
             f"FROM messages WHERE {where} ORDER BY created_at ASC",
             (conversation_id,),
         )
@@ -313,7 +318,8 @@ class Database:
                 provider=Provider(row[3]) if row[3] else None,
                 content=row[4],
                 model=row[5] if row[5] else None,
-                created_at=datetime.fromisoformat(row[6]),
+                display_mode=row[6],
+                created_at=datetime.fromisoformat(row[7]),
             )
             for row in cursor.fetchall()
         ]
