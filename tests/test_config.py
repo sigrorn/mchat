@@ -38,3 +38,22 @@ class TestConfig:
         config.set("openai_api_key", "oai-key")
         assert config.anthropic_api_key == "ant-key"
         assert config.openai_api_key == "oai-key"
+
+    def test_malformed_json(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text("not valid json {{{", encoding="utf-8")
+        config = Config(config_path=path)
+        # Should fall back to defaults, not crash
+        assert config.get("default_provider") == "claude"
+
+    def test_non_dict_json(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text('"just a string"', encoding="utf-8")
+        config = Config(config_path=path)
+        assert config.get("default_provider") == "claude"
+
+    def test_empty_file(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text("", encoding="utf-8")
+        config = Config(config_path=path)
+        assert config.get("default_provider") == "claude"

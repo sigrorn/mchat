@@ -88,7 +88,15 @@ class Config:
 
     def _load(self) -> None:
         if self._path.exists():
-            self._data = json.loads(self._path.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._data = data
+                else:
+                    self._data = {}
+            except (json.JSONDecodeError, OSError):
+                # Malformed or unreadable config — fall back to defaults
+                self._data = {}
         else:
             self._data = {}
 
