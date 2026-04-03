@@ -41,3 +41,32 @@ class BaseProvider(ABC):
     def list_models(self) -> list[str]:
         """Return available model identifiers."""
         ...
+
+    @staticmethod
+    def format_messages_openai(
+        messages: list[Message], own_provider: Provider,
+    ) -> list[dict]:
+        """Convert normalized messages to OpenAI-compatible API format.
+
+        Shared by all OpenAI-compatible providers (OpenAI, Gemini, Perplexity).
+        Claude uses a different format (separate system parameter).
+        """
+        api_messages: list[dict] = []
+        for msg in messages:
+            if msg.role == Role.SYSTEM:
+                api_messages.append({"role": "system", "content": msg.content})
+                continue
+
+            role = "user" if msg.role == Role.USER else "assistant"
+            if msg.role == Role.ASSISTANT and msg.provider != own_provider:
+                provider_name = msg.provider.value.upper() if msg.provider else "ASSISTANT"
+                content = f"[{provider_name} responded]: {msg.content}"
+                role = "user"
+            else:
+                content = msg.content
+
+            if api_messages and api_messages[-1]["role"] == role:
+                api_messages[-1]["content"] += "\n\n" + content
+            else:
+                api_messages.append({"role": role, "content": content})
+        return api_messages

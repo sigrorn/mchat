@@ -72,25 +72,5 @@ class PerplexityProvider(BaseProvider):
         # Perplexity does not have a models.list() endpoint
         return list(FALLBACK_MODELS)
 
-    @staticmethod
-    def _format_messages(messages: list[Message]) -> list[dict]:
-        """Convert normalized messages to OpenAI-compatible format for Perplexity."""
-        api_messages = []
-        for msg in messages:
-            if msg.role == Role.SYSTEM:
-                api_messages.append({"role": "system", "content": msg.content})
-                continue
-
-            role = "user" if msg.role == Role.USER else "assistant"
-            if msg.role == Role.ASSISTANT and msg.provider != Provider.PERPLEXITY:
-                provider_name = msg.provider.value.upper() if msg.provider else "ASSISTANT"
-                content = f"[{provider_name} responded]: {msg.content}"
-                role = "user"
-            else:
-                content = msg.content
-
-            if api_messages and api_messages[-1]["role"] == role:
-                api_messages[-1]["content"] += "\n\n" + content
-            else:
-                api_messages.append({"role": role, "content": content})
-        return api_messages
+    def _format_messages(self, messages: list[Message]) -> list[dict]:
+        return self.format_messages_openai(messages, Provider.PERPLEXITY)
