@@ -229,9 +229,9 @@ class MainWindow(QMainWindow):
 
         self._bar_layout.addStretch()
 
-        # Column/list mode toggle
-        self._column_mode = False
-        self._column_btn = QPushButton("⫏ List")
+        # Column/list mode toggle (restore from config)
+        self._column_mode = bool(self._config.get("column_mode"))
+        self._column_btn = QPushButton("⫐ Cols" if self._column_mode else "⫏ List")
         self._column_btn.setToolTip("Toggle between list and column layout for multi-provider responses")
         self._column_btn.setFixedWidth(70)
         self._column_btn.setStyleSheet(
@@ -1006,6 +1006,8 @@ class MainWindow(QMainWindow):
             self._column_btn.setText("⫐ Cols")
         else:
             self._column_btn.setText("⫏ List")
+        self._config.set("column_mode", self._column_mode)
+        self._config.save()
 
     def _clear_retry_stash(self) -> None:
         self._retry_contexts.clear()

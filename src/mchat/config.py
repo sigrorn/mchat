@@ -27,6 +27,7 @@ DEFAULTS = {
     "color_openai": "#e8e8e8",
     "color_gemini": "#c8d8e8",
     "color_perplexity": "#d8c8e8",
+    "column_mode": False,
     "system_prompt": "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.",
     "system_prompt_claude": "",
     "system_prompt_openai": "",
