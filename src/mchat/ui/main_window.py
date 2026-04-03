@@ -637,6 +637,7 @@ class MainWindow(QMainWindow):
         "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
         "  //select all          — target all configured providers\n"
         "  //providers           — list available providers and config status\n"
+        "  //rename <text>       — rename the current chat\n"
         "  //columns (//cols)    — show multi-provider responses side by side\n"
         "  //lines               — show multi-provider responses as a list (default)\n"
         "  //help                — show this help"
@@ -710,6 +711,8 @@ class MainWindow(QMainWindow):
             return self._handle_hide()
         if cmd == "//unhide":
             return self._handle_unhide()
+        if cmd == "//rename":
+            return self._handle_rename(arg)
         if cmd == "//select":
             return self._handle_select(arg)
         if cmd == "//providers":
@@ -728,6 +731,19 @@ class MainWindow(QMainWindow):
 
 
         return False
+
+    def _handle_rename(self, name: str) -> bool:
+        if not name:
+            self._chat.add_note("Error: //rename requires a name")
+            return True
+        if not self._current_conv:
+            self._chat.add_note("Error: no active conversation")
+            return True
+        self._db.update_conversation_title(self._current_conv.id, name)
+        self._current_conv.title = name
+        self._load_conversations()
+        self._chat.add_note(f"renamed to '{name}'")
+        return True
 
     def _handle_pop(self) -> bool:
         if not self._current_conv or not self._current_conv.messages:
