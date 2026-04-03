@@ -421,62 +421,72 @@ class ChatWidget(QTextEdit):
         cursor.insertHtml(table_html)
         end_block = cursor.block().blockNumber()
 
-        # Apply backgrounds programmatically — Qt ignores most inline CSS
+        # Apply backgrounds programmatically — Qt ignores most inline CSS.
+        # Process tables separately, then skip their blocks to avoid
+        # overwriting cell colours with the neutral background.
         doc = self.document()
-        tables_seen: set[int] = set()
-        for bn in range(start_block, end_block + 1):
+        table_block_ranges: list[tuple[int, int]] = []  # (first_bn, last_bn) per table
+
+        # First pass: find and process all tables
+        bn = start_block
+        while bn <= end_block:
             block = doc.findBlockByNumber(bn)
             if not block.isValid():
+                bn += 1
                 continue
             bc = QTextCursor(block)
-            bc.setBlockFormat(fmt)
-
             table = bc.currentTable()
             if table:
-                table_pos = table.firstCursorPosition().position()
-                if table_pos not in tables_seen:
-                    tables_seen.add(table_pos)
+                # Record the block range for this table
+                table_first = doc.findBlock(table.firstCursorPosition().position()).blockNumber()
+                table_last = doc.findBlock(table.lastCursorPosition().position()).blockNumber()
+                table_block_ranges.append((table_first, table_last))
 
-                    # Table frame: no gaps, full width
-                    tf = table.format()
-                    tf.setMargin(0)
-                    tf.setCellSpacing(0)
-                    tf.setCellPadding(8)
-                    tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
-                    tf.setBackground(QColor("#f5f5f5"))
-                    table.setFormat(tf)
+                # Table frame: no gaps, full width
+                tf = table.format()
+                tf.setMargin(0)
+                tf.setCellSpacing(0)
+                tf.setCellPadding(8)
+                tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                tf.setBackground(QColor("#f5f5f5"))
+                table.setFormat(tf)
 
-                    # Per-cell background: each column gets its provider colour
-                    for row in range(table.rows()):
-                        for col in range(table.columns()):
-                            cell = table.cellAt(row, col)
-                            cell_fmt = cell.format()
-                            cell_color = QColor(provider_colors[col]) if col < len(provider_colors) else QColor("#f5f5f5")
-                            cell_fmt.setBackground(cell_color)
-                            cell.setFormat(cell_fmt)
+                # Per-cell background: each column gets its provider colour
+                for row in range(table.rows()):
+                    for col in range(table.columns()):
+                        cell = table.cellAt(row, col)
+                        cell_fmt = cell.format()
+                        cell_color = QColor(provider_colors[col]) if col < len(provider_colors) else QColor("#f5f5f5")
+                        cell_fmt.setBackground(cell_color)
+                        cell.setFormat(cell_fmt)
 
-                            # Set block format background for every paragraph
-                            # inside the cell — this covers the line remainder
-                            # after wrapped text (painted from block bg)
-                            block_bg = QTextBlockFormat()
-                            block_bg.setBackground(cell_color)
-                            cell_start = cell.firstCursorPosition().position()
-                            cell_end = cell.lastCursorPosition().position()
-                            blk = doc.findBlock(cell_start)
-                            while blk.isValid() and blk.position() <= cell_end:
-                                blk_cursor = QTextCursor(blk)
-                                blk_cursor.setBlockFormat(block_bg)
-                                blk = blk.next()
+                        # Set block format for every paragraph inside the cell
+                        block_bg = QTextBlockFormat()
+                        block_bg.setBackground(cell_color)
+                        cell_start = cell.firstCursorPosition().position()
+                        cell_end = cell.lastCursorPosition().position()
+                        blk = doc.findBlock(cell_start)
+                        while blk.isValid() and blk.position() <= cell_end:
+                            blk_cursor = QTextCursor(blk)
+                            blk_cursor.setBlockFormat(block_bg)
+                            blk = blk.next()
 
-                            # Set char backgrounds inside cell to match
-                            char_bg = QTextCharFormat()
-                            char_bg.setBackground(cell_color)
-                            cell_cursor = cell.firstCursorPosition()
-                            cell_cursor.setPosition(
-                                cell_end,
-                                QTextCursor.MoveMode.KeepAnchor,
-                            )
-                            cell_cursor.mergeCharFormat(char_bg)
+                        # Set char backgrounds inside cell to match
+                        char_bg = QTextCharFormat()
+                        char_bg.setBackground(cell_color)
+                        cell_cursor = cell.firstCursorPosition()
+                        cell_cursor.setPosition(
+                            cell_end,
+                            QTextCursor.MoveMode.KeepAnchor,
+                        )
+                        cell_cursor.mergeCharFormat(char_bg)
+
+                # Skip past the table
+                bn = table_last + 1
+            else:
+                # Non-table block: apply neutral background
+                bc.setBlockFormat(fmt)
+                bn += 1
 
         self._scroll_to_bottom()
 
