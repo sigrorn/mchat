@@ -15,7 +15,8 @@ from mchat.config import Config
 from mchat.db import Database
 from mchat.ui.main_window import MainWindow
 
-_ICON_PATH = Path(__file__).parent / "resources" / "icon.png"
+_RESOURCES = Path(__file__).parent / "resources"
+_ICON_PATH = _RESOURCES / "icon.ico" if (_RESOURCES / "icon.ico").exists() else _RESOURCES / "icon.png"
 
 
 def main() -> None:

@@ -30,5 +30,11 @@ Thumbs.db
 .mchat/
 
 
+# PyInstaller
+*.spec.bak
+
+# Inno Setup output
+Output/
+
 # output directory,  might contain saved files
 outputs

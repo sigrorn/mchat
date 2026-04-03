@@ -18,6 +18,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-qt>=4.4",
+    "pyinstaller>=6.0",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]
@@ -27,7 +29,7 @@ mchat = "mchat.main:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mchat = ["resources/*.png"]
+mchat = ["resources/*.png", "resources/*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
