@@ -34,7 +34,7 @@ from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
-from mchat.ui.chat_widget import ChatWidget
+from mchat.ui.chat_widget import ChatWidget, FindBar
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
@@ -193,6 +193,8 @@ class MainWindow(QMainWindow):
             color_gemini=self._config.get("color_gemini"),
             color_perplexity=self._config.get("color_perplexity"),
         )
+        self._find_bar = FindBar(self._chat)
+        right_layout.addWidget(self._find_bar)
         right_layout.addWidget(self._chat, stretch=1)
 
         # ---- Provider bar (between chat and input) ----
@@ -444,6 +446,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+-"), self).activated.connect(self._zoom_out)
         QShortcut(QKeySequence("Ctrl+0"), self).activated.connect(self._zoom_reset)
         QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self._export_chat)
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self._find_bar.open_bar)
 
     def _export_chat(self) -> None:
         if not self._current_conv or not self._current_conv.messages:
