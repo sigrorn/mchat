@@ -8,7 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
-from mchat.models.message import Message, Provider
+from mchat.models.message import Message, Provider, Role
 
 
 class BaseProvider(ABC):
