@@ -455,12 +455,25 @@ class ChatWidget(QTextEdit):
                             cell_fmt.setBackground(cell_color)
                             cell.setFormat(cell_fmt)
 
+                            # Set block format background for every paragraph
+                            # inside the cell — this covers the line remainder
+                            # after wrapped text (painted from block bg)
+                            block_bg = QTextBlockFormat()
+                            block_bg.setBackground(cell_color)
+                            cell_start = cell.firstCursorPosition().position()
+                            cell_end = cell.lastCursorPosition().position()
+                            blk = doc.findBlock(cell_start)
+                            while blk.isValid() and blk.position() <= cell_end:
+                                blk_cursor = QTextCursor(blk)
+                                blk_cursor.setBlockFormat(block_bg)
+                                blk = blk.next()
+
                             # Set char backgrounds inside cell to match
                             char_bg = QTextCharFormat()
                             char_bg.setBackground(cell_color)
                             cell_cursor = cell.firstCursorPosition()
                             cell_cursor.setPosition(
-                                cell.lastCursorPosition().position(),
+                                cell_end,
                                 QTextCursor.MoveMode.KeepAnchor,
                             )
                             cell_cursor.mergeCharFormat(char_bg)
