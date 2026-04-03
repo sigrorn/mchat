@@ -100,6 +100,31 @@ class Router:
     def get_provider(self, provider_id: Provider) -> BaseProvider:
         return self._providers[provider_id]
 
+    @staticmethod
+    def _strip_prefix(text: str) -> tuple[list[str], str]:
+        """Strip provider prefixes from text without changing any state.
+
+        Returns (list of prefix names found, cleaned text).
+        """
+        remaining = text
+        found: list[str] = []
+        while True:
+            match = _WORD_PREFIX.match(remaining)
+            if not match:
+                break
+            prefix = match.group(1).lower()
+            if prefix in _SPECIAL_PREFIXES:
+                if found:
+                    break
+                found.append(prefix)
+                remaining = remaining[match.end():]
+                break
+            prov = PREFIX_TO_PROVIDER.get(prefix)
+            if prov:
+                found.append(prefix)
+            remaining = remaining[match.end():]
+        return found, remaining.strip() if found else text
+
     @property
     def last_used(self) -> Provider | list[Provider]:
         """For backward compat — returns single provider or list."""

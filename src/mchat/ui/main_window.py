@@ -618,7 +618,20 @@ class MainWindow(QMainWindow):
             idx = self._db.get_mark(self._current_conv.id, limit_mark)
             if idx is not None and idx < len(messages):
                 messages = messages[idx:]
-        context.extend(messages)
+
+        # Strip provider prefixes from user messages so providers don't
+        # see routing metadata like "claude," or "flipped," in context
+        from mchat.router import Router
+        for msg in messages:
+            if msg.role == Role.USER:
+                _, cleaned = Router._strip_prefix(msg.content)
+                context.append(
+                    Message(role=msg.role, content=cleaned,
+                            provider=msg.provider, model=msg.model,
+                            conversation_id=msg.conversation_id, id=msg.id)
+                )
+            else:
+                context.append(msg)
         return context
 
     # ------------------------------------------------------------------
