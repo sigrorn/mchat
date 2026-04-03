@@ -28,7 +28,16 @@ DEFAULTS = {
     "color_gemini": "#c8d8e8",
     "color_perplexity": "#d8c8e8",
     "column_mode": False,
-    "system_prompt": "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.",
+    "system_prompt": (
+        "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.\n\n"
+        "Be aware, I'm addressing you from a chat client that is connected and talking to multiple providers "
+        "-- if a block begins with \"GPT's take\", it indicates that what you're seeing is a response from one "
+        "of OpenAI's GPT models, \"Claude's take\" for answers from Anthropic models, \"Gemini's take\" one of "
+        "Google's Gemini models, \"Perplexity's take\" for Perplexity models.\n"
+        "(If I refer to 'all of you', that means all of the AI models that responded before)\n\n"
+        "So, when I ask whether something is agreeable to all of you, only answer whether it's agreeable "
+        "from your own perspective."
+    ),
     "system_prompt_claude": "",
     "system_prompt_openai": "",
     "system_prompt_gemini": "",
