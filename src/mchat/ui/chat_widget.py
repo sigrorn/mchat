@@ -442,13 +442,19 @@ class ChatWidget(QTextEdit):
                 table_last = doc.findBlock(table.lastCursorPosition().position()).blockNumber()
                 table_block_ranges.append((table_first, table_last))
 
-                # Table frame: no gaps, full width
+                # Table frame: no gaps, full width, equal columns
                 tf = table.format()
                 tf.setMargin(0)
                 tf.setCellSpacing(0)
                 tf.setCellPadding(8)
                 tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
                 tf.setBackground(QColor("#f5f5f5"))
+                num_cols = table.columns()
+                if num_cols > 0:
+                    col_pct = 100.0 / num_cols
+                    tf.setColumnWidthConstraints(
+                        [QTextLength(QTextLength.Type.PercentageLength, col_pct)] * num_cols
+                    )
                 table.setFormat(tf)
 
                 # Per-cell background: each column gets its provider colour
