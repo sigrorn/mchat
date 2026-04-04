@@ -16,21 +16,29 @@ from mchat.db import Database
 from mchat.ui.main_window import MainWindow
 
 def _find_icon() -> Path:
-    """Find the icon file, checking PyInstaller bundle path first."""
-    candidates = [
-        Path(__file__).parent / "resources",
-    ]
-    # PyInstaller stores data files under sys._MEIPASS
+    """Find the icon file, checking multiple bundle/source locations."""
+    candidates: list[Path] = []
+    # PyInstaller stores data files under sys._MEIPASS at runtime
     if hasattr(sys, "_MEIPASS"):
-        candidates.insert(0, Path(sys._MEIPASS) / "mchat" / "resources")
+        base = Path(sys._MEIPASS)
+        candidates.append(base / "mchat" / "resources")
+        candidates.append(base / "resources")
+        candidates.append(base)
+    # When running as a PyInstaller folder build, the exe dir has _internal
+    if hasattr(sys, "frozen"):
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "_internal" / "mchat" / "resources")
+        candidates.append(exe_dir / "mchat" / "resources")
+        candidates.append(exe_dir)
+    # Source/installed package layout
+    candidates.append(Path(__file__).parent / "resources")
+
     for d in candidates:
         for name in ("icon.ico", "icon.png"):
             p = d / name
             if p.exists():
                 return p
     return Path(__file__).parent / "resources" / "icon.png"
-
-_ICON_PATH = _find_icon()
 
 
 def main() -> None:
@@ -45,7 +53,9 @@ def main() -> None:
     app.setApplicationName("mchat")
     app.setStyle("Fusion")
 
-    icon = QIcon(str(_ICON_PATH)) if _ICON_PATH.exists() else QIcon()
+    # Resolve icon at runtime (lazily) so PyInstaller's _MEIPASS is set
+    icon_path = _find_icon()
+    icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     if not icon.isNull():
         app.setWindowIcon(icon)
 
