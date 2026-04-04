@@ -7,7 +7,7 @@ echo === Building mchat ===
 cd /d "%~dp0\.."
 
 echo [1/3] Running PyInstaller...
-.venv-win\Scripts\pyinstaller.exe --clean --noconfirm mchat.spec
+.venv-win\Scripts\pyinstaller.exe --noconfirm mchat.spec
 if errorlevel 1 (
     echo PyInstaller failed!
     exit /b 1
