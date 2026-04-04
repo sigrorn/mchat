@@ -91,6 +91,9 @@ class ChatWidget(QTextEdit):
         }
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
+        # Set of message indices that are excluded from provider context
+        # (e.g. before //limit). Rendered with paler colours.
+        self._excluded_indices: set[int] = set()
         self._block_roles: dict[int, _RoleInfo] = {}
         self._is_empty = True
         self._md = markdown.Markdown(
@@ -153,6 +156,41 @@ class ChatWidget(QTextEdit):
             return self._colors.get(message.provider.value, self._colors["user"])
         return self._colors["user"]
 
+    @staticmethod
+    def _blend_toward_white(hex_color: str, amount: float = 0.6) -> str:
+        """Blend a hex colour toward white by the given amount (0..1)."""
+        c = QColor(hex_color)
+        r = int(c.red() + (255 - c.red()) * amount)
+        g = int(c.green() + (255 - c.green()) * amount)
+        b = int(c.blue() + (255 - c.blue()) * amount)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _effective_color_for(self, message: Message, index: int) -> str:
+        """Return the (possibly shaded) colour for a message at this index."""
+        base = self._color_for(message)
+        if index in self._excluded_indices:
+            return self._blend_toward_white(base)
+        return base
+
+    def _effective_text_color(self, index: int) -> str:
+        """Return text colour, faded if the message is excluded."""
+        if index in self._excluded_indices:
+            return "#9a9a9a"
+        return "#1a1a1a"
+
+    def set_excluded_indices(self, indices: set[int]) -> None:
+        """Set which message indices are excluded from provider context.
+
+        Called before rendering messages; messages at these indices are
+        shaded to indicate they won't be sent to providers.
+        """
+        self._excluded_indices = set(indices)
+
+    def _make_block_fmt_for_index(self, message: Message, index: int) -> QTextBlockFormat:
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor(self._effective_color_for(message, index)))
+        return fmt
+
     def _make_block_fmt(self, message: Message) -> QTextBlockFormat:
         fmt = QTextBlockFormat()
         fmt.setBackground(QColor(self._color_for(message)))
@@ -181,14 +219,16 @@ class ChatWidget(QTextEdit):
     def _apply_bg_to_range(
         self, start_block: int, end_block: int,
         block_fmt: QTextBlockFormat, info: _RoleInfo, color: QColor,
+        text_color: str = "#1a1a1a",
     ) -> None:
         """Apply background colour and role to all blocks and table cells in range."""
         doc = self.document()
         tables_seen: set[int] = set()  # keyed by document position of table start
 
-        # Char format to set background matching the block colour
-        match_bg = QTextCharFormat()
-        match_bg.setBackground(color)
+        # Char format to set background and text colour
+        match_fmt = QTextCharFormat()
+        match_fmt.setBackground(color)
+        match_fmt.setForeground(QColor(text_color))
 
         for bn in range(start_block, end_block + 1):
             block = doc.findBlockByNumber(bn)
@@ -201,7 +241,7 @@ class ChatWidget(QTextEdit):
             # Set char-level backgrounds to match block background
             bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
             bc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            bc.mergeCharFormat(match_bg)
+            bc.mergeCharFormat(match_fmt)
 
             # If this block is inside a table, colour all cells
             table = bc.currentTable()
@@ -230,9 +270,15 @@ class ChatWidget(QTextEdit):
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        block_fmt = self._make_block_fmt(message)
+        # Index of this message (it's the next one to be appended)
+        msg_index = len(self._messages) - 1  # already appended by caller
+        if msg_index < 0:
+            msg_index = 0
+
+        block_fmt = self._make_block_fmt_for_index(message, msg_index)
         info = self._role_info(message)
-        color = QColor(self._color_for(message))
+        color = QColor(self._effective_color_for(message, msg_index))
+        text_color = self._effective_text_color(msg_index)
 
         # Start a new block (or reuse the initial empty one)
         if self._is_empty:
@@ -251,8 +297,8 @@ class ChatWidget(QTextEdit):
             char_fmt = cursor.charFormat()
             char_fmt.setForeground(QColor("#888"))
             cursor.insertText(f"{msg_num} — ", char_fmt)
-            # Reset to default colour for the actual content
-            char_fmt.setForeground(QColor("#1a1a1a"))
+            # Reset to default text colour for the actual content
+            char_fmt.setForeground(QColor(text_color))
             cursor.setCharFormat(char_fmt)
 
         # Insert HTML content
@@ -260,7 +306,7 @@ class ChatWidget(QTextEdit):
         cursor.insertHtml(rendered)
 
         end_block = cursor.block().blockNumber()
-        self._apply_bg_to_range(start_block, end_block, block_fmt, info, color)
+        self._apply_bg_to_range(start_block, end_block, block_fmt, info, color, text_color)
 
     def _rebuild(self) -> None:
         """Re-render all messages with markdown formatting."""
@@ -513,6 +559,7 @@ class ChatWidget(QTextEdit):
         self._messages.clear()
         self._message_positions.clear()
         self._block_roles.clear()
+        self._excluded_indices.clear()
         self._is_empty = True
 
     def update_font_size(self, size: int) -> None:

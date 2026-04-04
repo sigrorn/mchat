@@ -128,6 +128,7 @@ def _handle_limit(tag: str, app) -> bool:
     if tag.upper() == "ALL":
         app._current_conv.limit_mark = None
         app._db.set_conversation_limit(app._current_conv.id, None)
+        app._display_messages(app._current_conv.messages)
         app._chat.add_note("limit removed — full chat history will be sent")
         return True
     if tag.lower() == "last":
@@ -145,6 +146,7 @@ def _handle_limit(tag: str, app) -> bool:
         app._db.set_mark(app._current_conv.id, mark_name, last_user_idx)
         app._current_conv.limit_mark = mark_name
         app._db.set_conversation_limit(app._current_conv.id, mark_name)
+        app._display_messages(app._current_conv.messages)
         app._chat.add_note(f"limit set to last request (message {msg_num}) — earlier context will not be sent")
         return True
     if tag.isdigit():
@@ -156,6 +158,7 @@ def _handle_limit(tag: str, app) -> bool:
         app._db.set_mark(app._current_conv.id, mark_name, idx - 1)
         app._current_conv.limit_mark = mark_name
         app._db.set_conversation_limit(app._current_conv.id, mark_name)
+        app._display_messages(app._current_conv.messages)
         app._chat.add_note(f"limit set to message {idx} — earlier context will not be sent")
         return True
     app._chat.add_note(f"Error: '{tag}' is not a valid message number — use //limit <N>, //limit last, or //limit ALL")

@@ -881,6 +881,15 @@ class MainWindow(QMainWindow):
             self._update_input_placeholder()
             self._update_input_color()
 
+    def _compute_excluded_indices(self, messages: list[Message]) -> set[int]:
+        """Return message indices that would NOT be sent to providers."""
+        if not self._current_conv or self._current_conv.limit_mark is None:
+            return set()
+        idx = self._db.get_mark(self._current_conv.id, self._current_conv.limit_mark)
+        if idx is None or idx <= 0:
+            return set()
+        return set(range(min(idx, len(messages))))
+
     def _display_messages(self, messages: list[Message]) -> None:
         """Load messages into chat, detecting multi-provider groups.
 
@@ -889,6 +898,8 @@ class MainWindow(QMainWindow):
         """
         import markdown as md_lib
         self._chat.clear_messages()
+        # Tell chat which messages are excluded (before the //limit mark)
+        self._chat.set_excluded_indices(self._compute_excluded_indices(messages))
         self._chat.setUpdatesEnabled(False)
         try:
             i = 0
@@ -925,9 +936,13 @@ class MainWindow(QMainWindow):
                         header_cells = []
                         body_cells = []
                         provider_colors = []
+                        # Check if this group is excluded (all messages at indices < limit)
+                        group_indices = [messages.index(m) for m in ordered]
+                        excluded = any(idx in self._chat._excluded_indices for idx in group_indices)
                         for m in ordered:
                             label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
-                            color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
+                            base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
+                            color = self._chat._blend_toward_white(base_color) if excluded else base_color
                             provider_colors.append(color)
                             md.reset()
                             rendered = md.convert(_strip_echoed_heading(m.content))
