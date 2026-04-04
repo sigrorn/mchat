@@ -91,6 +91,7 @@ Use the checkboxes in the status bar to select multiple providers, or `//select`
 | `//columns` (`//cols`) | Show multi-provider responses side by side |
 | `//lines` | Show multi-provider responses as a list (default) |
 | `//help` | Show all commands |
+| `//vacuum` | Compact the database (rarely needed) |
 
 ### Keyboard shortcuts
 
@@ -122,6 +123,10 @@ Paris is the capital of France.
 
 Pasting text with these prefixes into the input box automatically strips them.
 
+### Database maintenance
+
+Chat history and settings are stored in `~/.mchat/` (SQLite database + JSON config). The database is self-maintaining under normal use. If you delete many large conversations and want to reclaim disk space, run `//vacuum` in the chat. This is rarely needed — the database typically stays under a few MB even after extended use.
+
 ## Development
 
 ```bash
@@ -131,3 +136,22 @@ pytest
 # Run the app
 mchat
 ```
+
+### WSL helper for Codex
+
+This repo includes a stable PowerShell wrapper at `scripts/codex-wsl.ps1` for running repo-local commands inside WSL.
+
+Example:
+
+```powershell
+powershell -File .\scripts\codex-wsl.ps1 "pytest -q"
+```
+
+For the most reusable approval flow, write the bash payload to `outputs/codex-wsl-command.txt` and invoke the wrapper with no arguments:
+
+```powershell
+Set-Content .\outputs\codex-wsl-command.txt "pytest -q"
+powershell -File .\scripts\codex-wsl.ps1
+```
+
+That keeps the actual invoked command fixed, which works better with Codex's permission memory than raw `wsl.exe bash -lc "..."` calls.

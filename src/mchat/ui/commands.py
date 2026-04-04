@@ -28,7 +28,8 @@ _HELP_COMMANDS = (
     "  //rename <text>       — rename the current chat\n"
     "  //columns (//cols)    — show multi-provider responses side by side\n"
     "  //lines               — show multi-provider responses as a list (default)\n"
-    "  //help                — show this help"
+    "  //help                — show this help\n"
+    "  //vacuum              — compact the database (rarely needed)"
 )
 
 _HELP_PROVIDERS = [
@@ -75,6 +76,8 @@ def dispatch(cmd: str, arg: str, app) -> bool:
             app._toggle_column_mode()
         app._chat.add_note("list layout enabled")
         return True
+    if cmd == "//vacuum":
+        return _handle_vacuum(app)
     return False
 
 
@@ -333,4 +336,23 @@ def _handle_providers(app) -> bool:
         char_fmt.setForeground(QColor("#666"))
         cursor.insertText(line, char_fmt)
     app._chat._scroll_to_bottom()
+    return True
+
+
+def _handle_vacuum(app) -> bool:
+    import os
+    db_path = app._db._path
+    size_before = os.path.getsize(db_path)
+    app._db._conn.execute("VACUUM")
+    size_after = os.path.getsize(db_path)
+    saved = size_before - size_after
+    if saved > 0:
+        app._chat.add_note(
+            f"database compacted: {size_before:,} → {size_after:,} bytes "
+            f"({saved:,} bytes freed)"
+        )
+    else:
+        app._chat.add_note(
+            f"database already compact ({size_after:,} bytes)"
+        )
     return True
