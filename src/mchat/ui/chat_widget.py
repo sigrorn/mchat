@@ -77,6 +77,8 @@ class ChatWidget(QTextEdit):
         color_openai: str = COLOR_OPENAI,
         color_gemini: str = COLOR_GEMINI,
         color_perplexity: str = COLOR_PERPLEXITY,
+        exclude_shade_mode: str = "darken",
+        exclude_shade_amount: int = 20,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -89,6 +91,8 @@ class ChatWidget(QTextEdit):
             "gemini": color_gemini,
             "perplexity": color_perplexity,
         }
+        self._exclude_shade_mode = exclude_shade_mode
+        self._exclude_shade_amount = exclude_shade_amount
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
         # Set of message indices that are excluded from provider context
@@ -174,11 +178,18 @@ class ChatWidget(QTextEdit):
         b = int(c.blue() * (1 - amount))
         return f"#{r:02x}{g:02x}{b:02x}"
 
+    def _shade(self, hex_color: str) -> str:
+        """Apply the configured shading to a colour."""
+        amount = max(0.0, min(1.0, self._exclude_shade_amount / 100.0))
+        if self._exclude_shade_mode == "lighten":
+            return self._blend_toward_white(hex_color, amount)
+        return self._darken(hex_color, amount)
+
     def _effective_color_for(self, message: Message, index: int) -> str:
         """Return the (possibly shaded) colour for a message at this index."""
         base = self._color_for(message)
         if index in self._excluded_indices:
-            return self._darken(base)
+            return self._shade(base)
         return base
 
     def _effective_text_color(self, index: int) -> str:
@@ -581,6 +592,12 @@ class ChatWidget(QTextEdit):
             # Accept both "color_claude" and "claude" forms
             name = key.removeprefix("color_")
             self._colors[name] = value
+        self._rebuild()
+
+    def update_shading(self, mode: str, amount: int) -> None:
+        """Update exclude shading mode and amount, re-render."""
+        self._exclude_shade_mode = mode
+        self._exclude_shade_amount = amount
         self._rebuild()
 
     # ------------------------------------------------------------------

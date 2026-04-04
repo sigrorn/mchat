@@ -104,6 +104,21 @@ class SettingsDialog(QDialog):
         reset_colors_btn.clicked.connect(self._reset_colors)
         form.addRow("", reset_colors_btn)
 
+        # Exclude shading (for messages outside //limit)
+        self._exclude_shade_mode = QComboBox()
+        self._exclude_shade_mode.addItems(["darken", "lighten"])
+        current_mode = str(self._config.get("exclude_shade_mode") or "darken")
+        idx = self._exclude_shade_mode.findText(current_mode)
+        if idx >= 0:
+            self._exclude_shade_mode.setCurrentIndex(idx)
+        form.addRow("Excluded shading:", self._exclude_shade_mode)
+
+        self._exclude_shade_amount = QSpinBox()
+        self._exclude_shade_amount.setRange(0, 100)
+        self._exclude_shade_amount.setSuffix(" %")
+        self._exclude_shade_amount.setValue(int(self._config.get("exclude_shade_amount") or 20))
+        form.addRow("Shading amount:", self._exclude_shade_amount)
+
         # --- General settings ---
         # Default provider
         self._default_provider = QComboBox()
@@ -219,5 +234,7 @@ class SettingsDialog(QDialog):
         self._config.set("default_provider", self._default_provider.currentText())
         self._config.set("system_prompt", self._system_prompt.toPlainText().strip())
         self._config.set("font_size", self._font_size.value())
+        self._config.set("exclude_shade_mode", self._exclude_shade_mode.currentText())
+        self._config.set("exclude_shade_amount", self._exclude_shade_amount.value())
         self._config.save()
         self.accept()

@@ -28,6 +28,8 @@ DEFAULTS = {
     "color_gemini": "#c8d8e8",
     "color_perplexity": "#d8c8e8",
     "column_mode": False,
+    "exclude_shade_mode": "darken",  # "darken" or "lighten"
+    "exclude_shade_amount": 20,  # percentage (0-100)
     "system_prompt": (
         "Be ruthless and direct in your responses. I value clarity, but I also want explained reasoning.\n\n"
         "Be aware, I'm addressing you from a chat client that is connected and talking to multiple providers "

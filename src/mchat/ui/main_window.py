@@ -198,6 +198,8 @@ class MainWindow(QMainWindow):
             color_openai=self._config.get("color_openai"),
             color_gemini=self._config.get("color_gemini"),
             color_perplexity=self._config.get("color_perplexity"),
+            exclude_shade_mode=str(self._config.get("exclude_shade_mode") or "darken"),
+            exclude_shade_amount=int(self._config.get("exclude_shade_amount") or 20),
         )
         self._find_bar = FindBar(self._chat)
         right_layout.addWidget(self._find_bar)
@@ -942,7 +944,7 @@ class MainWindow(QMainWindow):
                         for m in ordered:
                             label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
                             base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
-                            color = self._chat._darken(base_color) if excluded else base_color
+                            color = self._chat._shade(base_color) if excluded else base_color
                             provider_colors.append(color)
                             md.reset()
                             rendered = md.convert(_strip_echoed_heading(m.content))
@@ -1137,4 +1139,8 @@ class MainWindow(QMainWindow):
                 **{meta["color_key"]: self._config.get(meta["color_key"])
                    for meta in PROVIDER_META.values()},
                 color_user=self._config.get("color_user"),
+            )
+            self._chat.update_shading(
+                mode=str(self._config.get("exclude_shade_mode") or "darken"),
+                amount=int(self._config.get("exclude_shade_amount") or 20),
             )
