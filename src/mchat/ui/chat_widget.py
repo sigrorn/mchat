@@ -165,17 +165,25 @@ class ChatWidget(QTextEdit):
         b = int(c.blue() + (255 - c.blue()) * amount)
         return f"#{r:02x}{g:02x}{b:02x}"
 
+    @staticmethod
+    def _darken(hex_color: str, amount: float = 0.2) -> str:
+        """Darken a hex colour by the given amount (0..1)."""
+        c = QColor(hex_color)
+        r = int(c.red() * (1 - amount))
+        g = int(c.green() * (1 - amount))
+        b = int(c.blue() * (1 - amount))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
     def _effective_color_for(self, message: Message, index: int) -> str:
         """Return the (possibly shaded) colour for a message at this index."""
         base = self._color_for(message)
         if index in self._excluded_indices:
-            return self._blend_toward_white(base)
+            return self._darken(base)
         return base
 
     def _effective_text_color(self, index: int) -> str:
-        """Return text colour, faded if the message is excluded."""
-        if index in self._excluded_indices:
-            return "#9a9a9a"
+        """Return text colour for a message at this index."""
+        # Use the same dark text — background darkening provides the visual cue
         return "#1a1a1a"
 
     def set_excluded_indices(self, indices: set[int]) -> None:

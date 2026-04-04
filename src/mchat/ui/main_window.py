@@ -942,7 +942,7 @@ class MainWindow(QMainWindow):
                         for m in ordered:
                             label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
                             base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
-                            color = self._chat._blend_toward_white(base_color) if excluded else base_color
+                            color = self._chat._darken(base_color) if excluded else base_color
                             provider_colors.append(color)
                             md.reset()
                             rendered = md.convert(_strip_echoed_heading(m.content))
