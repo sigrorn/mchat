@@ -644,6 +644,50 @@ class MainWindow(QMainWindow):
     # // commands (delegated to ui.commands module)
     # ------------------------------------------------------------------
 
+    def _handle_selection_adjust(self, text: str) -> bool:
+        """Handle +provider / -provider selection adjustments."""
+        from mchat.router import PREFIX_TO_PROVIDER
+        op = text[0]  # '+' or '-'
+        name = text[1:].strip().lower()
+        provider = PREFIX_TO_PROVIDER.get(name)
+        if provider is None:
+            return False  # not a provider name — let normal parsing handle it
+
+        if not self._router:
+            self._chat.add_note("Error: no providers configured")
+            return True
+
+        configured = set(self._router._providers.keys())
+        if provider not in configured:
+            self._chat.add_note(f"Error: {_PROVIDER_DISPLAY[provider]} has no API key")
+            return True
+
+        current = list(self._router.selection)
+
+        if op == "+":
+            if provider not in current:
+                current.append(provider)
+                self._router.set_selection(current)
+            names = ", ".join(_PROVIDER_DISPLAY[p] for p in self._router.selection)
+            self._chat.add_note(f"selected: {names}")
+        else:  # '-'
+            if provider not in current:
+                self._chat.add_note(f"{_PROVIDER_DISPLAY[provider]} is not in current selection")
+                return True
+            if len(current) <= 1:
+                self._chat.add_note("Error: cannot remove the last provider from selection")
+                return True
+            current.remove(provider)
+            self._router.set_selection(current)
+            names = ", ".join(_PROVIDER_DISPLAY[p] for p in self._router.selection)
+            self._chat.add_note(f"selected: {names}")
+
+        self._save_selection()
+        self._sync_checkboxes_from_selection()
+        self._update_input_placeholder()
+        self._update_input_color()
+        return True
+
     def _handle_command(self, text: str) -> bool:
         stripped = text.strip()
         if not stripped.startswith("//"):
@@ -684,6 +728,12 @@ class MainWindow(QMainWindow):
         if text.strip().startswith("//"):
             self._handle_command(text)
             return
+
+        # +provider / -provider selection adjustment
+        stripped = text.strip()
+        if len(stripped) > 1 and stripped[0] in ("+", "-"):
+            if self._handle_selection_adjust(stripped):
+                return
 
         if not self._router:
             QMessageBox.warning(

@@ -22,6 +22,8 @@ _HELP_COMMANDS = (
     "  //hide                — hide the last request+responses, copy request to input\n"
     "  //unhide              — unhide all hidden messages\n"
     "  //retry               — re-attempt the last failed request\n"
+    "  +<provider>           — add a provider to the current selection\n"
+    "  -<provider>           — remove a provider from the selection\n"
     "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
     "  //select all          — target all configured providers\n"
     "  //providers           — list available providers and config status\n"
