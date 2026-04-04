@@ -15,8 +15,22 @@ from mchat.config import Config
 from mchat.db import Database
 from mchat.ui.main_window import MainWindow
 
-_RESOURCES = Path(__file__).parent / "resources"
-_ICON_PATH = _RESOURCES / "icon.ico" if (_RESOURCES / "icon.ico").exists() else _RESOURCES / "icon.png"
+def _find_icon() -> Path:
+    """Find the icon file, checking PyInstaller bundle path first."""
+    candidates = [
+        Path(__file__).parent / "resources",
+    ]
+    # PyInstaller stores data files under sys._MEIPASS
+    if hasattr(sys, "_MEIPASS"):
+        candidates.insert(0, Path(sys._MEIPASS) / "mchat" / "resources")
+    for d in candidates:
+        for name in ("icon.ico", "icon.png"):
+            p = d / name
+            if p.exists():
+                return p
+    return Path(__file__).parent / "resources" / "icon.png"
+
+_ICON_PATH = _find_icon()
 
 
 def main() -> None:
