@@ -2,11 +2,14 @@
 # Component: ConversationManager
 # Responsibility: Own the conversation lifecycle outside MainWindow —
 #                 listing, selecting, creating, renaming, exporting
-#                 and deleting conversations. Coordinates the Sidebar,
-#                 the current conversation on the host, the chat
-#                 rendering pipeline, and the DB.
-# Collaborators: MainWindow (host), db, sidebar, chat_widget,
-#                message_renderer, models.conversation
+#                 and deleting conversations. Data-layer access (db,
+#                 session state, router selection) goes through the
+#                 ServicesContext; presentational access (sidebar,
+#                 chat, renderer, refresh callbacks) still goes through
+#                 a MainWindow host reference, which will be narrowed
+#                 to a Protocol in #51.
+# Collaborators: services.ServicesContext, MainWindow (host),
+#                html_exporter, PySide6
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -14,24 +17,20 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from mchat.models.conversation import Conversation
 from mchat.models.message import Provider
 from mchat.ui.html_exporter import exporter_from_config
+from mchat.ui.services import ServicesContext
 
 if TYPE_CHECKING:
     from mchat.ui.main_window import MainWindow
 
 
 class ConversationManager:
-    """All conversation-level operations the main window exposes.
+    """All conversation-level operations the main window exposes."""
 
-    Holds a reference to the host so it can reach ``_db``, ``_sidebar``,
-    ``_chat``, ``_router``, ``_current_conv``, and the various
-    refresh/sync methods that need to fire after conversation changes.
-    """
-
-    def __init__(self, host: "MainWindow") -> None:
+    def __init__(self, host: "MainWindow", services: ServicesContext) -> None:
         self._host = host
+        self._services = services
 
     # ------------------------------------------------------------------
     # Listing & selection
@@ -39,29 +38,32 @@ class ConversationManager:
 
     def load_conversations(self) -> None:
         host = self._host
-        conversations = host._db.list_conversations()
+        conversations = self._services.db.list_conversations()
         host._sidebar.set_conversations(conversations)
         if conversations:
             host._sidebar.select_conversation(conversations[0].id)
 
     def on_conversation_selected(self, conv_id: int) -> None:
         host = self._host
-        conv = host._db.get_conversation(conv_id)
+        db = self._services.db
+        conv = db.get_conversation(conv_id)
         if not conv:
             return
-        messages = host._db.get_messages(conv_id)
-        host._current_conv = conv
-        host._current_conv.messages = messages
+        messages = db.get_messages(conv_id)
+        # Push the loaded conversation + messages through the session
+        # in a single call so conversation_changed and messages_changed
+        # fire in the right order.
+        self._services.session.set_current(conv, messages=messages)
 
         # Restore selection from last_provider (comma-separated)
-        if conv.last_provider and host._router:
+        if conv.last_provider and self._services.router:
             try:
                 providers = [
                     Provider(v.strip())
                     for v in conv.last_provider.split(",") if v.strip()
                 ]
                 if providers:
-                    host._router.set_selection(providers)
+                    self._services.router.set_selection(providers)
             except ValueError:
                 pass
         host._sync_checkboxes_from_selection()
@@ -77,9 +79,9 @@ class ConversationManager:
 
     def new_chat(self) -> None:
         host = self._host
-        system_prompt = host._config.get("system_prompt")
-        conv = host._db.create_conversation(system_prompt=system_prompt)
-        host._current_conv = conv
+        system_prompt = self._services.config.get("system_prompt")
+        conv = self._services.db.create_conversation(system_prompt=system_prompt)
+        self._services.session.set_current(conv)
         host._chat.clear_messages()
         host._update_spend_labels()
         host._sync_matrix_panel()
@@ -88,23 +90,24 @@ class ConversationManager:
 
     def on_rename(self, conv_id: int, new_title: str) -> None:
         host = self._host
-        host._db.update_conversation_title(conv_id, new_title)
-        if host._current_conv and host._current_conv.id == conv_id:
-            host._current_conv.title = new_title
+        self._services.db.update_conversation_title(conv_id, new_title)
+        current = self._services.session.current
+        if current and current.id == conv_id:
+            self._services.session.set_title(new_title)
         # Update the sidebar item in place — no reload, no re-render.
         host._sidebar.update_conversation_title(conv_id, new_title)
 
     def on_save(self, conv_id: int) -> None:
         host = self._host
-        messages = host._db.get_messages(conv_id)
+        messages = self._services.db.get_messages(conv_id)
         if not messages:
             return
-        convs = host._db.list_conversations()
+        convs = self._services.db.list_conversations()
         conv = next((c for c in convs if c.id == conv_id), None)
         title = (conv.title if conv else "chat").replace(" ", "_")[:40]
 
         # Pure non-Qt rendering — no temp widget, no private reach-through.
-        html = exporter_from_config(host._config).export(messages)
+        html = exporter_from_config(self._services.config).export(messages)
 
         path, _ = QFileDialog.getSaveFileName(
             host, "Export Chat", f"{title}.html", "HTML Files (*.html)"
@@ -122,10 +125,11 @@ class ConversationManager:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        was_current = host._current_conv and host._current_conv.id == conv_id
-        host._db.delete_conversation(conv_id)
+        current = self._services.session.current
+        was_current = current is not None and current.id == conv_id
+        self._services.db.delete_conversation(conv_id)
         if was_current:
-            host._current_conv = None
+            self._services.session.clear()
             host._chat.clear_messages()
         self.load_conversations()
         if was_current:
@@ -137,10 +141,11 @@ class ConversationManager:
 
     def save_selection(self) -> None:
         """Persist the current router selection onto the conversation."""
-        host = self._host
-        if host._current_conv and host._router:
-            sel_str = ",".join(p.value for p in host._router.selection)
-            host._current_conv.last_provider = sel_str
-            host._db.update_conversation_last_provider(
-                host._current_conv.id, sel_str
+        current = self._services.session.current
+        router = self._services.router
+        if current and router:
+            sel_str = ",".join(p.value for p in router.selection)
+            self._services.session.set_last_provider(sel_str)
+            self._services.db.update_conversation_last_provider(
+                current.id, sel_str
             )

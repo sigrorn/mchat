@@ -102,6 +102,7 @@ class PreferencesAdapter:
 
         # Re-apply everything that might have changed
         host._init_providers()
+        host._rebuild_services()
         host._populate_model_combos()
         host._apply_all_combo_styles()
         host._sync_matrix_panel()

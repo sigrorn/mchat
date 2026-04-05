@@ -47,6 +47,7 @@ from mchat.ui.message_renderer import (
 from mchat.ui.preferences_adapter import PreferencesAdapter
 from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
+from mchat.ui.services import ServicesContext
 from mchat.ui.state import ConversationSession, ModelCatalog, ProviderSelectionState
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.sidebar import Sidebar
@@ -94,13 +95,18 @@ class MainWindow(QMainWindow):
         self._model_catalog = ModelCatalog(self)
 
         self._init_providers()
+
+        # Shared services + state context — passed into extracted
+        # controllers so they can depend on a narrow typed surface
+        # instead of a full MainWindow reference. See ui/services.py.
+        self._rebuild_services()
         # PreferencesAdapter must exist before _build_ui, because
         # _build_ui calls _restore_geometry -> self._prefs.restore_geometry.
         self._prefs = PreferencesAdapter(self)
         self._build_ui()
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._send = SendController(self)
-        self._conv_mgr = ConversationManager(self)
+        self._conv_mgr = ConversationManager(self, self._services)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
@@ -133,6 +139,18 @@ class MainWindow(QMainWindow):
             self._session.clear()
         else:
             self._session.set_current(conv)
+
+    def _rebuild_services(self) -> None:
+        """(Re)build the ServicesContext from the current state. Called
+        from __init__ and from _open_settings after providers change."""
+        self._services = ServicesContext(
+            config=self._config,
+            db=self._db,
+            router=self._router,
+            session=self._session,
+            selection=self._selection_state,
+            model_catalog=self._model_catalog,
+        )
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
