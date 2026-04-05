@@ -201,6 +201,11 @@ class MainWindow(QMainWindow):
             exclude_shade_mode=str(self._config.get("exclude_shade_mode") or "darken"),
             exclude_shade_amount=int(self._config.get("exclude_shade_amount") or 20),
         )
+        # Delegate ChatWidget rebuilds through _display_messages so
+        # multi-provider column groups are preserved
+        self._chat._rebuild_callback = lambda: self._display_messages(
+            self._current_conv.messages if self._current_conv else []
+        )
         self._find_bar = FindBar(self._chat)
         right_layout.addWidget(self._find_bar)
         right_layout.addWidget(self._chat, stretch=1)

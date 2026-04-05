@@ -93,6 +93,8 @@ class ChatWidget(QTextEdit):
         }
         self._exclude_shade_mode = exclude_shade_mode
         self._exclude_shade_amount = exclude_shade_amount
+        # Optional callback for column-aware rebuild (set by MainWindow)
+        self._rebuild_callback = None
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
         # Set of message indices that are excluded from provider context
@@ -328,7 +330,14 @@ class ChatWidget(QTextEdit):
         self._apply_bg_to_range(start_block, end_block, block_fmt, info, color, text_color)
 
     def _rebuild(self) -> None:
-        """Re-render all messages with markdown formatting."""
+        """Re-render all messages with markdown formatting.
+
+        If a rebuild callback is set (by MainWindow), delegate to it so
+        multi-provider groups are rendered with the correct layout mode.
+        """
+        if self._rebuild_callback is not None:
+            self._rebuild_callback()
+            return
         saved = list(self._messages)
         self.clear()
         self._messages.clear()
