@@ -226,6 +226,49 @@ class TestPinning:
         assert messages[0].pin_target == "claude,openai"
 
 
+class TestSchemaVersioning:
+    def test_new_db_has_current_version(self, db):
+        from mchat.db import CURRENT_SCHEMA_VERSION
+        version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == CURRENT_SCHEMA_VERSION
+
+    def test_reopen_does_not_downgrade(self, tmp_path):
+        from mchat.db import Database, CURRENT_SCHEMA_VERSION
+        db1 = Database(db_path=tmp_path / "v.db")
+        db1.close()
+        db2 = Database(db_path=tmp_path / "v.db")
+        try:
+            version = db2._conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version == CURRENT_SCHEMA_VERSION
+        finally:
+            db2.close()
+
+    def test_legacy_db_upgraded(self, tmp_path):
+        """A DB created before versioning (user_version=0) but with all
+        current columns present must still end up at the current version
+        after the migration runs."""
+        import sqlite3
+        from mchat.db import Database, CURRENT_SCHEMA_VERSION
+
+        # Create a DB at version 0, then let Database upgrade it.
+        path = tmp_path / "legacy.db"
+        raw = sqlite3.connect(str(path))
+        raw.execute("PRAGMA user_version = 0")
+        raw.commit()
+        raw.close()
+
+        db = Database(db_path=path)
+        try:
+            version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version == CURRENT_SCHEMA_VERSION
+            # Smoke test: can still add and read a message
+            conv = db.create_conversation("legacy")
+            db.add_message(Message(role=Role.USER, content="hi", conversation_id=conv.id))
+            assert len(db.get_messages(conv.id)) == 1
+        finally:
+            db.close()
+
+
 class TestVisibility:
     def test_addressed_to_roundtrip(self, db):
         conv = db.create_conversation()
