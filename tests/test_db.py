@@ -224,3 +224,47 @@ class TestPinning:
         messages = db.get_messages(conv.id)
         assert messages[0].pinned is True
         assert messages[0].pin_target == "claude,openai"
+
+
+class TestVisibility:
+    def test_addressed_to_roundtrip(self, db):
+        conv = db.create_conversation()
+        db.add_message(Message(
+            role=Role.USER,
+            content="hi claude",
+            conversation_id=conv.id,
+            addressed_to="claude",
+        ))
+        db.add_message(Message(
+            role=Role.USER,
+            content="hi all",
+            conversation_id=conv.id,
+            addressed_to="all",
+        ))
+        db.add_message(Message(
+            role=Role.USER,
+            content="legacy",
+            conversation_id=conv.id,
+        ))
+        messages = db.get_messages(conv.id)
+        assert messages[0].addressed_to == "claude"
+        assert messages[1].addressed_to == "all"
+        assert messages[2].addressed_to is None
+
+    def test_visibility_matrix_default_empty(self, db):
+        conv = db.create_conversation()
+        fetched = db.get_conversation(conv.id)
+        assert fetched.visibility_matrix == {}
+
+    def test_set_and_get_visibility_matrix(self, db):
+        conv = db.create_conversation()
+        matrix = {"openai": ["claude"], "gemini": []}
+        db.set_visibility_matrix(conv.id, matrix)
+        fetched = db.get_conversation(conv.id)
+        assert fetched.visibility_matrix == matrix
+
+    def test_visibility_matrix_in_list_conversations(self, db):
+        conv = db.create_conversation()
+        db.set_visibility_matrix(conv.id, {"claude": ["openai", "gemini"]})
+        convs = db.list_conversations()
+        assert convs[0].visibility_matrix == {"claude": ["openai", "gemini"]}
