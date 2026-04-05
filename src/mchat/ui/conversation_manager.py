@@ -74,7 +74,10 @@ class ConversationManager:
         # fire in the right order.
         self._services.session.set_current(conv, messages=messages)
 
-        # Restore selection from last_provider (comma-separated)
+        # Restore selection from last_provider (comma-separated).
+        # set_selection fires ProviderSelectionState.selection_changed
+        # which drives sync/placeholder/color via the host fan-out.
+        selection_changed = False
         if conv.last_provider and self._services.router:
             try:
                 providers = [
@@ -83,11 +86,17 @@ class ConversationManager:
                 ]
                 if providers:
                     self._services.router.set_selection(providers)
+                    selection_changed = True
             except ValueError:
                 pass
-        host._sync_checkboxes_from_selection()
-        host._update_input_placeholder()
-        host._update_input_color()
+        if not selection_changed:
+            # No selection change fired the fan-out; do it manually so
+            # the new conversation still gets its placeholder/colour
+            # updated (the colour may depend on the conversation's
+            # title, context, etc.).
+            host._sync_checkboxes_from_selection()
+            host._update_input_placeholder()
+            host._update_input_color()
         host._update_spend_labels()
         host._sync_matrix_panel()
         host._display_messages(messages)

@@ -57,10 +57,9 @@ def handle_select(arg: str, host: CommandHost) -> bool:
         names = ", ".join(_PROVIDER_DISPLAY[p] for p in valid)
         host._chat.add_note(f"selected: {names}")
 
+    # router.set_selection fires ProviderSelectionState.selection_changed
+    # which drives sync/placeholder/color via the fan-out handler.
     host._save_selection()
-    host._sync_checkboxes_from_selection()
-    host._update_input_placeholder()
-    host._update_input_color()
     return True
 
 

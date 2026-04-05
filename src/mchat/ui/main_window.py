@@ -101,6 +101,17 @@ class MainWindow(QMainWindow):
         # controllers so they can depend on a narrow typed surface
         # instead of a full MainWindow reference. See ui/services.py.
         self._rebuild_services()
+
+        # Action bundle: whenever the provider selection changes (via
+        # router.set_selection, checkbox toggle, //select, +/-, or the
+        # parse path for prefix-only messages), fan out the dependent
+        # UI refreshes as a single side-effect group. This replaces the
+        # previous pattern where every caller had to manually invoke
+        # _sync_checkboxes_from_selection / _update_input_placeholder /
+        # _update_input_color in sequence after each mutation. See #58.
+        self._selection_state.selection_changed.connect(
+            self._on_selection_state_changed
+        )
         # PreferencesAdapter + SettingsApplier must exist before _build_ui,
         # because _build_ui calls _restore_geometry -> prefs.restore_geometry
         # and wires the Settings button to settings_applier.open.
@@ -350,6 +361,17 @@ class MainWindow(QMainWindow):
             return
         self._provider_panel.sync_checkboxes(set(self._router.selection))
 
+    def _on_selection_state_changed(self, _selection) -> None:
+        """Action bundle: runs every UI refresh that depends on the
+        current provider selection. Connected to
+        ``ProviderSelectionState.selection_changed`` in __init__, so
+        any code path that mutates selection via ``router.set_selection``
+        or parse-driven updates automatically triggers the fan-out.
+        """
+        self._sync_checkboxes_from_selection()
+        self._update_input_placeholder()
+        self._update_input_color()
+
     def _on_checkbox_changed(self, provider_id: Provider) -> None:
         if not self._router:
             return
@@ -358,10 +380,11 @@ class MainWindow(QMainWindow):
             self._sync_checkboxes_from_selection()
             self._chat.add_note("Error: at least one provider must be selected")
             return
+        # set_selection writes through ProviderSelectionState which
+        # emits selection_changed → _on_selection_state_changed fan-out
+        # handles sync/placeholder/color. We still need to persist.
         self._router.set_selection(selected)
         self._save_selection()
-        self._update_input_placeholder()
-        self._update_input_color()
 
     def _apply_settings_btn_style(self) -> None:
         self._settings_btn.setStyleSheet(
@@ -550,10 +573,9 @@ class MainWindow(QMainWindow):
             names = ", ".join(_PROVIDER_DISPLAY[p] for p in self._router.selection)
             self._chat.add_note(f"selected: {names}")
 
+        # set_selection fires ProviderSelectionState.selection_changed
+        # which drives sync/placeholder/color via the fan-out handler.
         self._save_selection()
-        self._sync_checkboxes_from_selection()
-        self._update_input_placeholder()
-        self._update_input_color()
         return True
 
     def _handle_command(self, text: str) -> bool:

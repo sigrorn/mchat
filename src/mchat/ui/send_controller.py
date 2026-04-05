@@ -138,14 +138,13 @@ class SendController:
         if svc.session.current is None:
             host._on_new_chat()
 
-        # Route message
+        # Route message. parse() writes any new selection into
+        # ProviderSelectionState, which fires selection_changed →
+        # the fan-out on the host updates sync/placeholder/color.
         targets, cleaned_text = svc.router.parse(text)
 
         # If provider prefixes consumed everything, treat as selection change
         if not cleaned_text.strip() and targets != svc.router.selection:
-            host._sync_checkboxes_from_selection()
-            host._update_input_placeholder()
-            host._update_input_color()
             host._save_selection()
             names = ", ".join(PROVIDER_DISPLAY[p] for p in targets)
             host._chat.add_note(f"selected: {names}")
@@ -192,7 +191,8 @@ class SendController:
 
         host._input.set_enabled(False)
         host._save_selection()
-        host._sync_checkboxes_from_selection()
+        # sync/placeholder/color already fan out from parse() writing
+        # to ProviderSelectionState. No explicit refresh needed here.
         self.clear_retry_stash()
 
         if len(targets) == 1:
