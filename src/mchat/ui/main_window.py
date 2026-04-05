@@ -35,22 +35,12 @@ from mchat.providers.openai_provider import OpenAIProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget, FindBar
+from mchat.ui.context_builder import build_context, compute_excluded_indices
 from mchat.ui.matrix_panel import MatrixPanel
-from mchat.ui.visibility import filter_for_provider
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
-
-def _pin_matches(pin_target: str | None, provider_id: Provider) -> bool:
-    """Return True if a pinned message targets the given provider."""
-    if not pin_target:
-        return False
-    if pin_target == "all":
-        return True
-    targets = {t.strip().lower() for t in pin_target.split(",") if t.strip()}
-    return provider_id.value in targets
-
 
 def _get_version() -> str:
     """Get version from last git commit timestamp (vYYYYMMDDHHMMSS)."""
@@ -649,69 +639,10 @@ class MainWindow(QMainWindow):
         return self._combos[p].currentText()
 
     def _build_context(self, provider_id: Provider) -> list[Message]:
-        context: list[Message] = []
-
-        # Provider-specific system prompt + main system prompt
-        parts: list[str] = []
-        provider_prompt = self._config.get(
-            PROVIDER_META[provider_id.value]["system_prompt_key"]
+        """Delegate to ui.context_builder — MainWindow is just the host."""
+        return build_context(
+            self._current_conv, provider_id, self._db, self._config
         )
-        if provider_prompt:
-            parts.append(provider_prompt)
-        if self._current_conv.system_prompt:
-            parts.append(self._current_conv.system_prompt)
-        if parts:
-            context.append(
-                Message(role=Role.SYSTEM, content="\n\n".join(parts))
-            )
-
-        all_messages = self._current_conv.messages
-        messages = all_messages
-        limit_mark = self._current_conv.limit_mark
-        cut_idx = 0
-        if limit_mark is not None:
-            idx = self._db.get_mark(self._current_conv.id, limit_mark)
-            if idx is not None and idx < len(all_messages):
-                cut_idx = idx
-                messages = all_messages[idx:]
-
-        # Include pinned messages that fall before the limit cut-off and
-        # target this provider. They are prepended so the provider sees
-        # them as early context regardless of //limit.
-        if cut_idx > 0:
-            pinned_before = [
-                m for m in all_messages[:cut_idx]
-                if m.pinned and _pin_matches(m.pin_target, provider_id)
-            ]
-            if pinned_before:
-                messages = pinned_before + list(messages)
-
-        # Apply per-provider visibility filtering (user message addressing
-        # + assistant visibility matrix). Pinned messages were already
-        # prepended and bypass these filters by design.
-        matrix = self._current_conv.visibility_matrix or {}
-        pinned_count = len(messages) - (len(all_messages) - cut_idx)
-        if pinned_count > 0:
-            pinned_prefix = messages[:pinned_count]
-            rest = messages[pinned_count:]
-            messages = pinned_prefix + filter_for_provider(rest, provider_id, matrix)
-        else:
-            messages = filter_for_provider(messages, provider_id, matrix)
-
-        # Strip provider prefixes from user messages so providers don't
-        # see routing metadata like "claude," or "flipped," in context
-        from mchat.router import Router
-        for msg in messages:
-            if msg.role == Role.USER:
-                _, cleaned = Router._strip_prefix(msg.content)
-                context.append(
-                    Message(role=msg.role, content=cleaned,
-                            provider=msg.provider, model=msg.model,
-                            conversation_id=msg.conversation_id, id=msg.id)
-                )
-            else:
-                context.append(msg)
-        return context
 
     # ------------------------------------------------------------------
     # // commands (delegated to ui.commands module)
@@ -965,26 +896,12 @@ class MainWindow(QMainWindow):
             self._update_input_color()
 
     def _compute_excluded_indices(self, messages: list[Message]) -> set[int]:
-        """Return message indices that would NOT be sent to providers.
-
-        Pinned messages whose target includes any currently-configured
-        provider are NOT excluded (they stay visually unshaded), giving
-        a visual cue that they are still sent despite being before the
-        //limit cut-off.
-        """
-        if not self._current_conv or self._current_conv.limit_mark is None:
-            return set()
-        idx = self._db.get_mark(self._current_conv.id, self._current_conv.limit_mark)
-        if idx is None or idx <= 0:
+        """Delegate to ui.context_builder — single source of truth for
+        which messages fall outside the current context."""
+        if not self._current_conv:
             return set()
         configured = set(self._router._providers.keys()) if self._router else set()
-        excluded: set[int] = set()
-        for i in range(min(idx, len(messages))):
-            m = messages[i]
-            if m.pinned and any(_pin_matches(m.pin_target, p) for p in configured):
-                continue
-            excluded.add(i)
-        return excluded
+        return compute_excluded_indices(self._current_conv, self._db, configured)
 
     def _display_messages(self, messages: list[Message]) -> None:
         """Load messages into chat, detecting multi-provider groups.

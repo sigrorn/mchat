@@ -1,0 +1,161 @@
+# ------------------------------------------------------------------
+# Component: test_context_builder
+# Responsibility: Tests for the pure context-policy functions that
+#                 decide which messages a provider sees (build_context)
+#                 and which indices fall outside that context
+#                 (compute_excluded_indices) for display shading.
+# Collaborators: ui.context_builder, db, models
+# ------------------------------------------------------------------
+from __future__ import annotations
+
+import pytest
+
+from mchat.config import Config
+from mchat.db import Database
+from mchat.models.message import Message, Provider, Role
+from mchat.ui.context_builder import (
+    build_context,
+    compute_excluded_indices,
+    pin_matches,
+)
+
+
+@pytest.fixture
+def db(tmp_path):
+    database = Database(db_path=tmp_path / "test.db")
+    yield database
+    database.close()
+
+
+@pytest.fixture
+def config(tmp_path):
+    return Config(config_path=tmp_path / "cfg.json")
+
+
+@pytest.fixture
+def conv_with_history(db):
+    """Fixture: conversation with 6 messages, user-assistant pairs.
+
+    Indices:
+      0: user "q1"
+      1: assistant "a1" (Claude)
+      2: user "q2"
+      3: assistant "a2" (Claude)
+      4: user "q3"
+      5: assistant "a3" (Claude)
+    """
+    conv = db.create_conversation()
+    contents = [
+        (Role.USER, "q1", None),
+        (Role.ASSISTANT, "a1", Provider.CLAUDE),
+        (Role.USER, "q2", None),
+        (Role.ASSISTANT, "a2", Provider.CLAUDE),
+        (Role.USER, "q3", None),
+        (Role.ASSISTANT, "a3", Provider.CLAUDE),
+    ]
+    for role, text, prov in contents:
+        db.add_message(Message(
+            role=role, content=text, provider=prov,
+            conversation_id=conv.id,
+        ))
+    conv.messages = db.get_messages(conv.id)
+    return conv
+
+
+class TestPinMatches:
+    def test_none_target_is_no_match(self):
+        assert pin_matches(None, Provider.CLAUDE) is False
+
+    def test_all_target_matches_every_provider(self):
+        for p in Provider:
+            assert pin_matches("all", p) is True
+
+    def test_single_target(self):
+        assert pin_matches("claude", Provider.CLAUDE) is True
+        assert pin_matches("claude", Provider.OPENAI) is False
+
+    def test_multi_target(self):
+        assert pin_matches("claude,openai", Provider.CLAUDE) is True
+        assert pin_matches("claude,openai", Provider.OPENAI) is True
+        assert pin_matches("claude,openai", Provider.GEMINI) is False
+
+
+class TestBuildContext:
+    def test_no_limit_returns_full_history(self, db, config, conv_with_history):
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        # No system prompt configured → no SYSTEM message
+        assert [m.content for m in ctx] == ["q1", "a1", "q2", "a2", "q3", "a3"]
+
+    def test_system_prompt_prepended(self, db, config, conv_with_history):
+        conv_with_history.system_prompt = "be terse"
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        assert ctx[0].role == Role.SYSTEM
+        assert "be terse" in ctx[0].content
+
+    def test_limit_slices_earlier_history(self, db, config, conv_with_history):
+        # Set limit to message 3 (index 2 = "q2")
+        db.set_mark(conv_with_history.id, "#3", 2)
+        conv_with_history.limit_mark = "#3"
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        assert [m.content for m in ctx] == ["q2", "a2", "q3", "a3"]
+
+    def test_pinned_before_cutoff_is_rescued(self, db, config, conv_with_history):
+        # Pin message 0 (user "q1") targeted at Claude
+        conv_with_history.messages[0].pinned = True
+        conv_with_history.messages[0].pin_target = "claude"
+        db.set_pinned(conv_with_history.messages[0].id, True, "claude")
+        # Limit to message 5 — "q1" falls before the cutoff
+        db.set_mark(conv_with_history.id, "#5", 4)
+        conv_with_history.limit_mark = "#5"
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        # q1 is prepended (rescued) plus the post-cutoff slice
+        assert [m.content for m in ctx] == ["q1", "q3", "a3"]
+
+    def test_pinned_not_rescued_for_other_provider(self, db, config, conv_with_history):
+        # Pin message 0 targeted ONLY at Claude
+        conv_with_history.messages[0].pinned = True
+        conv_with_history.messages[0].pin_target = "claude"
+        db.set_pinned(conv_with_history.messages[0].id, True, "claude")
+        db.set_mark(conv_with_history.id, "#5", 4)
+        conv_with_history.limit_mark = "#5"
+        # Build context for GPT — q1 must NOT be rescued
+        ctx = build_context(conv_with_history, Provider.OPENAI, db, config)
+        assert "q1" not in [m.content for m in ctx]
+
+
+class TestComputeExcludedIndices:
+    def test_no_limit_returns_empty(self, db, conv_with_history):
+        assert compute_excluded_indices(conv_with_history, db, {Provider.CLAUDE}) == set()
+
+    def test_limit_excludes_earlier_indices(self, db, conv_with_history):
+        db.set_mark(conv_with_history.id, "#4", 3)
+        conv_with_history.limit_mark = "#4"
+        excluded = compute_excluded_indices(
+            conv_with_history, db, {Provider.CLAUDE}
+        )
+        assert excluded == {0, 1, 2}
+
+    def test_pinned_not_excluded_when_configured(self, db, conv_with_history):
+        # Pin index 1 targeting Claude
+        conv_with_history.messages[1].pinned = True
+        conv_with_history.messages[1].pin_target = "claude"
+        db.set_pinned(conv_with_history.messages[1].id, True, "claude")
+        db.set_mark(conv_with_history.id, "#4", 3)
+        conv_with_history.limit_mark = "#4"
+        excluded = compute_excluded_indices(
+            conv_with_history, db, {Provider.CLAUDE}
+        )
+        # Index 1 is pinned for a configured provider → not shaded
+        assert excluded == {0, 2}
+
+    def test_pinned_excluded_when_target_not_configured(self, db, conv_with_history):
+        conv_with_history.messages[1].pinned = True
+        conv_with_history.messages[1].pin_target = "gemini"
+        db.set_pinned(conv_with_history.messages[1].id, True, "gemini")
+        db.set_mark(conv_with_history.id, "#4", 3)
+        conv_with_history.limit_mark = "#4"
+        # Only Claude is configured — Gemini-targeted pin isn't live, so shade
+        excluded = compute_excluded_indices(
+            conv_with_history, db, {Provider.CLAUDE}
+        )
+        assert excluded == {0, 1, 2}
