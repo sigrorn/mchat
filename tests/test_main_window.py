@@ -206,6 +206,57 @@ class TestConversationSwitching:
         assert main_window._db.get_conversation(cid).title == "renamed title"
 
 
+class TestPrefixOnlySelection:
+    """Regression tests for #60 — prefix-only provider inputs must be
+    treated as selection changes, not as empty sends."""
+
+    def test_bare_provider_prefix_changes_selection(self, main_window):
+        """'gpt,' with no trailing text should select GPT and not start a send."""
+        from mchat.models.message import Provider
+        # Start with Claude selected
+        main_window._router.set_selection([Provider.CLAUDE])
+        # Submit prefix-only input
+        main_window._on_message_submitted("gpt,")
+        # Selection should have flipped to GPT
+        assert main_window._router.selection == [Provider.OPENAI]
+        # Critical: no worker should have been started. If the prefix-only
+        # input had fallen through to the send path, _multi_workers would
+        # contain at least the GPT worker (possibly finished and popped,
+        # but the DB would have a user message).
+        assert main_window._send._multi_workers == {}
+
+    def test_all_prefix_selects_every_configured_provider(self, main_window):
+        from mchat.models.message import Provider
+        main_window._router.set_selection([Provider.CLAUDE])
+        main_window._on_message_submitted("all,")
+        # All four fake providers should now be selected
+        assert set(main_window._router.selection) == set(Provider)
+        assert main_window._input.isEnabled() is True
+
+    def test_prefix_only_does_not_save_user_message(self, main_window):
+        """A prefix-only selection change must never be persisted as a
+        user message — otherwise the conversation history fills up with
+        empty or near-empty rows every time the user re-selects."""
+        from mchat.models.message import Provider
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        main_window._router.set_selection([Provider.CLAUDE])
+        main_window._on_message_submitted("gpt,")
+        msgs = main_window._db.get_messages(conv_id)
+        assert all("gpt" not in (m.content or "").lower()[:10] for m in msgs), (
+            "prefix-only input should not end up in DB as a user message"
+        )
+
+    def test_multi_prefix_only(self, main_window):
+        from mchat.models.message import Provider
+        main_window._router.set_selection([Provider.CLAUDE])
+        main_window._on_message_submitted("gpt, gemini,")
+        assert set(main_window._router.selection) == {
+            Provider.OPENAI, Provider.GEMINI,
+        }
+        assert main_window._input.isEnabled() is True
+
+
 class TestStateObjectsWired:
     def test_session_reflects_current_conv(self, main_window):
         """_current_conv is a property backed by ConversationSession."""
