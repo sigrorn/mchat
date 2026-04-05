@@ -47,6 +47,7 @@ from mchat.ui.message_renderer import (
 from mchat.ui.preferences_adapter import PreferencesAdapter
 from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
+from mchat.ui.state import ConversationSession, ModelCatalog, ProviderSelectionState
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
@@ -81,9 +82,16 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._config = config
         self._db = db
-        self._current_conv: Conversation | None = None
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
+
+        # Application-state objects (see ui/state.py).
+        # ConversationSession owns the active conversation + its messages.
+        # ProviderSelectionState owns which providers the next send addresses.
+        # ModelCatalog owns the per-provider model-id cache.
+        self._session = ConversationSession(self)
+        self._selection_state = ProviderSelectionState(parent=self)
+        self._model_catalog = ModelCatalog(self)
 
         self._init_providers()
         # PreferencesAdapter must exist before _build_ui, because
@@ -106,6 +114,25 @@ class MainWindow(QMainWindow):
         # Fetch live model lists in background after window is shown
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._populate_model_combos_async)
+
+    # ------------------------------------------------------------------
+    # _current_conv is now backed by the ConversationSession state object.
+    # Existing callers that do ``self._current_conv`` or
+    # ``host._current_conv = conv`` still work — reads forward to the
+    # session, and writes go through session.set_current() so the
+    # conversation_changed signal fires.
+    # ------------------------------------------------------------------
+
+    @property
+    def _current_conv(self) -> Conversation | None:
+        return self._session.current
+
+    @_current_conv.setter
+    def _current_conv(self, conv: Conversation | None) -> None:
+        if conv is None:
+            self._session.clear()
+        else:
+            self._session.set_current(conv)
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
@@ -145,7 +172,11 @@ class MainWindow(QMainWindow):
         # Fall back to first configured provider if default is unconfigured
         if default not in providers and providers:
             default = next(iter(providers))
-        self._router = Router(providers, default) if providers else None
+        self._router = (
+            Router(providers, default, selection_state=self._selection_state)
+            if providers
+            else None
+        )
 
     # ------------------------------------------------------------------
     # UI
@@ -260,15 +291,38 @@ class MainWindow(QMainWindow):
         return set(self._router._providers.keys()) if self._router else set()
 
     def _populate_model_combos_fast(self) -> None:
-        self._provider_panel.populate_from_config(self._configured_provider_set())
+        configured = self._configured_provider_set()
+        self._provider_panel.populate_from_config(configured)
+        # Seed the catalog with whatever ended up in the combos so it's
+        # never empty for configured providers (later async refresh
+        # overwrites with the live lists).
+        for p in configured:
+            items = [
+                self._provider_panel.combos()[p].itemText(i)
+                for i in range(self._provider_panel.combos()[p].count())
+            ]
+            if items:
+                self._model_catalog.set(p, items)
 
     def _populate_model_combos_async(self) -> None:
         providers = self._router._providers if self._router else {}
-        self._provider_panel.populate_async(providers)
+
+        def _on_async_done() -> None:
+            # Sync the catalog from the newly-populated combos.
+            for p, combo in self._provider_panel.combos().items():
+                items = [combo.itemText(i) for i in range(combo.count())]
+                if items:
+                    self._model_catalog.set(p, items)
+
+        self._provider_panel.populate_async(providers, on_done=_on_async_done)
 
     def _populate_model_combos(self) -> None:
         providers = self._router._providers if self._router else {}
         self._provider_panel.populate_from_providers(providers)
+        for p, combo in self._provider_panel.combos().items():
+            items = [combo.itemText(i) for i in range(combo.count())]
+            if items:
+                self._model_catalog.set(p, items)
 
     def _sync_checkboxes_from_selection(self) -> None:
         if not self._router:

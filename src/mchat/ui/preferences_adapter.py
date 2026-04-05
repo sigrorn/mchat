@@ -86,14 +86,11 @@ class PreferencesAdapter:
     def open_settings(self) -> None:
         host = self._host
         providers = host._router._providers if host._router else {}
-        # Harvest the model lists the combos already hold — MainWindow
-        # fetches these asynchronously after startup, so they are usually
-        # up-to-date and available without any extra API calls.
-        models_cache: dict[Provider, list[str]] = {}
-        for p, combo in host._combos.items():
-            items = [combo.itemText(i) for i in range(combo.count())]
-            if items:
-                models_cache[p] = items
+        # The ModelCatalog is the source of truth for cached model lists —
+        # it's populated by the fast/async/sync paths in MainWindow, so
+        # SettingsDialog never needs to harvest combo contents or call
+        # provider.list_models() synchronously during _build_ui.
+        models_cache: dict[Provider, list[str]] = host._model_catalog.all()
         dialog = SettingsDialog(
             host._config,
             providers=providers,

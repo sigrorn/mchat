@@ -206,6 +206,42 @@ class TestConversationSwitching:
         assert main_window._db.get_conversation(cid).title == "renamed title"
 
 
+class TestStateObjectsWired:
+    def test_session_reflects_current_conv(self, main_window):
+        """_current_conv is a property backed by ConversationSession."""
+        main_window._on_new_chat()
+        assert main_window._current_conv is main_window._session.current
+
+    def test_session_writes_propagate_via_setter(self, main_window):
+        """Setting _current_conv drives session.set_current / clear."""
+        main_window._on_new_chat()
+        assert main_window._session.is_active()
+        main_window._current_conv = None
+        assert main_window._session.is_active() is False
+
+    def test_selection_state_is_the_router_source_of_truth(self, main_window):
+        """Router.selection reads through ProviderSelectionState."""
+        from mchat.models.message import Provider
+        main_window._selection_state.set([Provider.OPENAI, Provider.GEMINI])
+        assert main_window._router.selection == [Provider.OPENAI, Provider.GEMINI]
+
+    def test_router_set_selection_writes_to_state(self, main_window):
+        """Router.set_selection flows into the state object."""
+        from mchat.models.message import Provider
+        main_window._router.set_selection([Provider.CLAUDE])
+        assert main_window._selection_state.selection == [Provider.CLAUDE]
+
+    def test_model_catalog_populated_after_construction(self, main_window):
+        """FakeProvider.list_models returns two entries; after the
+        fast populate those must be reachable via the catalog."""
+        from mchat.models.message import Provider
+        # populate_from_config seeds from config default; populate_from_providers
+        # would push list_models results. For this smoke test we verify
+        # the catalog has at least one entry per configured provider.
+        for p in Provider:
+            assert main_window._model_catalog.get(p) != []
+
+
 class TestLayoutPersistence:
     def test_column_mode_persisted_to_config(self, main_window):
         initial = main_window._column_mode

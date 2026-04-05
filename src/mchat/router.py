@@ -32,9 +32,43 @@ _SPECIAL_PREFIXES = {ALL, FLIPPED}
 
 
 class Router:
-    def __init__(self, providers: dict[Provider, BaseProvider], default: Provider = Provider.CLAUDE) -> None:
+    def __init__(
+        self,
+        providers: dict[Provider, BaseProvider],
+        default: Provider = Provider.CLAUDE,
+        selection_state=None,
+    ) -> None:
         self._providers = providers
-        self._selection: list[Provider] = [default]
+        # If the caller supplies a ProviderSelectionState, selection
+        # lives there and Router becomes a thin view over it. If no
+        # state is supplied (e.g. unit tests that only exercise parsing),
+        # we fall back to a local list so Router stays self-contained.
+        self._selection_state = selection_state
+        if selection_state is None:
+            self._local_selection: list[Provider] = [default]
+        else:
+            if not selection_state.selection:
+                selection_state.set([default])
+
+    # ------------------------------------------------------------------
+    # Selection access — delegates to the injected state object when
+    # available, otherwise uses the local fallback. External callers
+    # see a uniform list[Provider] interface either way.
+    # ------------------------------------------------------------------
+
+    @property
+    def _selection(self) -> list[Provider]:
+        if self._selection_state is not None:
+            return self._selection_state.selection
+        return list(self._local_selection)
+
+    def _store_selection(self, providers: list[Provider]) -> None:
+        if not providers:
+            return
+        if self._selection_state is not None:
+            self._selection_state.set(providers)
+        else:
+            self._local_selection = list(providers)
 
     def parse(self, user_input: str) -> tuple[list[Provider], str]:
         """Parse user input, returning (target provider list, cleaned message).
@@ -66,13 +100,13 @@ class Router:
                 if prefix == ALL:
                     configured = [p for p in Provider if p in self._providers]
                     if configured:
-                        self._selection = configured
+                        self._store_selection(configured)
                 elif prefix == FLIPPED:
                     configured = set(p for p in Provider if p in self._providers)
                     current = set(self._selection)
                     flipped = [p for p in Provider if p in configured and p not in current]
                     if flipped and current != configured:
-                        self._selection = flipped
+                        self._store_selection(flipped)
                 return list(self._selection), cleaned
 
             # Regular provider prefix
@@ -83,15 +117,14 @@ class Router:
 
         if collected:
             message = remaining.strip()
-            self._selection = collected
+            self._store_selection(collected)
             return list(self._selection), message
 
         # No prefix matched — use current selection
         return list(self._selection), user_input
 
     def set_selection(self, providers: list[Provider]) -> None:
-        if providers:
-            self._selection = list(providers)
+        self._store_selection(providers)
 
     @property
     def selection(self) -> list[Provider]:
