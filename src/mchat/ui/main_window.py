@@ -43,6 +43,7 @@ from mchat.ui.message_renderer import (
     PROVIDER_ORDER as _PROVIDER_ORDER_FROM_RENDERER,
     strip_echoed_heading as _strip_echoed_heading,
 )
+from mchat.ui.send_controller import SendController
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
@@ -79,7 +80,6 @@ class MainWindow(QMainWindow):
         self._config = config
         self._db = db
         self._current_conv: Conversation | None = None
-        self._multi_workers: dict[Provider, StreamWorker] = {}
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
 
@@ -88,19 +88,10 @@ class MainWindow(QMainWindow):
         self._combos: dict[Provider, QComboBox] = {}
         self._spend_labels: dict[Provider, QLabel] = {}
 
-        # Column mode buffer — accumulates multi-provider results for table rendering
-        self._column_buffer: dict[Provider, tuple[str, str, str, int, int, bool]] = {}
-        # maps provider -> (display_label, full_text, model, input_tokens, output_tokens, estimated)
-
-        # Retry stash — cleared when user sends a new regular message
-        self._retry_contexts: dict[Provider, list[Message]] = {}
-        self._retry_models: dict[Provider, str] = {}
-        self._retry_failed: dict[Provider, tuple[str, bool]] = {}  # provider -> (error, transient)
-        self._retry_error_msg_ids: dict[Provider, int | None] = {}  # provider -> message DB id
-
         self._init_providers()
         self._build_ui()
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
+        self._send = SendController(self)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
@@ -704,11 +695,26 @@ class MainWindow(QMainWindow):
         self._config.set("column_mode", self._column_mode)
         self._config.save()
 
+    # ------------------------------------------------------------------
+    # Retry-stash accessors — commands._handle_retry still reaches into
+    # these attribute names on MainWindow, so we forward them to the
+    # SendController that now owns the state.
+    # ------------------------------------------------------------------
+
+    @property
+    def _retry_contexts(self) -> dict[Provider, list[Message]]:
+        return self._send.retry_contexts
+
+    @property
+    def _retry_failed(self) -> dict[Provider, tuple[str, bool]]:
+        return self._send.retry_failed
+
+    @property
+    def _retry_error_msg_ids(self) -> dict[Provider, int | None]:
+        return self._send.retry_error_msg_ids
+
     def _clear_retry_stash(self) -> None:
-        self._retry_contexts.clear()
-        self._retry_models.clear()
-        self._retry_failed.clear()
-        self._retry_error_msg_ids.clear()
+        self._send.clear_retry_stash()
 
     def _save_selection(self) -> None:
         """Persist the current selection to the conversation."""
@@ -722,171 +728,18 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_message_submitted(self, text: str) -> None:
-        if text.strip().startswith("//"):
-            self._handle_command(text)
-            return
-
-        # +provider / -provider selection adjustment
-        stripped = text.strip()
-        if len(stripped) > 1 and stripped[0] in ("+", "-"):
-            if self._handle_selection_adjust(stripped):
-                return
-
-        if not self._router:
-            QMessageBox.warning(
-                self, "No API Keys",
-                "Please configure at least one API key in Settings.",
-            )
-            return
-
-        if not self._current_conv:
-            self._on_new_chat()
-
-        # Route message
-        targets, cleaned_text = self._router.parse(text)
-
-        # If provider prefixes consumed everything, treat as selection change
-        if not cleaned_text.strip() and targets != self._router.selection:
-            self._sync_checkboxes_from_selection()
-            self._update_input_placeholder()
-            self._update_input_color()
-            self._save_selection()
-            names = ", ".join(_PROVIDER_DISPLAY[p] for p in targets)
-            self._chat.add_note(f"selected: {names}")
-            return
-
-        # Validate all targets are configured
-        configured = set(self._router._providers.keys())
-        missing = [p for p in targets if p not in configured]
-        targets = [p for p in targets if p in configured]
-        if missing:
-            names = ", ".join(_PROVIDER_DISPLAY[p] for p in missing)
-            self._chat.add_note(f"{names} not configured — skipped")
-        if not targets:
-            QMessageBox.warning(
-                self, "No Provider Available",
-                "None of the target providers have API keys configured.",
-            )
-            return
-
-        # Determine addressed_to: "all" if the user broadcast to every
-        # configured provider, otherwise a comma-separated list of the
-        # targeted provider values. This is what drives the "visible to
-        # addressed only" rule for user messages.
-        if set(targets) == configured:
-            addressed_to = "all"
-        else:
-            addressed_to = ",".join(p.value for p in targets)
-
-        # Save and display user message
-        user_msg = Message(
-            role=Role.USER,
-            content=text,
-            conversation_id=self._current_conv.id,
-            addressed_to=addressed_to,
-        )
-        self._db.add_message(user_msg)
-        self._current_conv.messages.append(user_msg)
-        self._chat.add_message(user_msg)
-
-        # Auto-title on first message
-        if len(self._current_conv.messages) == 1:
-            title = text[:50] + ("..." if len(text) > 50 else "")
-            self._db.update_conversation_title(self._current_conv.id, title)
-            self._load_conversations()
-            self._sidebar.select_conversation(self._current_conv.id)
-
-        self._input.set_enabled(False)
-        self._save_selection()
-        self._sync_checkboxes_from_selection()
-        self._clear_retry_stash()
-
-        if len(targets) == 1:
-            self._send_single(targets[0])
-        else:
-            self._send_multi(targets)
+        """Delegate to SendController."""
+        self._send.on_message_submitted(text)
 
     def _send_single(self, provider_id: Provider) -> None:
-        """Send to a single provider."""
-        model = self._selected_model(provider_id)
-        provider = self._router.get_provider(provider_id)
+        self._send.send_single(provider_id)
 
-        self._set_combo_waiting(provider_id, True)
-        self._send_multi([provider_id])
-
-    def _send_multi(self, targets: list[Provider], context_override: dict[Provider, list[Message]] | None = None) -> None:
-        """Send to multiple providers simultaneously, render when each completes."""
-        self._multi_workers.clear()
-        self._column_buffer.clear()
-
-        for provider_id in targets:
-            model = self._selected_model(provider_id)
-            provider = self._router.get_provider(provider_id)
-            self._set_combo_waiting(provider_id, True)
-            if context_override and provider_id in context_override:
-                context_messages = context_override[provider_id]
-            else:
-                context_messages = self._build_context(provider_id)
-
-            # Stash for //retry
-            self._retry_contexts[provider_id] = context_messages
-            self._retry_models[provider_id] = model
-
-            worker = StreamWorker(provider, context_messages, model)
-            worker.stream_complete.connect(
-                lambda full_text, inp, out, est, pid=provider_id, mdl=model: (
-                    self._on_multi_complete(pid, mdl, full_text, inp, out, est)
-                )
-            )
-            worker.stream_error.connect(
-                lambda error, pid=provider_id: self._on_multi_error(pid, error)
-            )
-            worker.retrying.connect(
-                lambda attempt, mx, pid=provider_id: self._set_combo_retrying(pid)
-            )
-            self._multi_workers[provider_id] = worker
-            worker.start()
-
-    # ------------------------------------------------------------------
-    # Multi-provider completion
-    # ------------------------------------------------------------------
-
-    def _on_multi_complete(
+    def _send_multi(
         self,
-        provider_id: Provider,
-        model: str,
-        full_text: str,
-        input_tokens: int,
-        output_tokens: int,
-        estimated: bool = False,
+        targets: list[Provider],
+        context_override: dict[Provider, list[Message]] | None = None,
     ) -> None:
-        self._set_combo_waiting(provider_id, False)
-        self._multi_workers.pop(provider_id, None)
-
-        # Update spend
-        cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None and self._current_conv:
-            self._db.add_conversation_spend(
-                self._current_conv.id, provider_id.value, cost, estimated
-            )
-        self._update_spend_labels()
-
-        # Always buffer — render in stable order when all are done
-        label = _PROVIDER_DISPLAY[provider_id]
-        self._column_buffer[provider_id] = (
-            label, full_text, model, input_tokens, output_tokens, estimated
-        )
-
-        if not self._multi_workers:
-            # All providers done — render in stable order
-            if self._column_mode:
-                self._render_column_responses()
-            else:
-                self._render_list_responses()
-            self._column_buffer.clear()
-            self._input.set_enabled(True)
-            self._update_input_placeholder()
-            self._update_input_color()
+        self._send.send_multi(targets, context_override=context_override)
 
     def _compute_excluded_indices(self, messages: list[Message]) -> set[int]:
         """Delegate to ui.context_builder — single source of truth for
@@ -902,63 +755,6 @@ class MainWindow(QMainWindow):
         self._renderer.display_messages(
             self._current_conv, messages, self._column_mode, configured
         )
-
-    def _persist_buffered_responses(self, display_mode: str) -> list[Message]:
-        """Save buffered multi-provider responses to the DB and to the
-        in-memory conversation. Returns the persisted Message list in
-        stable provider order. ``display_mode`` is stored on each row
-        so a future re-render can honour the original layout choice.
-        """
-        providers = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
-        persisted: list[Message] = []
-        for p in providers:
-            _label, full_text, model, _inp, _out, _est = self._column_buffer[p]
-            msg = Message(
-                role=Role.ASSISTANT,
-                content=_strip_echoed_heading(full_text),
-                provider=p,
-                model=model,
-                display_mode=display_mode,
-                conversation_id=self._current_conv.id,
-            )
-            self._db.add_message(msg)
-            self._current_conv.messages.append(msg)
-            persisted.append(msg)
-        return persisted
-
-    def _render_list_responses(self) -> None:
-        """Persist buffered multi-provider responses and render as a list."""
-        persisted = self._persist_buffered_responses(display_mode="lines")
-        self._renderer.render_list_responses(persisted)
-
-    def _render_column_responses(self) -> None:
-        """Persist buffered multi-provider responses and render as a column table."""
-        persisted = self._persist_buffered_responses(display_mode="cols")
-        self._renderer.render_column_responses(persisted)
-
-    def _on_multi_error(self, provider_id: Provider, error: str) -> None:
-        self._set_combo_waiting(provider_id, False)
-        worker = self._multi_workers.pop(provider_id, None)
-        transient = worker.last_error_transient if worker else False
-
-        error_msg = Message(
-            role=Role.ASSISTANT,
-            content=f"[Error from {provider_id.value}: {error}]",
-            provider=provider_id,
-            conversation_id=self._current_conv.id,
-        )
-        self._db.add_message(error_msg)
-        self._current_conv.messages.append(error_msg)
-        self._chat.add_message(error_msg)
-
-        # Stash for //retry
-        self._retry_failed[provider_id] = (error, transient)
-        self._retry_error_msg_ids[provider_id] = error_msg.id
-
-        if not self._multi_workers:
-            self._input.set_enabled(True)
-            self._update_input_placeholder()
-            self._update_input_color()
 
     # ------------------------------------------------------------------
     # Settings
