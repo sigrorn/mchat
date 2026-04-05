@@ -5,6 +5,7 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,6 +93,10 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN limit_mark TEXT"
             )
+        if "visibility_matrix" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN visibility_matrix TEXT NOT NULL DEFAULT '{}'"
+            )
 
         # Migrate spend data from old columns to conversation_spend table
         if "spend_claude" in cols:
@@ -135,6 +140,10 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE messages ADD COLUMN pin_target TEXT"
             )
+        if "addressed_to" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN addressed_to TEXT"
+            )
 
         # Strip legacy "**X's take:**\n\n" prefix from assistant messages
         # (one-time migration — these were stored with the heading before the
@@ -167,11 +176,27 @@ class Database:
             updated_at=datetime.fromisoformat(now),
         )
 
+    @staticmethod
+    def _decode_visibility(raw: str | None) -> dict[str, list[str]]:
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return {
+                    str(k): [str(s) for s in v]
+                    for k, v in data.items()
+                    if isinstance(v, list)
+                }
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return {}
+
     def get_conversation(self, conv_id: int) -> Conversation | None:
         """Fetch a single conversation by ID."""
         row = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "limit_mark, created_at, updated_at "
+            "limit_mark, visibility_matrix, created_at, updated_at "
             "FROM conversations WHERE id = ?",
             (conv_id,),
         ).fetchone()
@@ -183,14 +208,15 @@ class Database:
             system_prompt=row[2] or "",
             last_provider=row[3] or "",
             limit_mark=row[4],
-            created_at=datetime.fromisoformat(row[5]),
-            updated_at=datetime.fromisoformat(row[6]),
+            visibility_matrix=self._decode_visibility(row[5]),
+            created_at=datetime.fromisoformat(row[6]),
+            updated_at=datetime.fromisoformat(row[7]),
         )
 
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "limit_mark, created_at, updated_at "
+            "limit_mark, visibility_matrix, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -200,11 +226,22 @@ class Database:
                 system_prompt=row[2] or "",
                 last_provider=row[3] or "",
                 limit_mark=row[4],
-                created_at=datetime.fromisoformat(row[5]),
-                updated_at=datetime.fromisoformat(row[6]),
+                visibility_matrix=self._decode_visibility(row[5]),
+                created_at=datetime.fromisoformat(row[6]),
+                updated_at=datetime.fromisoformat(row[7]),
             )
             for row in cursor.fetchall()
         ]
+
+    def set_visibility_matrix(
+        self, conv_id: int, matrix: dict[str, list[str]]
+    ) -> None:
+        """Persist the per-conversation visibility matrix."""
+        self._conn.execute(
+            "UPDATE conversations SET visibility_matrix = ? WHERE id = ?",
+            (json.dumps(matrix), conv_id),
+        )
+        self._conn.commit()
 
     def update_conversation_title(self, conv_id: int, title: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -287,8 +324,8 @@ class Database:
     def add_message(self, msg: Message) -> Message:
         now = msg.created_at.isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, pinned, pin_target, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 msg.conversation_id,
                 msg.role.value,
@@ -298,6 +335,7 @@ class Database:
                 msg.display_mode,
                 1 if msg.pinned else 0,
                 msg.pin_target,
+                msg.addressed_to,
                 now,
             ),
         )
@@ -316,7 +354,7 @@ class Database:
         else:
             where = "conversation_id = ? AND (hidden = 0 OR hidden IS NULL)"
         cursor = self._conn.execute(
-            f"SELECT id, conversation_id, role, provider, content, model, display_mode, pinned, pin_target, created_at "
+            f"SELECT id, conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, created_at "
             f"FROM messages WHERE {where} ORDER BY created_at ASC",
             (conversation_id,),
         )
@@ -331,7 +369,8 @@ class Database:
                 display_mode=row[6],
                 pinned=bool(row[7]),
                 pin_target=row[8],
-                created_at=datetime.fromisoformat(row[9]),
+                addressed_to=row[9],
+                created_at=datetime.fromisoformat(row[10]),
             )
             for row in cursor.fetchall()
         ]

@@ -34,4 +34,5 @@ class Message:
     display_mode: str | None = None  # "cols", "lines", or None (single/legacy)
     pinned: bool = False
     pin_target: str | None = None  # "all" or comma-separated provider values
+    addressed_to: str | None = None  # "all" or comma-separated provider values (user msgs)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
