@@ -13,6 +13,7 @@ from pathlib import Path
 from mchat.config import DEFAULT_CONFIG_DIR
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
+from mchat.models.persona import Persona
 
 DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 
@@ -20,7 +21,7 @@ DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 # new _migration_N method whenever the schema changes. Each migration
 # runs exactly once per database, in ascending order, and must be
 # idempotent on partially-migrated legacy DBs where safe.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -84,7 +85,7 @@ class Database:
         current = self._conn.execute("PRAGMA user_version").fetchone()[0]
         migrations = [
             (1, self._migration_1_initial),
-            # Future migrations: (2, self._migration_2_...)
+            (2, self._migration_2_personas),
         ]
         for version, fn in migrations:
             if current < version:
@@ -184,6 +185,60 @@ class Database:
                 "UPDATE messages SET content = SUBSTR(content, ?) "
                 "WHERE role = 'assistant' AND content LIKE ?",
                 (len(prefix) + 1, f"**{display_name}'s take:**%"),
+            )
+
+    def _migration_2_personas(self) -> None:
+        """Add the personas table and the messages.persona_id column.
+
+        See docs/plans/personas.md § Stage 1.2. The migration is
+        purely additive:
+          * new `personas` table keyed by (conversation_id, id) with
+            a partial unique index on (conversation_id, name_slug)
+            WHERE deleted_at IS NULL so tombstoned rows don't block
+            slug reuse.
+          * new `messages.persona_id` column, NULL for legacy rows.
+
+        Legacy conversations continue to work unchanged — their
+        messages have persona_id=NULL and the upper layers fall back
+        to the existing `provider` field for identity/rendering.
+        """
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS personas (
+                conversation_id INTEGER NOT NULL,
+                id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                name TEXT NOT NULL,
+                name_slug TEXT NOT NULL,
+                system_prompt_override TEXT,
+                model_override TEXT,
+                color_override TEXT,
+                created_at_message_index INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT,
+                PRIMARY KEY (conversation_id, id),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_personas_active_slug
+                ON personas (conversation_id, name_slug)
+                WHERE deleted_at IS NULL
+            """
+        )
+
+        # Add persona_id column to messages — only if not already present,
+        # so re-running the migration against a partially-migrated DB is
+        # safe. (SQLite doesn't support `ADD COLUMN IF NOT EXISTS`.)
+        msg_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(messages)")
+        }
+        if "persona_id" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN persona_id TEXT"
             )
 
     def close(self) -> None:
@@ -354,8 +409,8 @@ class Database:
     def add_message(self, msg: Message) -> Message:
         now = msg.created_at.isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, persona_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 msg.conversation_id,
                 msg.role.value,
@@ -366,6 +421,7 @@ class Database:
                 1 if msg.pinned else 0,
                 msg.pin_target,
                 msg.addressed_to,
+                msg.persona_id,
                 now,
             ),
         )
@@ -384,7 +440,7 @@ class Database:
         else:
             where = "conversation_id = ? AND (hidden = 0 OR hidden IS NULL)"
         cursor = self._conn.execute(
-            f"SELECT id, conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, created_at "
+            f"SELECT id, conversation_id, role, provider, content, model, display_mode, pinned, pin_target, addressed_to, persona_id, created_at "
             f"FROM messages WHERE {where} ORDER BY created_at ASC",
             (conversation_id,),
         )
@@ -400,7 +456,8 @@ class Database:
                 pinned=bool(row[7]),
                 pin_target=row[8],
                 addressed_to=row[9],
-                created_at=datetime.fromisoformat(row[10]),
+                persona_id=row[10],
+                created_at=datetime.fromisoformat(row[11]),
             )
             for row in cursor.fetchall()
         ]
@@ -438,5 +495,126 @@ class Database:
         self._conn.execute(
             "UPDATE messages SET hidden = 0 WHERE conversation_id = ? AND hidden = 1",
             (conv_id,),
+        )
+        self._conn.commit()
+
+    # -- Personas --
+
+    def _row_to_persona(self, row) -> Persona:
+        """Build a Persona from a row tuple matching the SELECT below."""
+        deleted_at = datetime.fromisoformat(row[10]) if row[10] else None
+        return Persona(
+            conversation_id=row[0],
+            id=row[1],
+            provider=Provider(row[2]),
+            name=row[3],
+            name_slug=row[4],
+            system_prompt_override=row[5],
+            model_override=row[6],
+            color_override=row[7],
+            created_at_message_index=row[8],
+            sort_order=row[9],
+            deleted_at=deleted_at,
+        )
+
+    _PERSONA_COLS = (
+        "conversation_id, id, provider, name, name_slug, "
+        "system_prompt_override, model_override, color_override, "
+        "created_at_message_index, sort_order, deleted_at"
+    )
+
+    def create_persona(self, persona: Persona) -> Persona:
+        """Insert a new persona row. Raises sqlite3.IntegrityError if
+        the (conversation_id, name_slug) pair collides with an active
+        persona — the partial unique index on idx_personas_active_slug
+        enforces D2 uniqueness.
+        """
+        deleted_at_str = (
+            persona.deleted_at.isoformat() if persona.deleted_at else None
+        )
+        self._conn.execute(
+            f"INSERT INTO personas ({self._PERSONA_COLS}) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                persona.conversation_id,
+                persona.id,
+                persona.provider.value,
+                persona.name,
+                persona.name_slug,
+                persona.system_prompt_override,
+                persona.model_override,
+                persona.color_override,
+                persona.created_at_message_index,
+                persona.sort_order,
+                deleted_at_str,
+            ),
+        )
+        self._conn.commit()
+        return persona
+
+    def list_personas(self, conv_id: int) -> list[Persona]:
+        """Return active (non-tombstoned) personas for a conversation,
+        ordered by sort_order then id for stability."""
+        cursor = self._conn.execute(
+            f"SELECT {self._PERSONA_COLS} FROM personas "
+            f"WHERE conversation_id = ? AND deleted_at IS NULL "
+            f"ORDER BY sort_order ASC, id ASC",
+            (conv_id,),
+        )
+        return [self._row_to_persona(row) for row in cursor.fetchall()]
+
+    def list_personas_including_deleted(self, conv_id: int) -> list[Persona]:
+        """Return every persona for a conversation, including tombstoned
+        ones. Used by the renderer/exporter so historical messages can
+        resolve to their original persona label even after the persona
+        has been removed."""
+        cursor = self._conn.execute(
+            f"SELECT {self._PERSONA_COLS} FROM personas "
+            f"WHERE conversation_id = ? "
+            f"ORDER BY sort_order ASC, id ASC",
+            (conv_id,),
+        )
+        return [self._row_to_persona(row) for row in cursor.fetchall()]
+
+    def update_persona(self, persona: Persona) -> None:
+        """Update every mutable field on an existing persona row.
+        ``deleted_at`` is preserved as-passed — use ``tombstone_persona``
+        for the remove path rather than updating deleted_at manually.
+        """
+        deleted_at_str = (
+            persona.deleted_at.isoformat() if persona.deleted_at else None
+        )
+        self._conn.execute(
+            "UPDATE personas SET "
+            "provider = ?, name = ?, name_slug = ?, "
+            "system_prompt_override = ?, model_override = ?, color_override = ?, "
+            "created_at_message_index = ?, sort_order = ?, deleted_at = ? "
+            "WHERE conversation_id = ? AND id = ?",
+            (
+                persona.provider.value,
+                persona.name,
+                persona.name_slug,
+                persona.system_prompt_override,
+                persona.model_override,
+                persona.color_override,
+                persona.created_at_message_index,
+                persona.sort_order,
+                deleted_at_str,
+                persona.conversation_id,
+                persona.id,
+            ),
+        )
+        self._conn.commit()
+
+    def tombstone_persona(self, conv_id: int, persona_id: str) -> None:
+        """Mark a persona as deleted without removing the row. Historical
+        messages referring to this persona continue to resolve via
+        ``list_personas_including_deleted`` so their labels survive.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "UPDATE personas SET deleted_at = ? "
+            "WHERE conversation_id = ? AND id = ?",
+            (now, conv_id, persona_id),
         )
         self._conn.commit()

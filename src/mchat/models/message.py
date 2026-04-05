@@ -35,4 +35,5 @@ class Message:
     pinned: bool = False
     pin_target: str | None = None  # "all" or comma-separated provider values
     addressed_to: str | None = None  # "all" or comma-separated provider values (user msgs)
+    persona_id: str | None = None  # opaque persona id, or None for legacy/synthetic-default
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
