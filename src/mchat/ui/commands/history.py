@@ -1,0 +1,199 @@
+# ------------------------------------------------------------------
+# Component: commands.history
+# Responsibility: History/editing commands — //limit, //pop, //hide,
+#                 //unhide, //retry, //rename, //vacuum.
+# Collaborators: CommandHost, config, db
+# ------------------------------------------------------------------
+from __future__ import annotations
+
+from mchat.config import PROVIDER_META
+from mchat.models.message import Provider, Role
+from mchat.ui.commands.host import CommandHost
+
+_PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
+
+
+def handle_limit(tag: str, host: CommandHost) -> bool:
+    if not host._current_conv:
+        host._on_new_chat()
+    if not tag:
+        host._chat.add_note("Error: //limit requires a message number, 'last', or 'ALL'")
+        return True
+    if tag.upper() == "ALL":
+        host._current_conv.limit_mark = None
+        host._db.set_conversation_limit(host._current_conv.id, None)
+        host._display_messages(host._current_conv.messages)
+        host._chat.add_note("limit removed — full chat history will be sent")
+        return True
+    if tag.lower() == "last":
+        messages = host._current_conv.messages
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == Role.USER:
+                last_user_idx = i
+                break
+        if last_user_idx is None:
+            host._chat.add_note("Error: no user message found")
+            return True
+        msg_num = last_user_idx + 1
+        mark_name = f"#{msg_num}"
+        host._db.set_mark(host._current_conv.id, mark_name, last_user_idx)
+        host._current_conv.limit_mark = mark_name
+        host._db.set_conversation_limit(host._current_conv.id, mark_name)
+        host._display_messages(host._current_conv.messages)
+        host._chat.add_note(
+            f"limit set to last request (message {msg_num}) — earlier context will not be sent"
+        )
+        return True
+    if tag.isdigit():
+        idx = int(tag)
+        messages = host._current_conv.messages
+        if idx < 1 or idx > len(messages):
+            host._chat.add_note(f"Error: message {idx} out of range")
+            return True
+        if messages[idx - 1].role != Role.USER:
+            host._chat.add_note(
+                f"Error: message {idx} is not a user prompt — //limit must "
+                f"target a user message so the cut-off starts at a request"
+            )
+            return True
+        mark_name = f"#{idx}"
+        host._db.set_mark(host._current_conv.id, mark_name, idx - 1)
+        host._current_conv.limit_mark = mark_name
+        host._db.set_conversation_limit(host._current_conv.id, mark_name)
+        host._display_messages(messages)
+        host._chat.add_note(
+            f"limit set to message {idx} — earlier context will not be sent"
+        )
+        return True
+    host._chat.add_note(
+        f"Error: '{tag}' is not a valid message number — use //limit <N>, //limit last, or //limit ALL"
+    )
+    return True
+
+
+def handle_rename(name: str, host: CommandHost) -> bool:
+    if not name:
+        host._chat.add_note("Error: //rename requires a name")
+        return True
+    if not host._current_conv:
+        host._chat.add_note("Error: no active conversation")
+        return True
+    host._db.update_conversation_title(host._current_conv.id, name)
+    host._current_conv.title = name
+    # Update the sidebar item in place — no full reload/re-render.
+    host._sidebar.update_conversation_title(host._current_conv.id, name)
+    host._chat.add_note(f"renamed to '{name}'")
+    return True
+
+
+def handle_pop(host: CommandHost) -> bool:
+    if not host._current_conv or not host._current_conv.messages:
+        host._chat.add_note("Error: nothing to pop")
+        return True
+    messages = host._current_conv.messages
+    last_user_idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == Role.USER:
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        host._chat.add_note("Error: no user message found to pop")
+        return True
+    to_remove = messages[last_user_idx:]
+    ids_to_delete = [m.id for m in to_remove if m.id is not None]
+    count = len(to_remove)
+    host._db.delete_messages(ids_to_delete)
+    del host._current_conv.messages[last_user_idx:]
+    host._display_messages(host._current_conv.messages)
+    host._chat.add_note(f"popped {count} message(s)")
+    return True
+
+
+def handle_hide(host: CommandHost) -> bool:
+    if not host._current_conv or not host._current_conv.messages:
+        host._chat.add_note("Error: nothing to hide")
+        return True
+    messages = host._current_conv.messages
+    last_user_idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == Role.USER:
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        host._chat.add_note("Error: no user message found to hide")
+        return True
+    to_hide = messages[last_user_idx:]
+    ids_to_hide = [m.id for m in to_hide if m.id is not None]
+    user_text = messages[last_user_idx].content
+    count = len(to_hide)
+    host._db.hide_messages(ids_to_hide)
+    del host._current_conv.messages[last_user_idx:]
+    host._display_messages(host._current_conv.messages)
+    host._chat.add_note(f"hidden {count} message(s)")
+    host._input._text_edit.setPlainText(user_text)
+    return True
+
+
+def handle_unhide(host: CommandHost) -> bool:
+    if not host._current_conv:
+        host._chat.add_note("Error: no active conversation")
+        return True
+    host._db.unhide_all_messages(host._current_conv.id)
+    host._current_conv.messages = host._db.get_messages(host._current_conv.id)
+    host._display_messages(host._current_conv.messages)
+    host._chat.add_note("all hidden messages restored")
+    return True
+
+
+def handle_retry(host: CommandHost) -> bool:
+    if not host._retry_failed:
+        host._chat.add_note("Error: nothing to retry")
+        return True
+    for pid, (error, transient) in host._retry_failed.items():
+        if not transient:
+            name = _PROVIDER_DISPLAY[pid]
+            host._chat.add_note(
+                f"Warning: {name} error was non-transient ({error[:60]}) — retrying anyway"
+            )
+    error_ids = [mid for mid in host._retry_error_msg_ids.values() if mid is not None]
+    if error_ids:
+        host._db.hide_messages(error_ids)
+        hidden_set = set(error_ids)
+        host._current_conv.messages = [
+            m for m in host._current_conv.messages if m.id not in hidden_set
+        ]
+        host._display_messages(host._current_conv.messages)
+    failed_providers = list(host._retry_failed.keys())
+    context_override = {
+        pid: host._retry_contexts[pid]
+        for pid in failed_providers
+        if pid in host._retry_contexts
+    }
+    host._retry_failed.clear()
+    host._retry_error_msg_ids.clear()
+    host._input.set_enabled(False)
+    host._send_multi(failed_providers, context_override=context_override)
+    host._chat.add_note(
+        f"retrying {', '.join(_PROVIDER_DISPLAY[p] for p in failed_providers)}..."
+    )
+    return True
+
+
+def handle_vacuum(host: CommandHost) -> bool:
+    import os
+    db_path = host._db._path
+    size_before = os.path.getsize(db_path)
+    host._db._conn.execute("VACUUM")
+    size_after = os.path.getsize(db_path)
+    saved = size_before - size_after
+    if saved > 0:
+        host._chat.add_note(
+            f"database compacted: {size_before:,} → {size_after:,} bytes "
+            f"({saved:,} bytes freed)"
+        )
+    else:
+        host._chat.add_note(
+            f"database already compact ({size_after:,} bytes)"
+        )
+    return True
