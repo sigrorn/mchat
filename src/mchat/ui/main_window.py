@@ -463,8 +463,11 @@ class MainWindow(QMainWindow):
         )
         if path:
             from mchat.ui.html_exporter import exporter_from_config
+            personas = self._db.list_personas_including_deleted(
+                self._current_conv.id
+            )
             html = exporter_from_config(self._config).export(
-                self._current_conv.messages
+                self._current_conv.messages, personas=personas,
             )
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)

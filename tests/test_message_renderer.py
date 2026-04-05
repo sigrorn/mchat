@@ -157,9 +157,9 @@ class TestDisplayMessages:
         calls: list[list[int]] = []
         original = renderer._render_column_group
 
-        def spy(ordered, group_indices):
+        def spy(ordered, group_indices, **kwargs):
             calls.append(list(group_indices))
-            return original(ordered, group_indices)
+            return original(ordered, group_indices, **kwargs)
 
         renderer._render_column_group = spy
         renderer.display_messages(
@@ -275,9 +275,9 @@ class TestPersonaAwareRendering:
         calls: list[list] = []
         original = renderer._render_column_group
 
-        def spy(ordered, group_indices):
+        def spy(ordered, group_indices, **kwargs):
             calls.append([(m.persona_id, m.content) for m in ordered])
-            return original(ordered, group_indices)
+            return original(ordered, group_indices, **kwargs)
 
         renderer._render_column_group = spy
         renderer.display_messages(

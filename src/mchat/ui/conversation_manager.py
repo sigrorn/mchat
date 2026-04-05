@@ -135,7 +135,11 @@ class ConversationManager:
         title = (conv.title if conv else "chat").replace(" ", "_")[:40]
 
         # Pure non-Qt rendering — no temp widget, no private reach-through.
-        html = exporter_from_config(self._services.config).export(messages)
+        # Pass tombstoned personas too so historical messages keep their labels.
+        personas = self._services.db.list_personas_including_deleted(conv_id)
+        html = exporter_from_config(self._services.config).export(
+            messages, personas=personas,
+        )
 
         path, _ = QFileDialog.getSaveFileName(
             host, "Export Chat", f"{title}.html", "HTML Files (*.html)"

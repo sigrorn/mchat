@@ -17,6 +17,7 @@ import markdown as _md
 
 from mchat.config import PROVIDER_META
 from mchat.models.message import Message, Provider, Role
+from mchat.models.persona import Persona
 from mchat.ui.chat_export import short_model
 
 
@@ -54,13 +55,27 @@ class HtmlExporter:
             extensions=["tables", "fenced_code", "sane_lists"]
         )
 
-    def export(self, messages: list[Message]) -> str:
-        """Return a standalone HTML document rendering ``messages``."""
+    def export(
+        self,
+        messages: list[Message],
+        personas: list[Persona] | None = None,
+    ) -> str:
+        """Return a standalone HTML document rendering ``messages``.
+
+        ``personas`` is an optional list of Persona rows for this
+        conversation (typically ``db.list_personas_including_deleted(conv_id)``
+        so tombstoned personas still label their historical messages).
+        When provided, any message whose ``persona_id`` matches a row
+        uses that persona's ``name`` as its label. Messages without a
+        persona_id, or whose persona_id doesn't match any row, fall
+        back to the provider display name.
+        """
+        personas_by_id = {p.id: p for p in (personas or [])}
         parts: list[str] = []
         for msg in messages:
             colour = self._colors.color_for(msg)
             content = self._render(msg)
-            label = self._label_for(msg)
+            label = self._label_for(msg, personas_by_id)
             parts.append(
                 f'<div style="background-color:{colour}; padding:12px 16px; '
                 f'margin:0; border-radius:0;">'
@@ -104,9 +119,17 @@ class HtmlExporter:
         return text.replace("\n", "<br>")
 
     @staticmethod
-    def _label_for(msg: Message) -> str:
+    def _label_for(
+        msg: Message, personas_by_id: dict[str, Persona] | None = None,
+    ) -> str:
         if msg.role == Role.USER:
             return "You"
+        # Persona name wins when persona_id is set and we have a
+        # matching row (including tombstoned personas per D3).
+        if msg.persona_id is not None and personas_by_id:
+            p = personas_by_id.get(msg.persona_id)
+            if p is not None:
+                return f"{p.name} ({short_model(msg.model)})" if msg.model else p.name
         if msg.provider:
             display = PROVIDER_META.get(msg.provider.value, {}).get(
                 "display", msg.provider.value

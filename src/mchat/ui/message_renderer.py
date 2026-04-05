@@ -20,6 +20,7 @@ from mchat.config import PROVIDER_META, Config
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
+from mchat.models.persona import Persona
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.context_builder import compute_excluded_indices
 
@@ -34,6 +35,44 @@ PROVIDER_ORDER: list[Provider] = [
 PROVIDER_DISPLAY: dict[Provider, str] = {
     p: PROVIDER_META[p.value]["display"] for p in Provider
 }
+
+
+def message_grouping_key(msg: Message) -> str:
+    """Return the key used to group consecutive assistant messages into
+    multi-provider display groups.
+
+    Two messages with distinct ``persona_id`` values form distinct
+    group slots, even if they share the same backing provider — this
+    is what lets the Italian-tutor scenario render "partner" and
+    "evaluator" as two columns when both are backed by Claude.
+
+    Legacy messages with ``persona_id=None`` fall back to
+    ``provider.value`` so existing chats group exactly as before.
+    """
+    if msg.persona_id is not None:
+        return msg.persona_id
+    if msg.provider is not None:
+        return msg.provider.value
+    return ""  # SYSTEM or similar — shouldn't reach here in grouping paths
+
+
+def resolve_message_label(
+    msg: Message, personas_by_id: dict[str, Persona]
+) -> str:
+    """Return the display label for a message.
+
+    If the message has a ``persona_id`` and a matching persona is
+    provided (including tombstoned personas via
+    ``list_personas_including_deleted``), return the persona's name.
+    Otherwise fall back to the provider display name.
+    """
+    if msg.persona_id is not None:
+        p = personas_by_id.get(msg.persona_id)
+        if p is not None:
+            return p.name
+    if msg.provider is not None:
+        return PROVIDER_DISPLAY.get(msg.provider, "Assistant")
+    return "Assistant"
 
 # Patterns the LLMs may echo at the start of their response.
 _TAKE_ECHO_RE = re.compile(
@@ -72,17 +111,22 @@ class MessageRenderer:
     ) -> None:
         """Clear the chat and re-render ``messages`` from scratch.
 
-        Detects consecutive assistant messages from different providers
-        and renders them either as a columned table (if their stored
-        display_mode is "cols", or the global toggle is on for legacy
-        messages without a stored mode) or as stacked list items with
-        "X's take:" headings.
+        Detects consecutive assistant messages from distinct personas
+        (the grouping key is ``msg.persona_id or msg.provider.value``,
+        so two same-provider personas form distinct groups) and renders
+        them either as a columned table or as stacked list items with
+        persona-named headings. Tombstoned personas still resolve their
+        historical labels via ``list_personas_including_deleted``.
         """
         self._chat.clear_messages()
         if conv is not None:
             excluded = compute_excluded_indices(conv, self._db, configured_providers)
+            personas_by_id = {
+                p.id: p for p in self._db.list_personas_including_deleted(conv.id)
+            }
         else:
             excluded = set()
+            personas_by_id = {}
         self._chat.set_excluded_indices(excluded)
         self._chat.setUpdatesEnabled(False)
         try:
@@ -95,18 +139,23 @@ class MessageRenderer:
                     i += 1
                     continue
 
-                # Collect consecutive assistant messages from distinct providers
-                # as (original_index, message) pairs so we never have to
-                # re-derive positions via value-based list.index().
+                # Collect consecutive assistant messages from distinct
+                # personas as (original_index, message) pairs. Grouping
+                # key is (persona_id or provider.value), so two Claude
+                # personas with different persona_ids form distinct
+                # slots in the column table.
                 group: list[tuple[int, Message]] = [(i, msg)]
-                seen_providers = {msg.provider}
+                seen_keys = {message_grouping_key(msg)}
                 j = i + 1
                 while j < len(messages):
                     nxt = messages[j]
-                    if nxt.role != Role.ASSISTANT or nxt.provider in seen_providers:
+                    if nxt.role != Role.ASSISTANT:
+                        break
+                    nxt_key = message_grouping_key(nxt)
+                    if nxt_key in seen_keys:
                         break
                     group.append((j, nxt))
-                    seen_providers.add(nxt.provider)
+                    seen_keys.add(nxt_key)
                     j += 1
 
                 if len(group) > 1:
@@ -124,11 +173,18 @@ class MessageRenderer:
                     )
                     if use_cols:
                         group_indices = [idx for idx, _m in ordered_pairs]
-                        self._render_column_group(ordered, group_indices)
+                        self._render_column_group(
+                            ordered, group_indices,
+                            personas_by_id=personas_by_id,
+                        )
                     else:
-                        self._render_list_group(ordered)
+                        self._render_list_group(
+                            ordered, personas_by_id=personas_by_id,
+                        )
                 else:
-                    # Single assistant message — render as-is
+                    # Single assistant message — render as-is, label
+                    # resolution still goes through the persona lookup
+                    # so solo persona messages show the persona name.
                     self._chat._messages.append(msg)
                     self._chat._insert_rendered(msg)
 
@@ -188,9 +244,15 @@ class MessageRenderer:
     def _provider_color(self, p: Provider) -> str:
         return self._config.get(PROVIDER_META[p.value]["color_key"])
 
-    def _render_list_group(self, ordered: list[Message]) -> None:
+    def _render_list_group(
+        self,
+        ordered: list[Message],
+        *,
+        personas_by_id: dict[str, Persona] | None = None,
+    ) -> None:
+        personas_by_id = personas_by_id or {}
         for m in ordered:
-            label = PROVIDER_DISPLAY.get(m.provider, "Assistant")
+            label = resolve_message_label(m, personas_by_id)
             clean = strip_echoed_heading(m.content)
             display_msg = Message(
                 role=m.role,
@@ -204,23 +266,35 @@ class MessageRenderer:
             self._chat._insert_rendered(display_msg)
 
     def _render_column_group(
-        self, ordered: list[Message], group_indices: list[int]
+        self,
+        ordered: list[Message],
+        group_indices: list[int],
+        *,
+        personas_by_id: dict[str, Persona] | None = None,
     ) -> None:
+        personas_by_id = personas_by_id or {}
         excluded = any(idx in self._chat._excluded_indices for idx in group_indices)
-        table_html, provider_colors = self._build_column_table(ordered, excluded)
+        table_html, provider_colors = self._build_column_table(
+            ordered, excluded, personas_by_id=personas_by_id,
+        )
         for m in ordered:
             self._chat._messages.append(m)
         self._chat._insert_column_table(table_html, provider_colors)
 
     def _build_column_table(
-        self, ordered: list[Message], excluded: bool
+        self,
+        ordered: list[Message],
+        excluded: bool,
+        *,
+        personas_by_id: dict[str, Persona] | None = None,
     ) -> tuple[str, list[str]]:
+        personas_by_id = personas_by_id or {}
         md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
         header_cells: list[str] = []
         body_cells: list[str] = []
         provider_colors: list[str] = []
         for m in ordered:
-            label = PROVIDER_DISPLAY.get(m.provider, "Assistant")
+            label = resolve_message_label(m, personas_by_id)
             base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
             color = self._chat._shade(base_color) if excluded else base_color
             provider_colors.append(color)
