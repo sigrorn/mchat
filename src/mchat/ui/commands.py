@@ -30,7 +30,7 @@ _HELP_COMMANDS = (
     "  //pin <target>, <instr>— pin an instruction (always sent, bypasses //limit)\n"
     "  //unpin <N>           — remove a pin by message number\n"
     "  //unpin ALL           — remove all pins\n"
-    "  //pins                — list all pinned instructions\n"
+    "  //pins [provider]     — list pinned instructions (optionally filtered by provider)\n"
     "  //rename <text>       — rename the current chat\n"
     "  //columns (//cols)    — show multi-provider responses side by side\n"
     "  //lines               — show multi-provider responses as a list (default)\n"
@@ -89,7 +89,7 @@ def dispatch(cmd: str, arg: str, app) -> bool:
     if cmd == "//unpin":
         return _handle_unpin(arg, app)
     if cmd == "//pins":
-        return _handle_pins(app)
+        return _handle_pins(arg, app)
     return False
 
 
@@ -459,14 +459,41 @@ def _handle_unpin(arg: str, app) -> bool:
     return True
 
 
-def _handle_pins(app) -> bool:
+def _handle_pins(arg: str, app) -> bool:
     if not app._current_conv:
         app._chat.add_note("Error: no active conversation")
         return True
+
+    # Optional provider filter: //pins claude → only pins that would be
+    # delivered to Claude (i.e. pin_target is "all" or contains claude).
+    filter_provider: Provider | None = None
+    if arg.strip():
+        from mchat.router import PREFIX_TO_PROVIDER
+        name = arg.strip().lower()
+        filter_provider = PREFIX_TO_PROVIDER.get(name)
+        if filter_provider is None:
+            app._chat.add_note(f"Error: unknown provider '{arg.strip()}'")
+            return True
+
     messages = app._current_conv.messages
     pinned = [(i + 1, m) for i, m in enumerate(messages) if m.pinned]
+    if filter_provider is not None:
+        def _matches(m) -> bool:
+            if not m.pin_target:
+                return False
+            if m.pin_target == "all":
+                return True
+            targets = {t.strip().lower() for t in m.pin_target.split(",") if t.strip()}
+            return filter_provider.value in targets
+        pinned = [(n, m) for n, m in pinned if _matches(m)]
+
     if not pinned:
-        app._chat.add_note("no pinned messages")
+        if filter_provider is not None:
+            app._chat.add_note(
+                f"no pinned messages for {_PROVIDER_DISPLAY[filter_provider]}"
+            )
+        else:
+            app._chat.add_note("no pinned messages")
         return True
 
     # Resolve target labels for display
@@ -483,7 +510,12 @@ def _handle_pins(app) -> bool:
                 labels.append(v)
         return ",".join(labels)
 
-    app._chat.add_note("Pinned instructions")
+    if filter_provider is not None:
+        app._chat.add_note(
+            f"Pinned instructions for {_PROVIDER_DISPLAY[filter_provider]}"
+        )
+    else:
+        app._chat.add_note("Pinned instructions")
     cursor = app._chat.textCursor()
     cursor.movePosition(QTextCursor.MoveOperation.End)
     fmt = QTextBlockFormat()
