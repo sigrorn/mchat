@@ -161,14 +161,21 @@ def _handle_limit(tag: str, app) -> bool:
         return True
     if tag.isdigit():
         idx = int(tag)
-        if idx < 1 or idx > len(app._current_conv.messages):
+        messages = app._current_conv.messages
+        if idx < 1 or idx > len(messages):
             app._chat.add_note(f"Error: message {idx} out of range")
+            return True
+        if messages[idx - 1].role != Role.USER:
+            app._chat.add_note(
+                f"Error: message {idx} is not a user prompt — //limit must "
+                f"target a user message so the cut-off starts at a request"
+            )
             return True
         mark_name = f"#{idx}"
         app._db.set_mark(app._current_conv.id, mark_name, idx - 1)
         app._current_conv.limit_mark = mark_name
         app._db.set_conversation_limit(app._current_conv.id, mark_name)
-        app._display_messages(app._current_conv.messages)
+        app._display_messages(messages)
         app._chat.add_note(f"limit set to message {idx} — earlier context will not be sent")
         return True
     app._chat.add_note(f"Error: '{tag}' is not a valid message number — use //limit <N>, //limit last, or //limit ALL")
