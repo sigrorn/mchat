@@ -34,7 +34,8 @@ from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
-from mchat.ui.chat_widget import ChatWidget, FindBar
+from mchat.ui.chat_widget import ChatWidget
+from mchat.ui.find_bar import FindBar
 from mchat.ui.context_builder import build_context, compute_excluded_indices
 from mchat.ui.matrix_panel import MatrixPanel
 from mchat.ui.message_renderer import (
