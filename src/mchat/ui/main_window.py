@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE, PROVIDER_META
+from mchat.config import Config, PROVIDER_META
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
@@ -44,10 +44,10 @@ from mchat.ui.message_renderer import (
     PROVIDER_ORDER as _PROVIDER_ORDER_FROM_RENDERER,
     strip_echoed_heading as _strip_echoed_heading,
 )
+from mchat.ui.preferences_adapter import PreferencesAdapter
 from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
 from mchat.ui.input_widget import InputWidget
-from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
 
@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._send = SendController(self)
         self._conv_mgr = ConversationManager(self)
+        self._prefs = PreferencesAdapter(self)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
@@ -346,22 +347,16 @@ class MainWindow(QMainWindow):
                 f.write(html)
 
     def _zoom_in(self) -> None:
-        self._set_font_size(self._font_size + 1)
+        self._prefs.zoom_in()
 
     def _zoom_out(self) -> None:
-        self._set_font_size(self._font_size - 1)
+        self._prefs.zoom_out()
 
     def _zoom_reset(self) -> None:
-        self._set_font_size(14)
+        self._prefs.zoom_reset()
 
     def _set_font_size(self, size: int) -> None:
-        size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, size))
-        if size == self._font_size:
-            return
-        self._font_size = size
-        self._config.set("font_size", size)
-        self._config.save()
-        self._apply_font_size()
+        self._prefs.set_font_size(size)
 
     def _apply_font_size(self) -> None:
         self._chat.update_font_size(self._font_size)
@@ -560,58 +555,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _restore_geometry(self) -> None:
-        geo = self._config.get("window_geometry")
-        if geo:
-            try:
-                x, y, w, h = (int(v) for v in geo.split(","))
-                self.setGeometry(x, y, w, h)
-            except (ValueError, TypeError):
-                self.resize(1100, 750)
-        else:
-            self.resize(1100, 750)
+        self._prefs.restore_geometry()
 
     def _save_geometry(self) -> None:
-        g = self.geometry()
-        self._config.set("window_geometry", f"{g.x()},{g.y()},{g.width()},{g.height()}")
-        self._config.save()
+        self._prefs.save_geometry()
 
     def closeEvent(self, event) -> None:
-        self._save_geometry()
+        self._prefs.save_geometry()
         super().closeEvent(event)
 
     def _open_settings(self) -> None:
-        providers = self._router._providers if self._router else {}
-        # Harvest the model lists the combos already hold — MainWindow
-        # fetches these asynchronously after startup, so they are usually
-        # up-to-date and available without any extra API calls.
-        models_cache: dict[Provider, list[str]] = {}
-        for p, combo in self._combos.items():
-            items = [combo.itemText(i) for i in range(combo.count())]
-            if items:
-                models_cache[p] = items
-        dialog = SettingsDialog(
-            self._config,
-            providers=providers,
-            models_cache=models_cache,
-            parent=self,
-        )
-        if dialog.exec():
-            self._init_providers()
-            self._populate_model_combos()
-            self._apply_all_combo_styles()
-            self._sync_matrix_panel()
-            self._update_input_placeholder()
-            self._update_input_color()
-            new_size = int(self._config.get("font_size") or 14)
-            if new_size != self._font_size:
-                self._font_size = new_size
-                self._apply_font_size()
-            self._chat.update_colors(
-                **{meta["color_key"]: self._config.get(meta["color_key"])
-                   for meta in PROVIDER_META.values()},
-                color_user=self._config.get("color_user"),
-            )
-            self._chat.update_shading(
-                mode=str(self._config.get("exclude_shade_mode") or "darken"),
-                amount=int(self._config.get("exclude_shade_amount") or 20),
-            )
+        self._prefs.open_settings()
