@@ -4,31 +4,50 @@
 #                 listing, selecting, creating, renaming, exporting
 #                 and deleting conversations. Data-layer access (db,
 #                 session state, router selection) goes through the
-#                 ServicesContext; presentational access (sidebar,
-#                 chat, renderer, refresh callbacks) still goes through
-#                 a MainWindow host reference, which will be narrowed
-#                 to a Protocol in #51.
-# Collaborators: services.ServicesContext, MainWindow (host),
+#                 ServicesContext. Presentational side-effects go
+#                 through a narrow ConversationHost Protocol — the
+#                 concrete MainWindow type is never imported at
+#                 runtime.
+# Collaborators: services.ServicesContext, ConversationHost (Protocol),
 #                html_exporter, PySide6
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from mchat.models.message import Provider
+from mchat.models.message import Message, Provider
 from mchat.ui.html_exporter import exporter_from_config
 from mchat.ui.services import ServicesContext
 
 if TYPE_CHECKING:
-    from mchat.ui.main_window import MainWindow
+    from mchat.ui.main_window import MainWindow  # noqa: F401
+
+
+class ConversationHost(Protocol):
+    """Presentational surface ConversationManager is allowed to touch.
+
+    Documentation-level — Python doesn't enforce this at runtime, but
+    every method the manager calls on its host is listed here so
+    drift is easy to spot.
+    """
+
+    _chat: Any
+    _sidebar: Any
+
+    def _sync_checkboxes_from_selection(self) -> None: ...
+    def _update_input_placeholder(self) -> None: ...
+    def _update_input_color(self) -> None: ...
+    def _update_spend_labels(self) -> None: ...
+    def _sync_matrix_panel(self) -> None: ...
+    def _display_messages(self, messages: list[Message]) -> None: ...
 
 
 class ConversationManager:
     """All conversation-level operations the main window exposes."""
 
-    def __init__(self, host: "MainWindow", services: ServicesContext) -> None:
+    def __init__(self, host: ConversationHost, services: ServicesContext) -> None:
         self._host = host
         self._services = services
 
