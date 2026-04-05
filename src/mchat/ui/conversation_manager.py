@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from mchat.models.conversation import Conversation
 from mchat.models.message import Provider
-from mchat.ui.chat_widget import ChatWidget
+from mchat.ui.html_exporter import exporter_from_config
 
 if TYPE_CHECKING:
     from mchat.ui.main_window import MainWindow
@@ -103,12 +103,8 @@ class ConversationManager:
         conv = next((c for c in convs if c.id == conv_id), None)
         title = (conv.title if conv else "chat").replace(" ", "_")[:40]
 
-        tmp = ChatWidget(font_size=host._font_size)
-        for msg in messages:
-            tmp._messages.append(msg)
-            tmp._insert_rendered(msg)
-        html = tmp.export_html()
-        tmp.deleteLater()
+        # Pure non-Qt rendering — no temp widget, no private reach-through.
+        html = exporter_from_config(host._config).export(messages)
 
         path, _ = QFileDialog.getSaveFileName(
             host, "Export Chat", f"{title}.html", "HTML Files (*.html)"

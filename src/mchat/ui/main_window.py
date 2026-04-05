@@ -344,7 +344,10 @@ class MainWindow(QMainWindow):
             self, "Export Chat", f"{title}.html", "HTML Files (*.html)"
         )
         if path:
-            html = self._chat.export_html()
+            from mchat.ui.html_exporter import exporter_from_config
+            html = exporter_from_config(self._config).export(
+                self._current_conv.messages
+            )
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
 

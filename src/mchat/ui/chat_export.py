@@ -1,10 +1,10 @@
 # ------------------------------------------------------------------
 # Component: ChatExportMixin
-# Responsibility: HTML export and selection-copy with //speaker
-#                 prefixes. Split out from ChatWidget so the export
-#                 format and copy-with-prefix logic have a clear home
-#                 distinct from document rendering.
-# Collaborators: PySide6 (QTextEdit / QMimeData), config, models.message
+# Responsibility: Selection-copy with //speaker prefixes for the
+#                 ChatWidget. HTML export lives in ui.html_exporter as
+#                 a pure non-Qt module; this file only keeps the copy
+#                 behaviour and the shared short_model helper.
+# Collaborators: PySide6 (QTextEdit / QMimeData), models.message
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import re
 
 from PySide6.QtCore import QMimeData
 
-from mchat.config import PROVIDER_META
 from mchat.models.message import Provider, Role
 
 _RoleInfo = tuple[Role, Provider | None, str | None]
@@ -53,63 +52,11 @@ def prefix_for(role_info: _RoleInfo) -> str:
 
 
 class ChatExportMixin:
-    """Export-to-HTML and copy-with-prefix behaviour for ChatWidget.
+    """Copy-with-//speaker-prefix behaviour for ChatWidget.
 
-    Expects the host to provide ``_messages``, ``_block_roles``,
-    ``_font_size``, ``_color_for()``, ``_render()``, and standard
-    QTextEdit behaviour (``document``, ``textCursor``,
-    ``createMimeDataFromSelection`` as a super method).
+    Expects the host to provide ``_block_roles`` and the standard
+    QTextEdit ``document``/``textCursor`` surface.
     """
-
-    def export_html(self) -> str:
-        """Return a standalone HTML document with all messages."""
-        parts: list[str] = []
-        for msg in self._messages:
-            colour = self._color_for(msg)
-            content = self._render(msg)
-
-            if msg.role == Role.USER:
-                label = "You"
-            elif msg.provider:
-                display = PROVIDER_META.get(msg.provider.value, {}).get(
-                    "display", msg.provider.value
-                )
-                label = (
-                    f"{display} ({short_model(msg.model)})" if msg.model else display
-                )
-            else:
-                label = "Assistant"
-
-            parts.append(
-                f'<div style="background-color:{colour}; padding:12px 16px; '
-                f'margin:0; border-radius:0;">'
-                f'<div style="font-size:0.85em; color:#444; font-weight:bold; '
-                f'margin-bottom:4px;">{label}</div>'
-                f"{content}"
-                f"</div>"
-            )
-
-        body = "\n".join(parts)
-        return (
-            "<!DOCTYPE html>\n"
-            "<html><head><meta charset='utf-8'>\n"
-            "<style>\n"
-            "  body { font-family: -apple-system, Segoe UI, sans-serif;\n"
-            f"         font-size: {self._font_size}px; margin: 0; padding: 0;\n"
-            "         background: #f5f5f5; color: #1a1a1a; }\n"
-            "  code { background: rgba(0,0,0,0.06); padding: 1px 4px;\n"
-            "         font-family: Consolas, 'Courier New', monospace; }\n"
-            "  pre  { background: rgba(0,0,0,0.06); padding: 8px;\n"
-            "         font-family: Consolas, 'Courier New', monospace;\n"
-            "         white-space: pre-wrap; overflow-x: auto; }\n"
-            "  table { border-collapse: collapse; margin: 4px 0; }\n"
-            "  th, td { border: 1px solid #999; padding: 4px 8px; }\n"
-            "  th { background: rgba(0,0,0,0.08); font-weight: bold; }\n"
-            "</style>\n"
-            "</head><body>\n"
-            f"{body}\n"
-            "</body></html>"
-        )
 
     # Kept as a method so it can be accessed via ChatWidget._prefix_for
     # (preserves the old public-ish API) while the real implementation
