@@ -138,16 +138,28 @@ class SendController:
         if svc.session.current is None:
             host._on_new_chat()
 
+        # Capture selection *before* parse() — parse writes the new
+        # selection into ProviderSelectionState as a side effect, so we
+        # can't use svc.router.selection after the call to detect
+        # whether the input was a prefix-only selection change. See #60.
+        pre_parse_selection = list(svc.router.selection)
+
         # Route message. parse() writes any new selection into
         # ProviderSelectionState, which fires selection_changed →
         # the fan-out on the host updates sync/placeholder/color.
         targets, cleaned_text = svc.router.parse(text)
 
-        # If provider prefixes consumed everything, treat as selection change
-        if not cleaned_text.strip() and targets != svc.router.selection:
-            host._save_selection()
-            names = ", ".join(PROVIDER_DISPLAY[p] for p in targets)
-            host._chat.add_note(f"selected: {names}")
+        # Prefix-only input: no content left after consuming prefixes.
+        # This is a selection change, not a send. We detect it purely
+        # by "parse ate everything", not by comparing to a post-mutation
+        # router.selection. The second guard (did selection actually
+        # change vs pre-parse) suppresses the redundant "selected:"
+        # note when the user re-types the exact prefix already active.
+        if not cleaned_text.strip():
+            if targets != pre_parse_selection:
+                host._save_selection()
+                names = ", ".join(PROVIDER_DISPLAY[p] for p in targets)
+                host._chat.add_note(f"selected: {names}")
             return
 
         # Validate all targets are configured
