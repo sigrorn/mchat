@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
+        self._sync_matrix_panel()
         self._setup_shortcuts()
         self._load_conversations()
         self._update_input_placeholder()
@@ -555,13 +556,12 @@ class MainWindow(QMainWindow):
         self._display_messages(messages)
 
     def _sync_matrix_panel(self) -> None:
-        """Push the current conversation's visibility matrix into the panel
-        and mark unconfigured providers as disabled."""
-        if not self._current_conv:
-            return
-        configured = set(self._router._providers.keys()) if self._router else set()
-        self._matrix_panel.set_configured(configured)
-        self._matrix_panel.load_matrix(self._current_conv.visibility_matrix or {})
+        """Rebuild the matrix panel for the currently configured providers
+        and populate it from the current conversation's visibility matrix."""
+        configured = list(self._router._providers.keys()) if self._router else []
+        self._matrix_panel.set_providers(configured)
+        if self._current_conv:
+            self._matrix_panel.load_matrix(self._current_conv.visibility_matrix or {})
 
     def _on_visibility_changed(self, matrix: dict) -> None:
         if not self._current_conv:
@@ -1221,6 +1221,7 @@ class MainWindow(QMainWindow):
             self._init_providers()
             self._populate_model_combos()
             self._apply_all_combo_styles()
+            self._sync_matrix_panel()
             self._update_input_placeholder()
             self._update_input_color()
             new_size = int(self._config.get("font_size") or 14)
