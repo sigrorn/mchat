@@ -354,3 +354,160 @@ class TestLayoutPersistence:
         initial = main_window._column_mode
         main_window._toggle_column_mode()
         assert main_window._config.get("column_mode") == (not initial)
+
+
+class TestSendControllerPersonas:
+    """Stage 2.6 — send_controller threads PersonaTargets through the
+    send/retry flow. Sends produce persisted messages tagged with
+    persona_id + provider; model selection honours persona.model_override.
+    """
+
+    def _make_persona(self, db, conv_id, name="Evaluator", slug="evaluator",
+                      system_prompt_override=None, model_override=None):
+        from mchat.models.persona import Persona, generate_persona_id
+        p = Persona(
+            conversation_id=conv_id,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name=name,
+            name_slug=slug,
+            system_prompt_override=system_prompt_override,
+            model_override=model_override,
+        )
+        return db.create_persona(p)
+
+    def _send_and_wait(self, main_window, qtbot, text: str):
+        """Submit a message and let the fake worker's 'ok' yield
+        make it through the Qt event loop."""
+        main_window._on_new_chat() if not main_window._current_conv else None
+        main_window._on_message_submitted(text)
+        # Wait until the send finishes (input re-enabled = done).
+        qtbot.waitUntil(
+            lambda: main_window._input.isEnabled() is True,
+            timeout=3000,
+        )
+
+    def test_send_to_synthetic_default_works_like_today(
+        self, main_window, qtbot,
+    ):
+        """Baseline: sending with a provider shorthand produces a
+        persisted assistant message with persona_id == provider.value
+        (the synthetic default exception, D1). This is the regression
+        guarantee that legacy chats still behave identically."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        self._send_and_wait(main_window, qtbot, "claude, hello")
+
+        msgs = main_window._db.get_messages(conv_id)
+        # First is user, second+ are assistant replies
+        assistants = [m for m in msgs if m.role == Role.ASSISTANT]
+        assert len(assistants) >= 1
+        assert assistants[0].persona_id == "claude"
+        assert assistants[0].provider == Provider.CLAUDE
+
+    def test_send_to_explicit_persona_tags_message_with_persona_id(
+        self, main_window, qtbot,
+    ):
+        """A send addressed to an explicit persona produces a persisted
+        assistant message with persona_id == that persona's opaque id."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        partner = self._make_persona(
+            main_window._db, conv_id, name="Partner", slug="partner",
+        )
+        self._send_and_wait(main_window, qtbot, "partner, Ciao!")
+
+        assistants = [
+            m for m in main_window._db.get_messages(conv_id)
+            if m.role == Role.ASSISTANT
+        ]
+        assert len(assistants) >= 1
+        assert assistants[0].persona_id == partner.id
+        assert assistants[0].provider == Provider.CLAUDE
+
+    def test_persona_model_override_is_used_at_send_time(
+        self, main_window, qtbot,
+    ):
+        """D6: resolve_persona_model is called in the send path, so a
+        persona with model_override set sends with that model even
+        though the global Claude model differs."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        # Global default model is fake-model (from FakeProvider); set
+        # an explicit override on the persona to something different.
+        self._make_persona(
+            main_window._db, conv_id,
+            name="Translator", slug="translator",
+            model_override="claude-haiku-override",
+        )
+        self._send_and_wait(main_window, qtbot, "translator, word")
+
+        assistants = [
+            m for m in main_window._db.get_messages(conv_id)
+            if m.role == Role.ASSISTANT
+        ]
+        assert len(assistants) >= 1
+        assert assistants[0].model == "claude-haiku-override"
+
+    def test_persona_with_none_model_override_uses_config_model(
+        self, main_window, qtbot,
+    ):
+        """A persona with model_override=None inherits the global
+        provider model from config at send time."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        main_window._config.set("claude_model", "global-sonnet")
+        main_window._config.save()
+        self._make_persona(
+            main_window._db, conv_id,
+            name="Partner", slug="partner",
+            model_override=None,
+        )
+        self._send_and_wait(main_window, qtbot, "partner, hi")
+
+        assistants = [
+            m for m in main_window._db.get_messages(conv_id)
+            if m.role == Role.ASSISTANT
+        ]
+        assert len(assistants) >= 1
+        assert assistants[0].model == "global-sonnet"
+
+    def test_two_same_provider_personas_send_independently(
+        self, main_window, qtbot,
+    ):
+        """The killer use case: partner and evaluator, both on Claude,
+        addressed in a single multi-prefix send. Two assistant messages
+        should land — one per persona — with distinct persona_ids, and
+        the workers must not clobber each other's transient state."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        partner = self._make_persona(
+            main_window._db, conv_id, name="Partner", slug="partner",
+        )
+        evaluator = self._make_persona(
+            main_window._db, conv_id, name="Evaluator", slug="evaluator",
+        )
+        self._send_and_wait(main_window, qtbot, "partner, evaluator, go")
+
+        assistants = [
+            m for m in main_window._db.get_messages(conv_id)
+            if m.role == Role.ASSISTANT
+        ]
+        persona_ids = {m.persona_id for m in assistants}
+        assert partner.id in persona_ids
+        assert evaluator.id in persona_ids
+        # At least two distinct assistant rows
+        assert len({m.persona_id for m in assistants}) == 2
+
+    def test_prefix_only_input_still_short_circuits(
+        self, main_window, qtbot,
+    ):
+        """Regression guard for #60: prefix-only input with PersonaResolver
+        in the chain still doesn't start a worker."""
+        from mchat.models.message import Provider
+        main_window._on_new_chat()
+        main_window._router.set_selection([Provider.CLAUDE])
+        main_window._on_message_submitted("gpt,")
+        # No worker should have started
+        assert main_window._send._multi_workers == {}
+        assert main_window._router.selection == [Provider.OPENAI]
