@@ -45,6 +45,7 @@ from mchat.ui.message_renderer import (
     strip_echoed_heading as _strip_echoed_heading,
 )
 from mchat.ui.preferences_adapter import PreferencesAdapter
+from mchat.ui.settings_applier import SettingsApplier
 from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
 from mchat.ui.services import ServicesContext
@@ -100,9 +101,11 @@ class MainWindow(QMainWindow):
         # controllers so they can depend on a narrow typed surface
         # instead of a full MainWindow reference. See ui/services.py.
         self._rebuild_services()
-        # PreferencesAdapter must exist before _build_ui, because
-        # _build_ui calls _restore_geometry -> self._prefs.restore_geometry.
-        self._prefs = PreferencesAdapter(self)
+        # PreferencesAdapter + SettingsApplier must exist before _build_ui,
+        # because _build_ui calls _restore_geometry -> prefs.restore_geometry
+        # and wires the Settings button to settings_applier.open.
+        self._prefs = PreferencesAdapter(self, self._services)
+        self._settings_applier = SettingsApplier(self, self._services)
         self._build_ui()
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._send = SendController(self, self._services)
@@ -642,4 +645,4 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _open_settings(self) -> None:
-        self._prefs.open_settings()
+        self._settings_applier.open()

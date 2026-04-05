@@ -1,36 +1,43 @@
 # ------------------------------------------------------------------
 # Component: PreferencesAdapter
-# Responsibility: Apply window-level preferences and persist them —
-#                 geometry restore/save, font-size (zoom), and
-#                 settings-dialog round-trip including the subsequent
-#                 re-application of colours, shading, provider combos,
-#                 and input placeholder state.
-# Collaborators: MainWindow (host), config, ui.settings_dialog
+# Responsibility: Persist window-level preferences that live outside
+#                 the Settings dialog: geometry (restore/save on
+#                 open/close) and font size (zoom in/out/reset).
+#                 The Settings-dialog round-trip with its post-save
+#                 fan-out lives in SettingsApplier; this class is
+#                 intentionally narrow.
+# Collaborators: services.ServicesContext, PreferencesHost (Protocol)
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from mchat.config import MAX_FONT_SIZE, MIN_FONT_SIZE, PROVIDER_META
-from mchat.models.message import Provider
-from mchat.ui.settings_dialog import SettingsDialog
+from mchat.config import MAX_FONT_SIZE, MIN_FONT_SIZE
+from mchat.ui.services import ServicesContext
 
 if TYPE_CHECKING:
-    from mchat.ui.main_window import MainWindow
+    from mchat.ui.main_window import MainWindow  # noqa: F401
+
+
+class PreferencesHost(Protocol):
+    """Narrow host surface: PreferencesAdapter only needs to read the
+    window geometry, set it back on restore, poke the font size, and
+    trigger a font-size re-apply fan-out on the host."""
+
+    _font_size: int
+
+    def geometry(self): ...  # QRect
+    def setGeometry(self, x: int, y: int, w: int, h: int) -> None: ...
+    def resize(self, w: int, h: int) -> None: ...
+    def _apply_font_size(self) -> None: ...
 
 
 class PreferencesAdapter:
-    """Applies preferences onto the host MainWindow.
+    """Window geometry + zoom. Nothing else."""
 
-    Centralises the fan-out that happens when the user changes a
-    preference: the host must update ChatWidget colours/shading,
-    re-initialise providers, re-populate combos, refresh input
-    colour, and so on. Keeping this in one place avoids the previous
-    MainWindow sprawl.
-    """
-
-    def __init__(self, host: "MainWindow") -> None:
+    def __init__(self, host: PreferencesHost, services: ServicesContext) -> None:
         self._host = host
+        self._services = services
 
     # ------------------------------------------------------------------
     # Geometry
@@ -38,7 +45,7 @@ class PreferencesAdapter:
 
     def restore_geometry(self) -> None:
         host = self._host
-        geo = host._config.get("window_geometry")
+        geo = self._services.config.get("window_geometry")
         if geo:
             try:
                 x, y, w, h = (int(v) for v in geo.split(","))
@@ -51,10 +58,10 @@ class PreferencesAdapter:
     def save_geometry(self) -> None:
         host = self._host
         g = host.geometry()
-        host._config.set(
+        self._services.config.set(
             "window_geometry", f"{g.x()},{g.y()},{g.width()},{g.height()}"
         )
-        host._config.save()
+        self._services.config.save()
 
     # ------------------------------------------------------------------
     # Font size
@@ -75,51 +82,6 @@ class PreferencesAdapter:
         if size == host._font_size:
             return
         host._font_size = size
-        host._config.set("font_size", size)
-        host._config.save()
+        self._services.config.set("font_size", size)
+        self._services.config.save()
         host._apply_font_size()
-
-    # ------------------------------------------------------------------
-    # Settings dialog
-    # ------------------------------------------------------------------
-
-    def open_settings(self) -> None:
-        host = self._host
-        providers = host._router._providers if host._router else {}
-        # The ModelCatalog is the source of truth for cached model lists —
-        # it's populated by the fast/async/sync paths in MainWindow, so
-        # SettingsDialog never needs to harvest combo contents or call
-        # provider.list_models() synchronously during _build_ui.
-        models_cache: dict[Provider, list[str]] = host._model_catalog.all()
-        dialog = SettingsDialog(
-            host._config,
-            providers=providers,
-            models_cache=models_cache,
-            parent=host,
-        )
-        if not dialog.exec():
-            return
-
-        # Re-apply everything that might have changed
-        host._init_providers()
-        host._rebuild_services()
-        host._populate_model_combos()
-        host._apply_all_combo_styles()
-        host._sync_matrix_panel()
-        host._update_input_placeholder()
-        host._update_input_color()
-        new_size = int(host._config.get("font_size") or 14)
-        if new_size != host._font_size:
-            host._font_size = new_size
-            host._apply_font_size()
-        host._chat.update_colors(
-            **{
-                meta["color_key"]: host._config.get(meta["color_key"])
-                for meta in PROVIDER_META.values()
-            },
-            color_user=host._config.get("color_user"),
-        )
-        host._chat.update_shading(
-            mode=str(host._config.get("exclude_shade_mode") or "darken"),
-            amount=int(host._config.get("exclude_shade_amount") or 20),
-        )
