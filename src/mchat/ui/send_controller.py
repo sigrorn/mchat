@@ -4,13 +4,20 @@
 #                 submission, context building, multi-provider fan-out,
 #                 completion/error handling, spend updates, retry
 #                 stashing. Persists completed responses through the
-#                 host before asking MessageRenderer to display them.
-# Collaborators: MainWindow (host), ui.message_renderer, workers.stream_worker,
-#                db, router, pricing
+#                 services context before asking MessageRenderer to
+#                 display them.
+#
+#                 Data-layer access (db, router, session, selection)
+#                 goes through the ServicesContext. Presentational
+#                 side-effects go through a narrow SendHost Protocol
+#                 — the concrete MainWindow type is never imported at
+#                 runtime, only for type-checking.
+# Collaborators: ServicesContext, SendHost (Protocol), workers.stream_worker,
+#                ui.message_renderer, pricing
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PySide6.QtWidgets import QMessageBox
 
@@ -21,23 +28,57 @@ from mchat.ui.message_renderer import (
     PROVIDER_ORDER,
     strip_echoed_heading,
 )
+from mchat.ui.services import ServicesContext
 from mchat.workers.stream_worker import StreamWorker
 
 if TYPE_CHECKING:
-    from mchat.ui.main_window import MainWindow
+    from mchat.ui.main_window import MainWindow  # noqa: F401
+
+
+class SendHost(Protocol):
+    """The presentational surface SendController is allowed to touch.
+
+    Lives alongside SendController (not as a runtime-enforced type)
+    so every method the controller calls on its host is documented
+    in one place. Python doesn't enforce Protocols at runtime — the
+    real host is still MainWindow — but static type checkers use
+    this to flag drift if someone adds a new call that reaches
+    beyond the allowed surface.
+    """
+
+    # Presentation widgets SendController reads/writes
+    _chat: Any
+    _input: Any
+    _sidebar: Any
+    _renderer: Any
+    _column_mode: bool
+
+    # Callbacks SendController invokes
+    def _handle_command(self, text: str) -> bool: ...
+    def _handle_selection_adjust(self, text: str) -> bool: ...
+    def _on_new_chat(self) -> None: ...
+    def _selected_model(self, provider_id: Provider) -> str: ...
+    def _build_context(self, provider_id: Provider) -> list[Message]: ...
+    def _save_selection(self) -> None: ...
+    def _sync_checkboxes_from_selection(self) -> None: ...
+    def _update_input_placeholder(self) -> None: ...
+    def _update_input_color(self) -> None: ...
+    def _update_spend_labels(self) -> None: ...
+    def _set_combo_waiting(self, p: Provider, waiting: bool) -> None: ...
+    def _set_combo_retrying(self, p: Provider) -> None: ...
 
 
 class SendController:
-    """Owns the send/retry flow. Lives as ``MainWindow._send``.
+    """Owns the send/retry flow.
 
-    The controller holds its own transient state (active workers,
-    column buffer, retry stash) but reaches into ``host`` for shared
-    services: router, db, chat, input widget, combos, conversation,
-    and the message renderer.
+    Takes a ServicesContext for all data-layer access and a SendHost
+    for the presentational side-effects. The controller holds its own
+    transient state (active workers, column buffer, retry stash).
     """
 
-    def __init__(self, host: "MainWindow") -> None:
+    def __init__(self, host: SendHost, services: ServicesContext) -> None:
         self._host = host
+        self._services = services
         self._multi_workers: dict[Provider, StreamWorker] = {}
         self._column_buffer: dict[Provider, tuple[str, str, str, int, int, bool]] = {}
         self._retry_contexts: dict[Provider, list[Message]] = {}
@@ -75,6 +116,7 @@ class SendController:
 
     def on_message_submitted(self, text: str) -> None:
         host = self._host
+        svc = self._services
 
         if text.strip().startswith("//"):
             host._handle_command(text)
@@ -86,21 +128,21 @@ class SendController:
             if host._handle_selection_adjust(stripped):
                 return
 
-        if not host._router:
+        if svc.router is None:
             QMessageBox.warning(
                 host, "No API Keys",
                 "Please configure at least one API key in Settings.",
             )
             return
 
-        if not host._current_conv:
+        if svc.session.current is None:
             host._on_new_chat()
 
         # Route message
-        targets, cleaned_text = host._router.parse(text)
+        targets, cleaned_text = svc.router.parse(text)
 
         # If provider prefixes consumed everything, treat as selection change
-        if not cleaned_text.strip() and targets != host._router.selection:
+        if not cleaned_text.strip() and targets != svc.router.selection:
             host._sync_checkboxes_from_selection()
             host._update_input_placeholder()
             host._update_input_color()
@@ -110,7 +152,7 @@ class SendController:
             return
 
         # Validate all targets are configured
-        configured = set(host._router._providers.keys())
+        configured = set(svc.router._providers.keys())
         missing = [p for p in targets if p not in configured]
         targets = [p for p in targets if p in configured]
         if missing:
@@ -130,21 +172,23 @@ class SendController:
         else:
             addressed_to = ",".join(p.value for p in targets)
 
+        current = svc.session.current
         user_msg = Message(
             role=Role.USER,
             content=text,
-            conversation_id=host._current_conv.id,
+            conversation_id=current.id,
             addressed_to=addressed_to,
         )
-        host._db.add_message(user_msg)
-        host._current_conv.messages.append(user_msg)
+        svc.db.add_message(user_msg)
+        svc.session.append_message(user_msg)
         host._chat.add_message(user_msg)
 
         # Auto-title on first message
-        if len(host._current_conv.messages) == 1:
+        if len(current.messages) == 1:
             title = text[:50] + ("..." if len(text) > 50 else "")
-            host._db.update_conversation_title(host._current_conv.id, title)
-            host._sidebar.update_conversation_title(host._current_conv.id, title)
+            svc.db.update_conversation_title(current.id, title)
+            svc.session.set_title(title)
+            host._sidebar.update_conversation_title(current.id, title)
 
         host._input.set_enabled(False)
         host._save_selection()
@@ -174,12 +218,13 @@ class SendController:
     ) -> None:
         """Send to multiple providers simultaneously; render when all done."""
         host = self._host
+        svc = self._services
         self._multi_workers.clear()
         self._column_buffer.clear()
 
         for provider_id in targets:
             model = host._selected_model(provider_id)
-            provider = host._router.get_provider(provider_id)
+            provider = svc.router.get_provider(provider_id)
             host._set_combo_waiting(provider_id, True)
             if context_override and provider_id in context_override:
                 context_messages = context_override[provider_id]
@@ -219,14 +264,16 @@ class SendController:
         estimated: bool = False,
     ) -> None:
         host = self._host
+        svc = self._services
         host._set_combo_waiting(provider_id, False)
         self._multi_workers.pop(provider_id, None)
 
         # Update spend
         cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None and host._current_conv:
-            host._db.add_conversation_spend(
-                host._current_conv.id, provider_id.value, cost, estimated
+        current = svc.session.current
+        if cost is not None and current is not None:
+            svc.db.add_conversation_spend(
+                current.id, provider_id.value, cost, estimated
             )
         host._update_spend_labels()
 
@@ -250,18 +297,20 @@ class SendController:
 
     def _on_error(self, provider_id: Provider, error: str) -> None:
         host = self._host
+        svc = self._services
         host._set_combo_waiting(provider_id, False)
         worker = self._multi_workers.pop(provider_id, None)
         transient = worker.last_error_transient if worker else False
 
+        current = svc.session.current
         error_msg = Message(
             role=Role.ASSISTANT,
             content=f"[Error from {provider_id.value}: {error}]",
             provider=provider_id,
-            conversation_id=host._current_conv.id,
+            conversation_id=current.id if current else None,
         )
-        host._db.add_message(error_msg)
-        host._current_conv.messages.append(error_msg)
+        svc.db.add_message(error_msg)
+        svc.session.append_message(error_msg)
         host._chat.add_message(error_msg)
 
         # Stash for //retry
@@ -280,7 +329,8 @@ class SendController:
     def _persist_buffered(self, display_mode: str) -> list[Message]:
         """Save every buffered response to the DB + conversation and
         return the new Message objects in stable provider order."""
-        host = self._host
+        svc = self._services
+        current = svc.session.current
         providers = [p for p in PROVIDER_ORDER if p in self._column_buffer]
         persisted: list[Message] = []
         for p in providers:
@@ -291,9 +341,9 @@ class SendController:
                 provider=p,
                 model=model,
                 display_mode=display_mode,
-                conversation_id=host._current_conv.id,
+                conversation_id=current.id if current else None,
             )
-            host._db.add_message(msg)
-            host._current_conv.messages.append(msg)
+            svc.db.add_message(msg)
+            svc.session.append_message(msg)
             persisted.append(msg)
         return persisted
