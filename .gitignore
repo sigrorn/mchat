@@ -38,3 +38,4 @@ Output/
 
 # output directory,  might contain saved files
 outputs
+scripts/codex-wsl.ps1
