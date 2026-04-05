@@ -20,20 +20,40 @@ from mchat.router import Router
 from mchat.ui.state import ConversationSession, ModelCatalog, ProviderSelectionState
 
 
-@dataclass(frozen=True)
+# IMPORTANT: ServicesContext is intentionally NOT frozen.
+#
+# It's a long-lived container that every extracted controller holds
+# a reference to. Most of the fields are stable for the lifetime of
+# the application (config, db, session, selection, model_catalog),
+# but ``router`` is rebuilt whenever the user adds or removes an API
+# key via the Settings dialog.
+#
+# Rather than reallocate the ServicesContext on every provider
+# rebuild (and then chase down every long-lived collaborator to
+# rebind them to the new context), we mutate ``router`` in place.
+# That keeps every existing reference in every controller
+# automatically pointing at the current router — there is only one
+# source of truth, and it's this object.
+#
+# This is the "option 1" fix from issue #59: context stable, router
+# updated in place via ``ServicesContext.set_router()``.
+
+
+@dataclass
 class ServicesContext:
     """Shared long-lived services + application state.
 
-    Intentionally small. Adding anything to this dataclass should be
-    a deliberate decision — the goal is to give extracted controllers
+    Intentionally small. Adding anything to this class should be a
+    deliberate decision — the goal is to give extracted controllers
     a narrow collaboration root, not to create a new god object.
 
     Contents:
       * ``config``  — user-editable settings persisted to ~/.mchat/config.json
       * ``db``      — SQLite persistence layer
-      * ``router``  — provider registry + parser. Selection state lives
-                      in ``selection`` below; router.selection delegates
-                      to it, so the two are consistent.
+      * ``router``  — provider registry + parser. Reassignable via
+                      ``set_router()`` when providers are reconfigured.
+                      Selection state lives in ``selection`` below;
+                      router.selection delegates to it.
       * ``session`` — ConversationSession (active conversation + messages)
       * ``selection`` — ProviderSelectionState (which providers the next
                       send addresses)
@@ -54,3 +74,11 @@ class ServicesContext:
     session: ConversationSession
     selection: ProviderSelectionState
     model_catalog: ModelCatalog
+
+    def set_router(self, router: Router | None) -> None:
+        """Replace the router reference in place. Called after
+        _init_providers runs again (e.g. after the user saves Settings
+        with new API keys). All long-lived controllers holding a
+        reference to this ServicesContext see the update immediately.
+        """
+        self.router = router

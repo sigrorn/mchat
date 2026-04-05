@@ -257,6 +257,50 @@ class TestPrefixOnlySelection:
         assert main_window._input.isEnabled() is True
 
 
+class TestServicesContextStability:
+    """Regression tests for #59 — long-lived controllers hold the
+    ServicesContext by reference, so provider/settings rebuilds must
+    update the context in place rather than replacing it."""
+
+    def test_context_identity_stable_across_rebuild(self, main_window):
+        """_rebuild_services must NOT reallocate the context."""
+        before = main_window._services
+        main_window._rebuild_services()
+        assert main_window._services is before, (
+            "ServicesContext identity changed — long-lived collaborators "
+            "would now hold stale references"
+        )
+
+    def test_router_rebind_reaches_long_lived_collaborators(self, main_window):
+        """Swap the router via the public path and verify every
+        collaborator that cached self._services now sees it."""
+        # Every collaborator should have been constructed with the
+        # same context instance as MainWindow.
+        assert main_window._send._services is main_window._services
+        assert main_window._conv_mgr._services is main_window._services
+        assert main_window._prefs._services is main_window._services
+        assert main_window._settings_applier._services is main_window._services
+
+        # Simulate the post-settings path: swap the router, rebuild.
+        original_router = main_window._router
+        assert original_router is not None
+        # Create a new Router with the same providers — new object identity.
+        from mchat.router import Router
+        new_router = Router(
+            dict(original_router._providers),
+            default=list(original_router._providers.keys())[0],
+            selection_state=main_window._selection_state,
+        )
+        main_window._router = new_router
+        main_window._rebuild_services()
+
+        # Every long-lived collaborator sees the new router through
+        # its cached services reference.
+        assert main_window._services.router is new_router
+        assert main_window._send._services.router is new_router
+        assert main_window._conv_mgr._services.router is new_router
+
+
 class TestStateObjectsWired:
     def test_session_reflects_current_conv(self, main_window):
         """_current_conv is a property backed by ConversationSession."""

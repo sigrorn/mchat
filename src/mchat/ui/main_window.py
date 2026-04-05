@@ -99,8 +99,11 @@ class MainWindow(QMainWindow):
 
         # Shared services + state context — passed into extracted
         # controllers so they can depend on a narrow typed surface
-        # instead of a full MainWindow reference. See ui/services.py.
-        self._rebuild_services()
+        # instead of a full MainWindow reference. Constructed exactly
+        # once here; subsequent provider rebuilds mutate it in place
+        # via _rebuild_services() → set_router(). See ui/services.py
+        # and #59.
+        self._build_services()
 
         # Action bundle: whenever the provider selection changes (via
         # router.set_selection, checkbox toggle, //select, +/-, or the
@@ -154,9 +157,17 @@ class MainWindow(QMainWindow):
         else:
             self._session.set_current(conv)
 
-    def _rebuild_services(self) -> None:
-        """(Re)build the ServicesContext from the current state. Called
-        from __init__ and from _open_settings after providers change."""
+    def _build_services(self) -> None:
+        """Construct the ServicesContext exactly once, during startup.
+
+        The context is a long-lived object that every extracted
+        controller holds a reference to. Most fields (config, db,
+        session, selection, model_catalog) are stable for the app's
+        lifetime; the only field that changes at runtime is
+        ``router`` (rebuilt when API keys are added/removed in
+        Settings). Use ``_rebuild_services()`` after _init_providers
+        to push the new router into the existing context.
+        """
         self._services = ServicesContext(
             config=self._config,
             db=self._db,
@@ -165,6 +176,15 @@ class MainWindow(QMainWindow):
             selection=self._selection_state,
             model_catalog=self._model_catalog,
         )
+
+    def _rebuild_services(self) -> None:
+        """Update the existing ServicesContext after a provider rebuild.
+
+        Mutates ``router`` in place rather than replacing the whole
+        context so every long-lived collaborator that cached the
+        context reference stays correctly wired. See #59.
+        """
+        self._services.set_router(self._router)
 
     def _init_providers(self) -> None:
         providers: dict[Provider, BaseProvider] = {}
