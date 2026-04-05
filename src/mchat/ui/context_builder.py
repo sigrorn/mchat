@@ -1,13 +1,15 @@
 # ------------------------------------------------------------------
 # Component: context_builder
 # Responsibility: Pure context-policy functions — decide which
-#                 messages a given provider should see when a request
+#                 messages a given persona should see when a request
 #                 is built, and which message indices fall outside
 #                 that context (used by the UI for exclusion shading).
-#                 Owns //limit semantics, pin-bypass, and visibility
-#                 filtering. Must NOT depend on Qt or on MainWindow.
-# Collaborators: models.message, models.conversation, config, db,
-#                ui.visibility, router
+#                 Owns //limit semantics, pin-bypass, visibility
+#                 filtering, and the per-persona history cutoff.
+#                 Must NOT depend on Qt or on MainWindow.
+# Collaborators: models.message, models.conversation, models.persona,
+#                config, db, ui.visibility, ui.persona_resolution,
+#                ui.persona_target, router
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -15,7 +17,10 @@ from mchat.config import PROVIDER_META, Config
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
+from mchat.models.persona import Persona
 from mchat.router import Router
+from mchat.ui.persona_resolution import resolve_persona_prompt
+from mchat.ui.persona_target import PersonaTarget, synthetic_default
 from mchat.ui.visibility import filter_for_provider
 
 
@@ -31,27 +36,47 @@ def pin_matches(pin_target: str | None, provider_id: Provider) -> bool:
 
 def build_context(
     conv: Conversation,
-    target: Provider,
+    target: Provider | PersonaTarget,
     db: Database,
     config: Config,
 ) -> list[Message]:
     """Build the message list that will be sent to ``target`` for a new
     request on ``conv``.
 
+    ``target`` may be either a ``Provider`` (legacy callers — back-compat
+    shim until Stage 2.6 updates send_controller) or a ``PersonaTarget``
+    (Stage 2.5+ callers). A bare Provider is treated as the synthetic
+    default PersonaTarget for that provider (D1).
+
     Order of operations:
-      1. Prepend system messages (provider-specific + conversation-wide).
+      1. Prepend system messages (persona override or provider default,
+         plus conversation-wide).
       2. Apply //limit to slice off earlier history.
       3. Rescue pinned messages from before the cut-off whose pin_target
          covers this provider.
-      4. Apply visibility filtering (user-message addressing + per-observer
-         matrix) to the limited slice. Pinned messages bypass this.
-      5. Strip provider-routing prefixes from user messages.
+      4. Apply per-persona history cutoff (D6: if the persona has a
+         non-null ``created_at_message_index``, drop messages before
+         that index). Runs after //limit, so the two cutoffs stack.
+      5. Apply visibility filtering (user-message addressing + per-
+         observer matrix) to the limited slice. Pinned messages bypass.
+      6. Strip provider-routing prefixes from user messages.
     """
+    # Normalise target → (PersonaTarget, Persona|None). Persona is None
+    # for synthetic defaults; the resolver helpers gracefully handle a
+    # synthetic-shaped Persona so we build one for the shared path.
+    if isinstance(target, Provider):
+        persona_target = synthetic_default(target)
+    else:
+        persona_target = target
+
+    provider = persona_target.provider
+    persona = _load_persona(conv, persona_target, db)
+
     context: list[Message] = []
 
     # --- 1. System prompts ---
     parts: list[str] = []
-    provider_prompt = config.get(PROVIDER_META[target.value]["system_prompt_key"])
+    provider_prompt = resolve_persona_prompt(persona, config)
     if provider_prompt:
         parts.append(provider_prompt)
     if conv.system_prompt:
@@ -74,14 +99,37 @@ def build_context(
     if cut_idx > 0:
         pinned_prefix = [
             m for m in all_messages[:cut_idx]
-            if m.pinned and pin_matches(m.pin_target, target)
+            if m.pinned and pin_matches(m.pin_target, provider)
         ]
 
-    # --- 4. Visibility filter (pins bypass) ---
-    matrix = conv.visibility_matrix or {}
-    messages = pinned_prefix + filter_for_provider(list(messages), target, matrix)
+    # --- 4. Persona history cutoff (D6) ---
+    # If the persona was added mid-chat with `new` mode, it should
+    # only see messages from its join point onwards. This applies to
+    # the post-limit slice — we drop any messages whose original index
+    # in conv.messages is below created_at_message_index. Pinned
+    # messages are NOT rescued across this cutoff: joining fresh means
+    # fresh, pins from before the join aren't retroactively visible.
+    if persona.created_at_message_index is not None:
+        cutoff = persona.created_at_message_index
+        # Rebuild the messages list keeping only entries whose original
+        # position in conv.messages is >= cutoff.
+        original_indices = {id(m): i for i, m in enumerate(conv.messages)}
+        messages = [
+            m for m in messages
+            if original_indices.get(id(m), -1) >= cutoff
+        ]
+        # Pinned prefix is also filtered — a persona joining at index
+        # 3 doesn't see a pin that was created at index 0.
+        pinned_prefix = [
+            m for m in pinned_prefix
+            if original_indices.get(id(m), -1) >= cutoff
+        ]
 
-    # --- 5. Strip routing prefixes from user messages ---
+    # --- 5. Visibility filter (pins bypass) ---
+    matrix = conv.visibility_matrix or {}
+    messages = pinned_prefix + filter_for_provider(list(messages), provider, matrix)
+
+    # --- 6. Strip routing prefixes from user messages ---
     for msg in messages:
         if msg.role == Role.USER:
             _, cleaned = Router._strip_prefix(msg.content)
@@ -98,6 +146,34 @@ def build_context(
         else:
             context.append(msg)
     return context
+
+
+def _load_persona(
+    conv: Conversation,
+    target: PersonaTarget,
+    db: Database,
+) -> Persona:
+    """Fetch the Persona row for a target, or synthesise one for the
+    default case.
+
+    For synthetic-default targets (persona_id == provider.value with no
+    explicit row in the personas table), we construct a virtual Persona
+    with all override fields None so the shared resolution helpers
+    (D6b) can treat synthetic defaults and explicit inherit-everything
+    personas identically.
+    """
+    # Try to find an explicit row first
+    for p in db.list_personas_including_deleted(conv.id):
+        if p.id == target.persona_id:
+            return p
+    # Fall through: synthetic default
+    return Persona(
+        conversation_id=conv.id,
+        id=target.persona_id,
+        provider=target.provider,
+        name=target.provider.value,
+        name_slug=target.provider.value,
+    )
 
 
 def compute_excluded_indices(
