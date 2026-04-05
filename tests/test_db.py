@@ -172,3 +172,55 @@ class TestHideUnhide:
         db.unhide_all_messages(conv.id)
         visible = db.get_messages(conv.id)
         assert len(visible) == 2
+
+
+class TestPinning:
+    def test_add_pinned_message(self, db):
+        conv = db.create_conversation()
+        msg = Message(
+            role=Role.USER,
+            content="always reply in bullet points",
+            conversation_id=conv.id,
+            pinned=True,
+            pin_target="claude",
+        )
+        db.add_message(msg)
+        messages = db.get_messages(conv.id)
+        assert len(messages) == 1
+        assert messages[0].pinned is True
+        assert messages[0].pin_target == "claude"
+
+    def test_default_message_is_not_pinned(self, db):
+        conv = db.create_conversation()
+        db.add_message(Message(role=Role.USER, content="hi", conversation_id=conv.id))
+        messages = db.get_messages(conv.id)
+        assert messages[0].pinned is False
+        assert messages[0].pin_target is None
+
+    def test_set_pinned_unpins(self, db):
+        conv = db.create_conversation()
+        m = db.add_message(Message(
+            role=Role.USER,
+            content="be concise",
+            conversation_id=conv.id,
+            pinned=True,
+            pin_target="all",
+        ))
+        db.set_pinned(m.id, False, None)
+        messages = db.get_messages(conv.id)
+        assert messages[0].pinned is False
+        assert messages[0].pin_target is None
+
+    def test_set_pinned_updates_target(self, db):
+        conv = db.create_conversation()
+        m = db.add_message(Message(
+            role=Role.USER,
+            content="rule",
+            conversation_id=conv.id,
+            pinned=True,
+            pin_target="claude",
+        ))
+        db.set_pinned(m.id, True, "claude,openai")
+        messages = db.get_messages(conv.id)
+        assert messages[0].pinned is True
+        assert messages[0].pin_target == "claude,openai"
