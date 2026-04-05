@@ -308,7 +308,15 @@ class MainWindow(QMainWindow):
         self._column_btn.clicked.connect(self._toggle_column_mode)
         self._bar_layout.addWidget(self._column_btn)
 
-        # Settings button (right-aligned)
+        # Providers button (per-provider config — API keys, models,
+        # provider colours, provider system prompts) next to Settings.
+        self._providers_btn = QPushButton("☁ Providers")
+        self._apply_settings_btn_style(self._providers_btn)
+        self._providers_btn.clicked.connect(self._open_providers)
+        self._bar_layout.addWidget(self._providers_btn)
+
+        # Settings button (general settings — font, shading, global
+        # system prompt, user colour, default provider)
         self._settings_btn = QPushButton("⚙ Settings")
         self._apply_settings_btn_style()
         self._settings_btn.clicked.connect(self._open_settings)
@@ -415,12 +423,23 @@ class MainWindow(QMainWindow):
         self._router.set_selection(selected)
         self._save_selection()
 
-    def _apply_settings_btn_style(self) -> None:
-        self._settings_btn.setStyleSheet(
+    def _apply_settings_btn_style(self, btn=None) -> None:
+        """Apply the bar-button style. Without an argument, styles
+        every button in the right-hand group (Settings + Providers)
+        so font-size changes flow through to both uniformly."""
+        style = (
             f"QPushButton {{ background: none; border: 1px solid #ccc; border-radius: 6px; "
             f"padding: 4px 12px; color: #666; font-size: {self._font_size - 1}px; }}"
             f"QPushButton:hover {{ background-color: #eee; }}"
         )
+        if btn is not None:
+            btn.setStyleSheet(style)
+            return
+        # No argument → style every bar button that exists
+        for attr in ("_settings_btn", "_providers_btn"):
+            b = getattr(self, attr, None)
+            if b is not None:
+                b.setStyleSheet(style)
 
     def _provider_color(self, p: Provider) -> str:
         return self._config.get(PROVIDER_META[p.value]["color_key"])
@@ -741,4 +760,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _open_settings(self) -> None:
-        self._settings_applier.open()
+        self._settings_applier.open_settings()
+
+    def _open_providers(self) -> None:
+        self._settings_applier.open_providers()
