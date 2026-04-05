@@ -40,6 +40,16 @@ from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
 
+def _pin_matches(pin_target: str | None, provider_id: Provider) -> bool:
+    """Return True if a pinned message targets the given provider."""
+    if not pin_target:
+        return False
+    if pin_target == "all":
+        return True
+    targets = {t.strip().lower() for t in pin_target.split(",") if t.strip()}
+    return provider_id.value in targets
+
+
 def _get_version() -> str:
     """Get version from last git commit timestamp (vYYYYMMDDHHMMSS)."""
     import subprocess
@@ -625,12 +635,26 @@ class MainWindow(QMainWindow):
                 Message(role=Role.SYSTEM, content="\n\n".join(parts))
             )
 
-        messages = self._current_conv.messages
+        all_messages = self._current_conv.messages
+        messages = all_messages
         limit_mark = self._current_conv.limit_mark
+        cut_idx = 0
         if limit_mark is not None:
             idx = self._db.get_mark(self._current_conv.id, limit_mark)
-            if idx is not None and idx < len(messages):
-                messages = messages[idx:]
+            if idx is not None and idx < len(all_messages):
+                cut_idx = idx
+                messages = all_messages[idx:]
+
+        # Include pinned messages that fall before the limit cut-off and
+        # target this provider. They are prepended so the provider sees
+        # them as early context regardless of //limit.
+        if cut_idx > 0:
+            pinned_before = [
+                m for m in all_messages[:cut_idx]
+                if m.pinned and _pin_matches(m.pin_target, provider_id)
+            ]
+            if pinned_before:
+                messages = pinned_before + list(messages)
 
         # Strip provider prefixes from user messages so providers don't
         # see routing metadata like "claude," or "flipped," in context
@@ -889,13 +913,26 @@ class MainWindow(QMainWindow):
             self._update_input_color()
 
     def _compute_excluded_indices(self, messages: list[Message]) -> set[int]:
-        """Return message indices that would NOT be sent to providers."""
+        """Return message indices that would NOT be sent to providers.
+
+        Pinned messages whose target includes any currently-configured
+        provider are NOT excluded (they stay visually unshaded), giving
+        a visual cue that they are still sent despite being before the
+        //limit cut-off.
+        """
         if not self._current_conv or self._current_conv.limit_mark is None:
             return set()
         idx = self._db.get_mark(self._current_conv.id, self._current_conv.limit_mark)
         if idx is None or idx <= 0:
             return set()
-        return set(range(min(idx, len(messages))))
+        configured = set(self._router._providers.keys()) if self._router else set()
+        excluded: set[int] = set()
+        for i in range(min(idx, len(messages))):
+            m = messages[i]
+            if m.pinned and any(_pin_matches(m.pin_target, p) for p in configured):
+                continue
+            excluded.add(i)
+        return excluded
 
     def _display_messages(self, messages: list[Message]) -> None:
         """Load messages into chat, detecting multi-provider groups.

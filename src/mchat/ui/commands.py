@@ -27,6 +27,10 @@ _HELP_COMMANDS = (
     "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
     "  //select all          — target all configured providers\n"
     "  //providers           — list available providers and config status\n"
+    "  //pin <target>, <instr>— pin an instruction (always sent, bypasses //limit)\n"
+    "  //unpin <N>           — remove a pin by message number\n"
+    "  //unpin ALL           — remove all pins\n"
+    "  //pins                — list all pinned instructions\n"
     "  //rename <text>       — rename the current chat\n"
     "  //columns (//cols)    — show multi-provider responses side by side\n"
     "  //lines               — show multi-provider responses as a list (default)\n"
@@ -80,6 +84,12 @@ def dispatch(cmd: str, arg: str, app) -> bool:
         return True
     if cmd == "//vacuum":
         return _handle_vacuum(app)
+    if cmd == "//pin":
+        return _handle_pin(arg, app)
+    if cmd == "//unpin":
+        return _handle_unpin(arg, app)
+    if cmd == "//pins":
+        return _handle_pins(app)
     return False
 
 
@@ -336,6 +346,146 @@ def _handle_providers(app) -> bool:
     fmt = QTextBlockFormat()
     fmt.setBackground(QColor("#f5f5f5"))
     for line in lines:
+        cursor.insertBlock(fmt)
+        char_fmt = cursor.charFormat()
+        char_fmt.setForeground(QColor("#666"))
+        cursor.insertText(line, char_fmt)
+    app._chat._scroll_to_bottom()
+    return True
+
+
+def _handle_pin(arg: str, app) -> bool:
+    if not app._current_conv:
+        app._on_new_chat()
+    if not arg or "," not in arg:
+        app._chat.add_note(
+            "Error: //pin requires a target — e.g. //pin gemini, <instruction>"
+        )
+        return True
+    target_part, _, instruction = arg.partition(",")
+    target_part = target_part.strip().lower()
+    instruction = instruction.strip()
+    if not target_part or not instruction:
+        app._chat.add_note(
+            "Error: //pin requires both a target and an instruction — "
+            "e.g. //pin claude, be concise"
+        )
+        return True
+
+    from mchat.router import PREFIX_TO_PROVIDER
+    if target_part == "all":
+        pin_target = "all"
+        label = "all"
+    else:
+        # Target may be multiple providers separated by spaces or commas
+        # (commas were already consumed as the separator — but user may
+        # also write "claude gpt" or "claude,gpt, rule" where the first
+        # comma is ambiguous). We split target_part on whitespace only.
+        names = [n for n in target_part.replace(",", " ").split() if n]
+        providers = []
+        unknown = []
+        for name in names:
+            p = PREFIX_TO_PROVIDER.get(name)
+            if p and p not in providers:
+                providers.append(p)
+            elif not p:
+                unknown.append(name)
+        if unknown or not providers:
+            app._chat.add_note(
+                f"Error: unknown provider(s) in //pin target: {', '.join(unknown) or target_part}"
+            )
+            return True
+        pin_target = ",".join(p.value for p in providers)
+        label = ",".join(_PROVIDER_DISPLAY[p] for p in providers)
+
+    msg = Message(
+        role=Role.USER,
+        content=instruction,
+        conversation_id=app._current_conv.id,
+        pinned=True,
+        pin_target=pin_target,
+    )
+    app._db.add_message(msg)
+    app._current_conv.messages.append(msg)
+    app._display_messages(app._current_conv.messages)
+    preview = instruction if len(instruction) <= 60 else instruction[:57] + "..."
+    app._chat.add_note(f"pinned to {label}: {preview}")
+    return True
+
+
+def _handle_unpin(arg: str, app) -> bool:
+    if not app._current_conv:
+        app._chat.add_note("Error: no active conversation")
+        return True
+    messages = app._current_conv.messages
+    if arg.strip().upper() == "ALL":
+        any_pinned = False
+        for m in messages:
+            if m.pinned and m.id is not None:
+                app._db.set_pinned(m.id, False, None)
+                m.pinned = False
+                m.pin_target = None
+                any_pinned = True
+        if not any_pinned:
+            app._chat.add_note("no pinned messages to remove")
+            return True
+        app._display_messages(messages)
+        app._chat.add_note("all pins removed")
+        return True
+    if not arg.strip().isdigit():
+        app._chat.add_note("Error: //unpin requires a message number or ALL")
+        return True
+    n = int(arg.strip())
+    if n < 1 or n > len(messages):
+        app._chat.add_note(f"Error: message {n} out of range")
+        return True
+    m = messages[n - 1]
+    if not m.pinned:
+        app._chat.add_note(f"Error: message {n} is not pinned")
+        return True
+    if m.id is not None:
+        app._db.set_pinned(m.id, False, None)
+    m.pinned = False
+    m.pin_target = None
+    app._display_messages(messages)
+    app._chat.add_note(f"unpinned message {n}")
+    return True
+
+
+def _handle_pins(app) -> bool:
+    if not app._current_conv:
+        app._chat.add_note("Error: no active conversation")
+        return True
+    messages = app._current_conv.messages
+    pinned = [(i + 1, m) for i, m in enumerate(messages) if m.pinned]
+    if not pinned:
+        app._chat.add_note("no pinned messages")
+        return True
+
+    # Resolve target labels for display
+    from mchat.models.message import Provider as _P
+    def _label(target: str | None) -> str:
+        if not target or target == "all":
+            return "all"
+        labels = []
+        for v in target.split(","):
+            v = v.strip()
+            try:
+                labels.append(_PROVIDER_DISPLAY[_P(v)])
+            except ValueError:
+                labels.append(v)
+        return ",".join(labels)
+
+    app._chat.add_note("Pinned instructions")
+    cursor = app._chat.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    fmt = QTextBlockFormat()
+    fmt.setBackground(QColor("#f5f5f5"))
+    for n, m in pinned:
+        content = m.content
+        if len(content) > 80:
+            content = content[:77] + "..."
+        line = f"  {n}: [{_label(m.pin_target)}] {content}"
         cursor.insertBlock(fmt)
         char_fmt = cursor.charFormat()
         char_fmt.setForeground(QColor("#666"))
