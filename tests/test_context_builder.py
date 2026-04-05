@@ -159,3 +159,154 @@ class TestComputeExcludedIndices:
             conv_with_history, db, {Provider.CLAUDE}
         )
         assert excluded == {0, 1, 2}
+
+
+class TestBuildContextWithPersonaTarget:
+    """Stage 2.5 — build_context now takes a PersonaTarget instead of
+    a bare Provider. Existing Provider calls still work via a back-
+    compat shim. The persona's system_prompt_override is applied via
+    resolve_persona_prompt, and a non-null created_at_message_index
+    slices prior history."""
+
+    def _make_persona(self, conv_id, name="Evaluator", slug="evaluator",
+                      system_prompt_override=None,
+                      created_at_message_index=None):
+        from mchat.models.persona import Persona, generate_persona_id
+        return Persona(
+            conversation_id=conv_id,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name=name,
+            name_slug=slug,
+            system_prompt_override=system_prompt_override,
+            created_at_message_index=created_at_message_index,
+        )
+
+    def test_accepts_persona_target(self, db, config, conv_with_history):
+        """build_context(conv, target, db, config) where target is a
+        PersonaTarget. The resolved provider is target.provider."""
+        from mchat.ui.persona_target import PersonaTarget
+        target = PersonaTarget(persona_id="claude", provider=Provider.CLAUDE)
+        ctx = build_context(conv_with_history, target, db, config)
+        assert [m.content for m in ctx] == ["q1", "a1", "q2", "a2", "q3", "a3"]
+
+    def test_accepts_bare_provider_for_back_compat(self, db, config, conv_with_history):
+        """Existing callers still passing a bare Provider must keep
+        working until Stage 2.6 updates send_controller."""
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        assert [m.content for m in ctx] == ["q1", "a1", "q2", "a2", "q3", "a3"]
+
+    def test_persona_system_prompt_override_replaces_global(
+        self, db, config, conv_with_history,
+    ):
+        """D6: a persona with a non-null system_prompt_override uses
+        that prompt instead of the global provider prompt."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+        config.set("system_prompt_claude", "Global Claude prompt")
+        config.save()
+
+        p = self._make_persona(
+            conv_with_history.id,
+            system_prompt_override="Be ruthless and direct",
+        )
+        db.create_persona(p)
+        target = PersonaTarget(persona_id=p.id, provider=p.provider)
+
+        ctx = build_context(conv_with_history, target, db, config)
+        # First message is the SYSTEM block
+        assert ctx[0].role == Role.SYSTEM
+        assert "Be ruthless and direct" in ctx[0].content
+        # Global Claude prompt is NOT present — override replaced it
+        assert "Global Claude prompt" not in ctx[0].content
+
+    def test_persona_with_none_prompt_falls_through_to_global(
+        self, db, config, conv_with_history,
+    ):
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+        config.set("system_prompt_claude", "Global Claude prompt")
+        config.save()
+
+        p = self._make_persona(conv_with_history.id, system_prompt_override=None)
+        db.create_persona(p)
+        target = PersonaTarget(persona_id=p.id, provider=p.provider)
+
+        ctx = build_context(conv_with_history, target, db, config)
+        assert ctx[0].role == Role.SYSTEM
+        assert "Global Claude prompt" in ctx[0].content
+
+    def test_persona_history_cutoff_slices_prior_history(
+        self, db, config, conv_with_history,
+    ):
+        """A persona with created_at_message_index=2 only sees messages
+        at index >= 2 (q2 onwards). This runs AFTER the //limit slice,
+        so //limit and persona cutoff stack."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        p = self._make_persona(
+            conv_with_history.id, created_at_message_index=2,
+        )
+        db.create_persona(p)
+        target = PersonaTarget(persona_id=p.id, provider=p.provider)
+
+        ctx = build_context(conv_with_history, target, db, config)
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert contents == ["q2", "a2", "q3", "a3"]
+
+    def test_persona_cutoff_stacks_with_limit(
+        self, db, config, conv_with_history,
+    ):
+        """Both //limit and the persona history cutoff apply.
+        //limit to index 2, persona cutoff at index 4 → only index 4+.
+        """
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        db.set_mark(conv_with_history.id, "#3", 2)
+        conv_with_history.limit_mark = "#3"
+
+        p = self._make_persona(
+            conv_with_history.id, created_at_message_index=4,
+        )
+        db.create_persona(p)
+        target = PersonaTarget(persona_id=p.id, provider=p.provider)
+
+        ctx = build_context(conv_with_history, target, db, config)
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert contents == ["q3", "a3"]
+
+    def test_persona_cutoff_none_means_full_history(
+        self, db, config, conv_with_history,
+    ):
+        """created_at_message_index=None (the default) means the
+        persona sees full history."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        p = self._make_persona(
+            conv_with_history.id, created_at_message_index=None,
+        )
+        db.create_persona(p)
+        target = PersonaTarget(persona_id=p.id, provider=p.provider)
+
+        ctx = build_context(conv_with_history, target, db, config)
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert contents == ["q1", "a1", "q2", "a2", "q3", "a3"]
+
+    def test_synthetic_default_target_behaves_like_bare_provider(
+        self, db, config, conv_with_history,
+    ):
+        """A PersonaTarget with persona_id = provider.value (the
+        synthetic default) produces identical context to passing the
+        Provider directly — D1's unified code path."""
+        from mchat.ui.persona_target import synthetic_default
+
+        ctx_synthetic = build_context(
+            conv_with_history, synthetic_default(Provider.CLAUDE), db, config,
+        )
+        ctx_provider = build_context(
+            conv_with_history, Provider.CLAUDE, db, config,
+        )
+        assert [m.content for m in ctx_synthetic] == [m.content for m in ctx_provider]
