@@ -230,19 +230,18 @@ class SendController:
             )
             return
 
-        # Determine addressed_to. For now we keep the provider-value
-        # comma list (the visibility filter is still keyed by provider
-        # — Stage 2.7 migrates it to persona ids along with the filter).
-        target_providers = [t.provider for t in targets]
-        if set(target_providers) == configured_providers:
-            addressed_to = "all"
-        else:
-            # Dedupe provider values while preserving order
-            seen: list[str] = []
-            for p in target_providers:
-                if p.value not in seen:
-                    seen.append(p.value)
-            addressed_to = ",".join(seen)
+        # addressed_to is a comma-separated list of persona_ids so
+        # the visibility filter can key on them (Stage 2.7). Synthetic
+        # defaults use persona_id = provider.value (D1 exception), so
+        # legacy chats continue to produce the same strings they did
+        # before personas existed. We no longer emit the "all" shortcut
+        # because "every Claude persona" != "every persona", and the
+        # filter's "all" branch is retained only for legacy rows.
+        seen_pids: list[str] = []
+        for t in targets:
+            if t.persona_id not in seen_pids:
+                seen_pids.append(t.persona_id)
+        addressed_to = ",".join(seen_pids)
 
         user_msg = Message(
             role=Role.USER,

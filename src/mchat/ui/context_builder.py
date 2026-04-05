@@ -126,8 +126,13 @@ def build_context(
         ]
 
     # --- 5. Visibility filter (pins bypass) ---
+    # Pass the PersonaTarget itself (not just the provider) so the
+    # filter can key the matrix by persona_id. Synthetic defaults
+    # collapse to provider.value naturally via D1.
     matrix = conv.visibility_matrix or {}
-    messages = pinned_prefix + filter_for_provider(list(messages), provider, matrix)
+    messages = pinned_prefix + filter_for_provider(
+        list(messages), persona_target, matrix,
+    )
 
     # --- 6. Strip routing prefixes from user messages ---
     for msg in messages:
