@@ -35,6 +35,7 @@ from mchat.providers.openai_provider import OpenAIProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget, FindBar
+from mchat.ui.matrix_panel import MatrixPanel
 from mchat.ui.visibility import filter_for_provider
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
@@ -274,10 +275,19 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(bar)
 
-        # Input area
+        # Input area + visibility matrix to its right
+        input_row = QHBoxLayout()
+        input_row.setContentsMargins(0, 0, 0, 0)
+        input_row.setSpacing(4)
         self._input = InputWidget(font_size=self._font_size)
         self._input.message_submitted.connect(self._on_message_submitted)
-        right_layout.addWidget(self._input)
+        input_row.addWidget(self._input, stretch=1)
+
+        self._matrix_panel = MatrixPanel()
+        self._matrix_panel.matrix_changed.connect(self._on_visibility_changed)
+        input_row.addWidget(self._matrix_panel, stretch=0)
+
+        right_layout.addLayout(input_row)
 
         main_layout.addWidget(right, stretch=1)
 
@@ -540,8 +550,24 @@ class MainWindow(QMainWindow):
         self._update_input_placeholder()
         self._update_input_color()
         self._update_spend_labels()
+        self._sync_matrix_panel()
 
         self._display_messages(messages)
+
+    def _sync_matrix_panel(self) -> None:
+        """Push the current conversation's visibility matrix into the panel
+        and mark unconfigured providers as disabled."""
+        if not self._current_conv:
+            return
+        configured = set(self._router._providers.keys()) if self._router else set()
+        self._matrix_panel.set_configured(configured)
+        self._matrix_panel.load_matrix(self._current_conv.visibility_matrix or {})
+
+    def _on_visibility_changed(self, matrix: dict) -> None:
+        if not self._current_conv:
+            return
+        self._current_conv.visibility_matrix = matrix
+        self._db.set_visibility_matrix(self._current_conv.id, matrix)
 
     def _on_new_chat(self) -> None:
         system_prompt = self._config.get("system_prompt")
@@ -549,6 +575,7 @@ class MainWindow(QMainWindow):
         self._current_conv = conv
         self._chat.clear_messages()
         self._update_spend_labels()
+        self._sync_matrix_panel()
         self._load_conversations()
         self._sidebar.select_conversation(conv.id)
 
