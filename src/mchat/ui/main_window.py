@@ -549,10 +549,15 @@ class MainWindow(QMainWindow):
     def _selected_model(self, p: Provider) -> str:
         return self._combos[p].currentText()
 
-    def _build_context(self, provider_id: Provider) -> list[Message]:
-        """Delegate to ui.context_builder — MainWindow is just the host."""
+    def _build_context(self, target) -> list[Message]:
+        """Delegate to ui.context_builder — MainWindow is just the host.
+
+        ``target`` may be either a Provider (legacy callers) or a
+        PersonaTarget (Stage 2.6+). build_context handles both via
+        the synthetic-default wrap.
+        """
         return build_context(
-            self._current_conv, provider_id, self._db, self._config
+            self._current_conv, target, self._db, self._config
         )
 
     # ------------------------------------------------------------------
@@ -651,14 +656,23 @@ class MainWindow(QMainWindow):
         """Delegate to SendController."""
         self._send.on_message_submitted(text)
 
-    def _send_single(self, provider_id: Provider) -> None:
-        self._send.send_single(provider_id)
+    def _send_single(self, target) -> None:
+        """Accepts either a Provider (legacy) or a PersonaTarget (new)."""
+        if isinstance(target, Provider):
+            from mchat.ui.persona_target import synthetic_default
+            target = synthetic_default(target)
+        self._send.send_single(target)
 
     def _send_multi(
         self,
-        targets: list[Provider],
-        context_override: dict[Provider, list[Message]] | None = None,
+        targets,
+        context_override=None,
     ) -> None:
+        """Accepts list[Provider] (legacy) or list[PersonaTarget] (new).
+        ``context_override`` is keyed by persona_id."""
+        if targets and isinstance(targets[0], Provider):
+            from mchat.ui.persona_target import synthetic_default
+            targets = [synthetic_default(p) for p in targets]
         self._send.send_multi(targets, context_override=context_override)
 
     def _compute_excluded_indices(self, messages: list[Message]) -> set[int]:

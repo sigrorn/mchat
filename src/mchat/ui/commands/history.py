@@ -147,16 +147,30 @@ def handle_unhide(host: CommandHost) -> bool:
 
 
 def handle_retry(host: CommandHost) -> bool:
+    """Re-send the last failed requests. As of Stage 2.6 of the
+    personas feature, retry state is keyed by persona_id (str)
+    rather than Provider enum — this lets the retry path work for
+    same-provider personas that would otherwise clobber each other.
+    """
     if not host._retry_failed:
         host._chat.add_note("Error: nothing to retry")
         return True
-    for pid, (error, transient) in host._retry_failed.items():
+
+    # Access the controller directly — the retry stash lives there.
+    # The CommandHost protocol's properties expose it, but we also
+    # need the PersonaTargets and display labels now.
+    send = host._send
+
+    # Warn on non-transient errors, one note per persona.
+    for persona_id, (error, transient) in send.retry_failed.items():
         if not transient:
-            name = _PROVIDER_DISPLAY[pid]
+            name = send.retry_labels.get(persona_id, persona_id)
             host._chat.add_note(
                 f"Warning: {name} error was non-transient ({error[:60]}) — retrying anyway"
             )
-    error_ids = [mid for mid in host._retry_error_msg_ids.values() if mid is not None]
+
+    # Hide the error messages from view
+    error_ids = [mid for mid in send.retry_error_msg_ids.values() if mid is not None]
     if error_ids:
         host._db.hide_messages(error_ids)
         hidden_set = set(error_ids)
@@ -164,18 +178,32 @@ def handle_retry(host: CommandHost) -> bool:
             m for m in host._current_conv.messages if m.id not in hidden_set
         ]
         host._display_messages(host._current_conv.messages)
-    failed_providers = list(host._retry_failed.keys())
+
+    # Collect targets to re-send (as PersonaTargets from the stash)
+    failed_persona_ids = list(send.retry_failed.keys())
+    failed_targets = [
+        send.retry_targets[pid]
+        for pid in failed_persona_ids
+        if pid in send.retry_targets
+    ]
+    # Context override keyed by persona_id matches the new send_multi signature
     context_override = {
-        pid: host._retry_contexts[pid]
-        for pid in failed_providers
-        if pid in host._retry_contexts
+        pid: send.retry_contexts[pid]
+        for pid in failed_persona_ids
+        if pid in send.retry_contexts
     }
-    host._retry_failed.clear()
-    host._retry_error_msg_ids.clear()
+    labels_copy = dict(send.retry_labels)
+
+    # Clear only the failure bits; targets/contexts/labels stay populated
+    # as the new send fills them in.
+    send.retry_failed.clear()
+    send.retry_error_msg_ids.clear()
+
     host._input.set_enabled(False)
-    host._send_multi(failed_providers, context_override=context_override)
+    # send_multi now takes list[PersonaTarget] (Stage 2.6)
+    send.send_multi(failed_targets, context_override=context_override)
     host._chat.add_note(
-        f"retrying {', '.join(_PROVIDER_DISPLAY[p] for p in failed_providers)}..."
+        f"retrying {', '.join(labels_copy.get(pid, pid) for pid in failed_persona_ids)}..."
     )
     return True
 

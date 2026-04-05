@@ -148,7 +148,7 @@ def build_context(
     return context
 
 
-def _load_persona(
+def load_persona_for_target(
     conv: Conversation,
     target: PersonaTarget,
     db: Database,
@@ -161,6 +161,9 @@ def _load_persona(
     with all override fields None so the shared resolution helpers
     (D6b) can treat synthetic defaults and explicit inherit-everything
     personas identically.
+
+    Used by context_builder and send_controller to load the persona
+    row they need to call the D6b resolve_persona_* helpers.
     """
     # Try to find an explicit row first
     for p in db.list_personas_including_deleted(conv.id):
@@ -168,12 +171,19 @@ def _load_persona(
             return p
     # Fall through: synthetic default
     return Persona(
-        conversation_id=conv.id,
+        conversation_id=conv.id if conv is not None else 0,
         id=target.persona_id,
         provider=target.provider,
-        name=target.provider.value,
+        name=PROVIDER_META.get(target.provider.value, {}).get(
+            "display", target.provider.value
+        ),
         name_slug=target.provider.value,
     )
+
+
+# Private alias for the build_context caller — kept to avoid touching
+# the existing in-module caller while the public symbol is the new name.
+_load_persona = load_persona_for_target
 
 
 def compute_excluded_indices(

@@ -1,19 +1,27 @@
 # ------------------------------------------------------------------
 # Component: SendController
 # Responsibility: Own the full message-send lifecycle — message
-#                 submission, context building, multi-provider fan-out,
-#                 completion/error handling, spend updates, retry
-#                 stashing. Persists completed responses through the
-#                 services context before asking MessageRenderer to
-#                 display them.
+#                 submission, persona resolution, context building,
+#                 multi-persona fan-out, completion/error handling,
+#                 spend updates, retry stashing. Persists completed
+#                 responses through the services context before asking
+#                 MessageRenderer to display them.
 #
 #                 Data-layer access (db, router, session, selection)
 #                 goes through the ServicesContext. Presentational
 #                 side-effects go through a narrow SendHost Protocol
 #                 — the concrete MainWindow type is never imported at
 #                 runtime, only for type-checking.
+#
+#                 Transient state (_multi_workers, _column_buffer,
+#                 retry stash) is keyed by persona_id (str) rather
+#                 than Provider so two same-provider personas can
+#                 coexist in a single send group without clobbering
+#                 each other's state. See docs/plans/personas.md
+#                 § Stage 2.6.
 # Collaborators: ServicesContext, SendHost (Protocol), workers.stream_worker,
-#                ui.message_renderer, pricing
+#                ui.message_renderer, ui.persona_resolver,
+#                ui.persona_resolution, ui.persona_target, pricing
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -23,11 +31,15 @@ from PySide6.QtWidgets import QMessageBox
 
 from mchat.models.message import Message, Provider, Role
 from mchat.pricing import estimate_cost
+from mchat.ui.context_builder import load_persona_for_target
 from mchat.ui.message_renderer import (
     PROVIDER_DISPLAY,
     PROVIDER_ORDER,
     strip_echoed_heading,
 )
+from mchat.ui.persona_resolution import resolve_persona_model
+from mchat.ui.persona_resolver import PersonaResolver, ResolveError
+from mchat.ui.persona_target import PersonaTarget, synthetic_default
 from mchat.ui.services import ServicesContext
 from mchat.workers.stream_worker import StreamWorker
 
@@ -36,15 +48,7 @@ if TYPE_CHECKING:
 
 
 class SendHost(Protocol):
-    """The presentational surface SendController is allowed to touch.
-
-    Lives alongside SendController (not as a runtime-enforced type)
-    so every method the controller calls on its host is documented
-    in one place. Python doesn't enforce Protocols at runtime — the
-    real host is still MainWindow — but static type checkers use
-    this to flag drift if someone adds a new call that reaches
-    beyond the allowed surface.
-    """
+    """The presentational surface SendController is allowed to touch."""
 
     # Presentation widgets SendController reads/writes
     _chat: Any
@@ -58,7 +62,7 @@ class SendHost(Protocol):
     def _handle_selection_adjust(self, text: str) -> bool: ...
     def _on_new_chat(self) -> None: ...
     def _selected_model(self, provider_id: Provider) -> str: ...
-    def _build_context(self, provider_id: Provider) -> list[Message]: ...
+    def _build_context(self, target: Any) -> list[Message]: ...
     def _save_selection(self) -> None: ...
     def _sync_checkboxes_from_selection(self) -> None: ...
     def _update_input_placeholder(self) -> None: ...
@@ -68,47 +72,82 @@ class SendHost(Protocol):
     def _set_combo_retrying(self, p: Provider) -> None: ...
 
 
-class SendController:
-    """Owns the send/retry flow.
+# Type aliases for the transient state dicts. All keyed by persona_id (str).
+_ColumnBufferEntry = tuple[str, str, str, int, int, bool, PersonaTarget]
+# (label, full_text, model, input_tokens, output_tokens, estimated, target)
 
-    Takes a ServicesContext for all data-layer access and a SendHost
-    for the presentational side-effects. The controller holds its own
-    transient state (active workers, column buffer, retry stash).
-    """
+
+class SendController:
+    """Owns the send/retry flow. Stage 2.6+ threads PersonaTargets
+    through instead of bare Providers."""
 
     def __init__(self, host: SendHost, services: ServicesContext) -> None:
         self._host = host
         self._services = services
-        self._multi_workers: dict[Provider, StreamWorker] = {}
-        self._column_buffer: dict[Provider, tuple[str, str, str, int, int, bool]] = {}
-        self._retry_contexts: dict[Provider, list[Message]] = {}
-        self._retry_models: dict[Provider, str] = {}
-        # provider -> (error, transient)
-        self._retry_failed: dict[Provider, tuple[str, bool]] = {}
-        # provider -> message DB id of the stored error (so //retry can hide it)
-        self._retry_error_msg_ids: dict[Provider, int | None] = {}
+        # PersonaResolver maps user input → PersonaTargets, honouring
+        # the current conversation's active persona list.
+        self._resolver = (
+            PersonaResolver(services.router) if services.router is not None else None
+        )
+
+        # Transient per-send state, keyed by persona_id (str) so two
+        # same-provider personas can coexist in one send group.
+        self._multi_workers: dict[str, StreamWorker] = {}
+        self._column_buffer: dict[str, _ColumnBufferEntry] = {}
+
+        # Retry stash — all keyed by persona_id (str). _retry_targets
+        # holds the full PersonaTarget so the retry command can
+        # reconstruct the send without re-parsing the user input.
+        self._retry_targets: dict[str, PersonaTarget] = {}
+        self._retry_contexts: dict[str, list[Message]] = {}
+        self._retry_models: dict[str, str] = {}
+        self._retry_failed: dict[str, tuple[str, bool]] = {}
+        self._retry_error_msg_ids: dict[str, int | None] = {}
+        # Display labels (persona name or provider display name) for
+        # the retry command's user-facing notes, so the retry handler
+        # doesn't need to re-query the DB.
+        self._retry_labels: dict[str, str] = {}
 
     # ------------------------------------------------------------------
-    # Retry-stash helpers (also consumed by commands._handle_retry)
+    # Retry-stash helpers (consumed by commands.handle_retry)
     # ------------------------------------------------------------------
 
     def clear_retry_stash(self) -> None:
+        self._retry_targets.clear()
         self._retry_contexts.clear()
         self._retry_models.clear()
         self._retry_failed.clear()
         self._retry_error_msg_ids.clear()
+        self._retry_labels.clear()
 
     @property
-    def retry_contexts(self) -> dict[Provider, list[Message]]:
+    def retry_contexts(self) -> dict[str, list[Message]]:
         return self._retry_contexts
 
     @property
-    def retry_failed(self) -> dict[Provider, tuple[str, bool]]:
+    def retry_failed(self) -> dict[str, tuple[str, bool]]:
         return self._retry_failed
 
     @property
-    def retry_error_msg_ids(self) -> dict[Provider, int | None]:
+    def retry_error_msg_ids(self) -> dict[str, int | None]:
         return self._retry_error_msg_ids
+
+    @property
+    def retry_targets(self) -> dict[str, PersonaTarget]:
+        return self._retry_targets
+
+    @property
+    def retry_labels(self) -> dict[str, str]:
+        return self._retry_labels
+
+    def rebuild_resolver(self) -> None:
+        """Called when the router is rebuilt (e.g. after settings change).
+        The old resolver holds a stale Router reference."""
+        self._resolver = (
+            PersonaResolver(self._services.router)
+            if self._services.router is not None
+            else None
+        )
 
     # ------------------------------------------------------------------
     # Submission entry point
@@ -128,7 +167,7 @@ class SendController:
             if host._handle_selection_adjust(stripped):
                 return
 
-        if svc.router is None:
+        if svc.router is None or self._resolver is None:
             QMessageBox.warning(
                 host, "No API Keys",
                 "Please configure at least one API key in Settings.",
@@ -138,36 +177,51 @@ class SendController:
         if svc.session.current is None:
             host._on_new_chat()
 
-        # Capture selection *before* parse() — parse writes the new
-        # selection into ProviderSelectionState as a side effect, so we
-        # can't use svc.router.selection after the call to detect
-        # whether the input was a prefix-only selection change. See #60.
+        conv = svc.session.current
+        if conv is None:
+            return
+
+        # Capture selection *before* resolve() — resolve writes the new
+        # selection into SelectionState as a side effect, so we can't
+        # use svc.router.selection after the call to detect whether
+        # the input was a prefix-only selection change. See #60.
         pre_parse_selection = list(svc.router.selection)
 
-        # Route message. parse() writes any new selection into
-        # ProviderSelectionState, which fires selection_changed →
-        # the fan-out on the host updates sync/placeholder/color.
-        targets, cleaned_text = svc.router.parse(text)
+        # Route message through PersonaResolver. This replaces the
+        # direct router.parse call — PersonaResolver internally uses
+        # the router for provider-shorthand parsing but also handles
+        # explicit persona names and returns list[PersonaTarget].
+        try:
+            targets, cleaned_text = self._resolver.resolve(text, conv.id, svc.db)
+        except ResolveError as e:
+            host._chat.add_note(f"Error: {e}")
+            return
 
         # Prefix-only input: no content left after consuming prefixes.
-        # This is a selection change, not a send. We detect it purely
-        # by "parse ate everything", not by comparing to a post-mutation
-        # router.selection. The second guard (did selection actually
-        # change vs pre-parse) suppresses the redundant "selected:"
-        # note when the user re-types the exact prefix already active.
+        # Treat as a selection change, not a send. Guard against the
+        # post-mutation router state per #60 by comparing to the
+        # pre-parse snapshot.
         if not cleaned_text.strip():
-            if targets != pre_parse_selection:
+            post_parse_selection = svc.router.selection
+            if list(post_parse_selection) != pre_parse_selection:
                 host._save_selection()
-                names = ", ".join(PROVIDER_DISPLAY[p] for p in targets)
+                names = ", ".join(
+                    PROVIDER_DISPLAY.get(p, p.value) for p in post_parse_selection
+                )
                 host._chat.add_note(f"selected: {names}")
             return
 
-        # Validate all targets are configured
-        configured = set(svc.router._providers.keys())
-        missing = [p for p in targets if p not in configured]
-        targets = [p for p in targets if p in configured]
-        if missing:
-            names = ", ".join(PROVIDER_DISPLAY[p] for p in missing)
+        # Validate every target's provider is configured.
+        configured_providers = set(svc.router._providers.keys())
+        missing_targets = [
+            t for t in targets if t.provider not in configured_providers
+        ]
+        targets = [t for t in targets if t.provider in configured_providers]
+        if missing_targets:
+            names = ", ".join(
+                PROVIDER_DISPLAY.get(t.provider, t.provider.value)
+                for t in missing_targets
+            )
             host._chat.add_note(f"{names} not configured — skipped")
         if not targets:
             QMessageBox.warning(
@@ -176,18 +230,24 @@ class SendController:
             )
             return
 
-        # Determine addressed_to: "all" if the user broadcast to every
-        # configured provider, otherwise a comma-separated list of values.
-        if set(targets) == configured:
+        # Determine addressed_to. For now we keep the provider-value
+        # comma list (the visibility filter is still keyed by provider
+        # — Stage 2.7 migrates it to persona ids along with the filter).
+        target_providers = [t.provider for t in targets]
+        if set(target_providers) == configured_providers:
             addressed_to = "all"
         else:
-            addressed_to = ",".join(p.value for p in targets)
+            # Dedupe provider values while preserving order
+            seen: list[str] = []
+            for p in target_providers:
+                if p.value not in seen:
+                    seen.append(p.value)
+            addressed_to = ",".join(seen)
 
-        current = svc.session.current
         user_msg = Message(
             role=Role.USER,
             content=text,
-            conversation_id=current.id,
+            conversation_id=conv.id,
             addressed_to=addressed_to,
         )
         svc.db.add_message(user_msg)
@@ -195,16 +255,16 @@ class SendController:
         host._chat.add_message(user_msg)
 
         # Auto-title on first message
-        if len(current.messages) == 1:
+        if len(conv.messages) == 1:
             title = text[:50] + ("..." if len(text) > 50 else "")
-            svc.db.update_conversation_title(current.id, title)
+            svc.db.update_conversation_title(conv.id, title)
             svc.session.set_title(title)
-            host._sidebar.update_conversation_title(current.id, title)
+            host._sidebar.update_conversation_title(conv.id, title)
 
         host._input.set_enabled(False)
         host._save_selection()
-        # sync/placeholder/color already fan out from parse() writing
-        # to ProviderSelectionState. No explicit refresh needed here.
+        # sync/placeholder/color already fan out from the selection
+        # state change triggered by the resolver.
         self.clear_retry_stash()
 
         if len(targets) == 1:
@@ -216,50 +276,66 @@ class SendController:
     # Fan-out
     # ------------------------------------------------------------------
 
-    def send_single(self, provider_id: Provider) -> None:
-        """Send to a single provider."""
-        # Kept as a distinct entry point for clarity; delegates to send_multi
-        # so state handling stays in one place.
-        self._host._set_combo_waiting(provider_id, True)
-        self.send_multi([provider_id])
+    def send_single(self, target: PersonaTarget) -> None:
+        """Send to a single persona (kept distinct for clarity)."""
+        self._host._set_combo_waiting(target.provider, True)
+        self.send_multi([target])
 
     def send_multi(
         self,
-        targets: list[Provider],
-        context_override: dict[Provider, list[Message]] | None = None,
+        targets: list[PersonaTarget],
+        context_override: dict[str, list[Message]] | None = None,
     ) -> None:
-        """Send to multiple providers simultaneously; render when all done."""
+        """Send to multiple personas simultaneously; render when all done.
+
+        ``context_override`` is keyed by persona_id — used by the //retry
+        command to re-send the same context for failed targets.
+        """
         host = self._host
         svc = self._services
         self._multi_workers.clear()
         self._column_buffer.clear()
 
-        for provider_id in targets:
-            model = host._selected_model(provider_id)
-            provider = svc.router.get_provider(provider_id)
-            host._set_combo_waiting(provider_id, True)
-            if context_override and provider_id in context_override:
-                context_messages = context_override[provider_id]
-            else:
-                context_messages = host._build_context(provider_id)
+        conv = svc.session.current
 
-            # Stash for //retry
-            self._retry_contexts[provider_id] = context_messages
-            self._retry_models[provider_id] = model
+        for target in targets:
+            persona = load_persona_for_target(conv, target, svc.db)
+            model = resolve_persona_model(persona, svc.config)
+            provider = svc.router.get_provider(target.provider)
+            host._set_combo_waiting(target.provider, True)
+
+            if context_override and target.persona_id in context_override:
+                context_messages = context_override[target.persona_id]
+            else:
+                context_messages = host._build_context(target)
+
+            # Stash for //retry (all keyed by persona_id)
+            pid = target.persona_id
+            self._retry_targets[pid] = target
+            self._retry_contexts[pid] = context_messages
+            self._retry_models[pid] = model
+            # Display label for retry command: persona name if explicit,
+            # provider display name for synthetic defaults.
+            if persona.id == target.provider.value:
+                self._retry_labels[pid] = PROVIDER_DISPLAY.get(
+                    target.provider, target.provider.value
+                )
+            else:
+                self._retry_labels[pid] = persona.name
 
             worker = StreamWorker(provider, context_messages, model)
             worker.stream_complete.connect(
-                lambda full_text, inp, out, est, pid=provider_id, mdl=model: (
-                    self._on_complete(pid, mdl, full_text, inp, out, est)
+                lambda full_text, inp, out, est, t=target, mdl=model: (
+                    self._on_complete(t, mdl, full_text, inp, out, est)
                 )
             )
             worker.stream_error.connect(
-                lambda error, pid=provider_id: self._on_error(pid, error)
+                lambda error, t=target: self._on_error(t, error)
             )
             worker.retrying.connect(
-                lambda attempt, mx, pid=provider_id: host._set_combo_retrying(pid)
+                lambda attempt, mx, t=target: host._set_combo_retrying(t.provider)
             )
-            self._multi_workers[provider_id] = worker
+            self._multi_workers[target.persona_id] = worker
             worker.start()
 
     # ------------------------------------------------------------------
@@ -268,7 +344,7 @@ class SendController:
 
     def _on_complete(
         self,
-        provider_id: Provider,
+        target: PersonaTarget,
         model: str,
         full_text: str,
         input_tokens: int,
@@ -277,22 +353,26 @@ class SendController:
     ) -> None:
         host = self._host
         svc = self._services
-        host._set_combo_waiting(provider_id, False)
-        self._multi_workers.pop(provider_id, None)
+        host._set_combo_waiting(target.provider, False)
+        self._multi_workers.pop(target.persona_id, None)
 
-        # Update spend
+        # Update spend (still per-provider — billing unit is the provider,
+        # not the persona. Per-persona spend breakdown is FE3.)
         cost = estimate_cost(model, input_tokens, output_tokens)
         current = svc.session.current
         if cost is not None and current is not None:
             svc.db.add_conversation_spend(
-                current.id, provider_id.value, cost, estimated
+                current.id, target.provider.value, cost, estimated
             )
         host._update_spend_labels()
 
         # Buffer and render once every worker has finished.
-        label = PROVIDER_DISPLAY[provider_id]
-        self._column_buffer[provider_id] = (
-            label, full_text, model, input_tokens, output_tokens, estimated
+        label = self._retry_labels.get(
+            target.persona_id,
+            PROVIDER_DISPLAY.get(target.provider, target.provider.value),
+        )
+        self._column_buffer[target.persona_id] = (
+            label, full_text, model, input_tokens, output_tokens, estimated, target,
         )
 
         if not self._multi_workers:
@@ -307,27 +387,28 @@ class SendController:
             host._update_input_placeholder()
             host._update_input_color()
 
-    def _on_error(self, provider_id: Provider, error: str) -> None:
+    def _on_error(self, target: PersonaTarget, error: str) -> None:
         host = self._host
         svc = self._services
-        host._set_combo_waiting(provider_id, False)
-        worker = self._multi_workers.pop(provider_id, None)
+        host._set_combo_waiting(target.provider, False)
+        worker = self._multi_workers.pop(target.persona_id, None)
         transient = worker.last_error_transient if worker else False
 
         current = svc.session.current
         error_msg = Message(
             role=Role.ASSISTANT,
-            content=f"[Error from {provider_id.value}: {error}]",
-            provider=provider_id,
+            content=f"[Error from {target.provider.value}: {error}]",
+            provider=target.provider,
+            persona_id=target.persona_id,
             conversation_id=current.id if current else None,
         )
         svc.db.add_message(error_msg)
         svc.session.append_message(error_msg)
         host._chat.add_message(error_msg)
 
-        # Stash for //retry
-        self._retry_failed[provider_id] = (error, transient)
-        self._retry_error_msg_ids[provider_id] = error_msg.id
+        # Stash for //retry (keyed by persona_id).
+        self._retry_failed[target.persona_id] = (error, transient)
+        self._retry_error_msg_ids[target.persona_id] = error_msg.id
 
         if not self._multi_workers:
             host._input.set_enabled(True)
@@ -340,19 +421,35 @@ class SendController:
 
     def _persist_buffered(self, display_mode: str) -> list[Message]:
         """Save every buffered response to the DB + conversation and
-        return the new Message objects in stable provider order."""
+        return the new Message objects in stable provider order.
+
+        Each Message is tagged with both provider and persona_id so
+        the renderer and exporter can label by persona name and
+        group by persona_id.
+        """
         svc = self._services
         current = svc.session.current
-        providers = [p for p in PROVIDER_ORDER if p in self._column_buffer]
+        # Sort by PROVIDER_ORDER then by persona_id for stability.
+        def sort_key(pid: str) -> tuple[int, str]:
+            _label, _text, _model, _inp, _out, _est, target = self._column_buffer[pid]
+            order = (
+                PROVIDER_ORDER.index(target.provider)
+                if target.provider in PROVIDER_ORDER
+                else 99
+            )
+            return (order, pid)
+
+        persona_ids = sorted(self._column_buffer.keys(), key=sort_key)
         persisted: list[Message] = []
-        for p in providers:
-            _label, full_text, model, _inp, _out, _est = self._column_buffer[p]
+        for pid in persona_ids:
+            _label, full_text, model, _inp, _out, _est, target = self._column_buffer[pid]
             msg = Message(
                 role=Role.ASSISTANT,
                 content=strip_echoed_heading(full_text),
-                provider=p,
+                provider=target.provider,
                 model=model,
                 display_mode=display_mode,
+                persona_id=target.persona_id,
                 conversation_id=current.id if current else None,
             )
             svc.db.add_message(msg)

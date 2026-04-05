@@ -377,13 +377,18 @@ class TestSendControllerPersonas:
         return db.create_persona(p)
 
     def _send_and_wait(self, main_window, qtbot, text: str):
-        """Submit a message and let the fake worker's 'ok' yield
-        make it through the Qt event loop."""
+        """Submit a message and let the fake worker's 'ok' yield make
+        it through the Qt event loop. The send runs on a QThread so we
+        wait until all multi_workers have drained — that's the real
+        "send is done" signal (input-enabled flips true at the same
+        moment but also starts as true, so we can't just poll that).
+        """
         main_window._on_new_chat() if not main_window._current_conv else None
         main_window._on_message_submitted(text)
-        # Wait until the send finishes (input re-enabled = done).
+        # After submit, workers should be running. Wait for them to
+        # drain back to empty.
         qtbot.waitUntil(
-            lambda: main_window._input.isEnabled() is True,
+            lambda: len(main_window._send._multi_workers) == 0,
             timeout=3000,
         )
 
