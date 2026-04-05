@@ -1,0 +1,331 @@
+# ------------------------------------------------------------------
+# Component: ChatDocumentMixin
+# Responsibility: Low-level QTextDocument mutation for ChatWidget —
+#                 colour policy, markdown rendering, per-message block
+#                 insertion, column-table painting, and full rebuild.
+#                 Isolated from ChatWidget's widget shell so the most
+#                 bug-prone code in the UI layer has a clear home.
+# Collaborators: PySide6 (QTextEdit/QTextDocument), models.message
+# ------------------------------------------------------------------
+from __future__ import annotations
+
+import html as html_mod
+
+from PySide6.QtGui import (
+    QColor,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+    QTextLength,
+)
+
+from mchat.models.message import Message, Provider, Role
+
+# Role info stored per text-block: (role, provider, model)
+_RoleInfo = tuple[Role, Provider | None, str | None]
+
+
+class ChatDocumentMixin:
+    """QTextDocument mutation methods for ChatWidget.
+
+    Expects the host class to provide the following state (all set up
+    in ChatWidget.__init__): ``_messages``, ``_message_positions``,
+    ``_block_roles``, ``_excluded_indices``, ``_is_empty``, ``_colors``,
+    ``_exclude_shade_mode``, ``_exclude_shade_amount``, ``_md``, and
+    ``_rebuild_callback``. The mixin also uses standard QTextEdit
+    methods (``document``, ``textCursor``, ``clear``, ``setUpdatesEnabled``,
+    and ``_scroll_to_bottom`` from the host class).
+    """
+
+    # ------------------------------------------------------------------
+    # Colour helpers
+    # ------------------------------------------------------------------
+
+    def _color_for(self, message: Message) -> str:
+        if message.role == Role.USER:
+            return self._colors["user"]
+        if message.provider:
+            return self._colors.get(message.provider.value, self._colors["user"])
+        return self._colors["user"]
+
+    @staticmethod
+    def _blend_toward_white(hex_color: str, amount: float = 0.6) -> str:
+        c = QColor(hex_color)
+        r = int(c.red() + (255 - c.red()) * amount)
+        g = int(c.green() + (255 - c.green()) * amount)
+        b = int(c.blue() + (255 - c.blue()) * amount)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    @staticmethod
+    def _darken(hex_color: str, amount: float = 0.2) -> str:
+        c = QColor(hex_color)
+        r = int(c.red() * (1 - amount))
+        g = int(c.green() * (1 - amount))
+        b = int(c.blue() * (1 - amount))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _shade(self, hex_color: str) -> str:
+        amount = max(0.0, min(1.0, self._exclude_shade_amount / 100.0))
+        if self._exclude_shade_mode == "lighten":
+            return self._blend_toward_white(hex_color, amount)
+        return self._darken(hex_color, amount)
+
+    def _effective_color_for(self, message: Message, index: int) -> str:
+        base = self._color_for(message)
+        if index in self._excluded_indices:
+            return self._shade(base)
+        return base
+
+    def _effective_text_color(self, index: int) -> str:
+        return "#1a1a1a"
+
+    def set_excluded_indices(self, indices: set[int]) -> None:
+        """Set which message indices are excluded from provider context."""
+        self._excluded_indices = set(indices)
+
+    def _make_block_fmt_for_index(
+        self, message: Message, index: int
+    ) -> QTextBlockFormat:
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor(self._effective_color_for(message, index)))
+        return fmt
+
+    def _make_block_fmt(self, message: Message) -> QTextBlockFormat:
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor(self._color_for(message)))
+        return fmt
+
+    @staticmethod
+    def _role_info(message: Message) -> _RoleInfo:
+        return (message.role, message.provider, message.model)
+
+    # ------------------------------------------------------------------
+    # Markdown rendering
+    # ------------------------------------------------------------------
+
+    def _render(self, message: Message) -> str:
+        """Return HTML for a message: markdown for assistants, escaped for user."""
+        if message.role == Role.ASSISTANT and message.content:
+            self._md.reset()
+            return self._md.convert(message.content)
+        text = html_mod.escape(message.content) if message.content else ""
+        return text.replace("\n", "<br>")
+
+    # ------------------------------------------------------------------
+    # Background application
+    # ------------------------------------------------------------------
+
+    def _apply_bg_to_range(
+        self,
+        start_block: int,
+        end_block: int,
+        block_fmt: QTextBlockFormat,
+        info: _RoleInfo,
+        color: QColor,
+        text_color: str = "#1a1a1a",
+    ) -> None:
+        """Apply background colour and role to all blocks and table cells in range."""
+        doc = self.document()
+        tables_seen: set[int] = set()
+
+        match_fmt = QTextCharFormat()
+        match_fmt.setBackground(color)
+        match_fmt.setForeground(QColor(text_color))
+
+        for bn in range(start_block, end_block + 1):
+            block = doc.findBlockByNumber(bn)
+            if not block.isValid():
+                continue
+            bc = QTextCursor(block)
+            bc.setBlockFormat(block_fmt)
+            self._block_roles[bn] = info
+
+            bc.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            bc.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
+            )
+            bc.mergeCharFormat(match_fmt)
+
+            table = bc.currentTable()
+            if table:
+                table_pos = table.firstCursorPosition().position()
+                if table_pos not in tables_seen:
+                    tables_seen.add(table_pos)
+                    tf = table.format()
+                    tf.setMargin(0)
+                    tf.setCellSpacing(0)
+                    tf.setBackground(color)
+                    tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                    table.setFormat(tf)
+
+                    for row in range(table.rows()):
+                        for col in range(table.columns()):
+                            cell = table.cellAt(row, col)
+                            fmt = cell.format()
+                            fmt.setBackground(color)
+                            cell.setFormat(fmt)
+
+    # ------------------------------------------------------------------
+    # Insert a single rendered message
+    # ------------------------------------------------------------------
+
+    def _insert_rendered(self, message: Message) -> None:
+        """Insert a message as rendered HTML with background colour on every block."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        msg_index = len(self._messages) - 1  # already appended by caller
+        if msg_index < 0:
+            msg_index = 0
+
+        block_fmt = self._make_block_fmt_for_index(message, msg_index)
+        info = self._role_info(message)
+        color = QColor(self._effective_color_for(message, msg_index))
+        text_color = self._effective_text_color(msg_index)
+
+        if self._is_empty:
+            cursor.setBlockFormat(block_fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(block_fmt)
+
+        self._message_positions.append(cursor.position())
+        start_block = cursor.block().blockNumber()
+
+        if message.role == Role.USER:
+            msg_num = len(self._messages)  # 1-based (appended before _insert_rendered)
+            char_fmt = cursor.charFormat()
+            char_fmt.setForeground(QColor("#888"))
+            cursor.insertText(f"{msg_num} — ", char_fmt)
+            char_fmt.setForeground(QColor(text_color))
+            cursor.setCharFormat(char_fmt)
+
+        rendered = self._render(message)
+        cursor.insertHtml(rendered)
+
+        end_block = cursor.block().blockNumber()
+        self._apply_bg_to_range(start_block, end_block, block_fmt, info, color, text_color)
+
+    # ------------------------------------------------------------------
+    # Column table (multi-provider response grid)
+    # ------------------------------------------------------------------
+
+    def _insert_column_table(
+        self, table_html: str, provider_colors: list[str]
+    ) -> None:
+        """Insert a pre-built HTML table for column-mode multi-provider responses."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor("#f5f5f5"))
+
+        if self._is_empty:
+            cursor.setBlockFormat(fmt)
+            self._is_empty = False
+        else:
+            cursor.insertBlock(fmt)
+
+        start_block = cursor.block().blockNumber()
+        cursor.insertHtml(table_html)
+        end_block = cursor.block().blockNumber()
+
+        doc = self.document()
+
+        # First pass: find and process all tables
+        bn = start_block
+        while bn <= end_block:
+            block = doc.findBlockByNumber(bn)
+            if not block.isValid():
+                bn += 1
+                continue
+            bc = QTextCursor(block)
+            table = bc.currentTable()
+            if table:
+                table_first = doc.findBlock(
+                    table.firstCursorPosition().position()
+                ).blockNumber()
+                table_last = doc.findBlock(
+                    table.lastCursorPosition().position()
+                ).blockNumber()
+
+                tf = table.format()
+                tf.setMargin(0)
+                tf.setCellSpacing(0)
+                tf.setCellPadding(8)
+                tf.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+                tf.setBackground(QColor("#f5f5f5"))
+                num_cols = table.columns()
+                if num_cols > 0:
+                    col_pct = 100.0 / num_cols
+                    tf.setColumnWidthConstraints(
+                        [QTextLength(QTextLength.Type.PercentageLength, col_pct)]
+                        * num_cols
+                    )
+                table.setFormat(tf)
+
+                for row in range(table.rows()):
+                    for col in range(table.columns()):
+                        cell = table.cellAt(row, col)
+                        cell_fmt = cell.format()
+                        cell_color = (
+                            QColor(provider_colors[col])
+                            if col < len(provider_colors)
+                            else QColor("#f5f5f5")
+                        )
+                        cell_fmt.setBackground(cell_color)
+                        cell.setFormat(cell_fmt)
+
+                        block_bg = QTextBlockFormat()
+                        block_bg.setBackground(cell_color)
+                        cell_start = cell.firstCursorPosition().position()
+                        cell_end = cell.lastCursorPosition().position()
+                        blk = doc.findBlock(cell_start)
+                        while blk.isValid() and blk.position() <= cell_end:
+                            blk_cursor = QTextCursor(blk)
+                            blk_cursor.setBlockFormat(block_bg)
+                            blk = blk.next()
+
+                        char_bg = QTextCharFormat()
+                        char_bg.setBackground(cell_color)
+                        cell_cursor = cell.firstCursorPosition()
+                        cell_cursor.setPosition(
+                            cell_end,
+                            QTextCursor.MoveMode.KeepAnchor,
+                        )
+                        cell_cursor.mergeCharFormat(char_bg)
+
+                bn = table_last + 1
+            else:
+                bc.setBlockFormat(fmt)
+                bn += 1
+
+        self._scroll_to_bottom()
+
+    # ------------------------------------------------------------------
+    # Full rebuild
+    # ------------------------------------------------------------------
+
+    def _rebuild(self) -> None:
+        """Re-render all messages.
+
+        If a rebuild callback is set (by MainWindow), delegate to it so
+        multi-provider groups are rendered with the correct layout mode.
+        """
+        if self._rebuild_callback is not None:
+            self._rebuild_callback()
+            return
+        saved = list(self._messages)
+        self.clear()
+        self._messages.clear()
+        self._message_positions.clear()
+        self._block_roles.clear()
+        self._is_empty = True
+        self.setUpdatesEnabled(False)
+        try:
+            for msg in saved:
+                self._messages.append(msg)
+                self._insert_rendered(msg)
+        finally:
+            self.setUpdatesEnabled(True)
+        self._scroll_to_bottom()
