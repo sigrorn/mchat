@@ -86,11 +86,13 @@ class MainWindow(QMainWindow):
         self._font_size = int(self._config.get("font_size") or 14)
 
         self._init_providers()
+        # PreferencesAdapter must exist before _build_ui, because
+        # _build_ui calls _restore_geometry -> self._prefs.restore_geometry.
+        self._prefs = PreferencesAdapter(self)
         self._build_ui()
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._send = SendController(self)
         self._conv_mgr = ConversationManager(self)
-        self._prefs = PreferencesAdapter(self)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
