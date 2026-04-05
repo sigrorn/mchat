@@ -33,11 +33,16 @@ class SettingsDialog(QDialog):
         self,
         config: Config,
         providers: dict | None = None,
+        models_cache: dict | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._config = config
         self._providers = providers or {}
+        # Optional pre-fetched model lists keyed by Provider enum — when
+        # supplied, the dialog uses them instead of calling list_models()
+        # (which may hit the network) during _build_ui.
+        self._models_cache = models_cache or {}
         self.setWindowTitle("Settings")
         self.setMinimumWidth(500)
         self.setMinimumHeight(500)
@@ -207,10 +212,16 @@ class SettingsDialog(QDialog):
                 combo.addItem(current_model)
             return
 
-        provider: BaseProvider | None = self._providers.get(provider_enum)
-        models: list[str] = []
-        if provider:
-            models = provider.list_models()
+        # Prefer the pre-fetched cache (populated by MainWindow's background
+        # model fetch) so opening Settings does not block on provider APIs.
+        models: list[str] = list(self._models_cache.get(provider_enum, []))
+        if not models:
+            provider: BaseProvider | None = self._providers.get(provider_enum)
+            if provider:
+                try:
+                    models = provider.list_models()
+                except Exception:
+                    models = []
         if not models and current_model:
             models = [current_model]
         combo.addItems(models)

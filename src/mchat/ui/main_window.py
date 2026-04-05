@@ -1218,7 +1218,20 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         providers = self._router._providers if self._router else {}
-        dialog = SettingsDialog(self._config, providers=providers, parent=self)
+        # Harvest the model lists the combos already hold — MainWindow
+        # fetches these asynchronously after startup, so they are usually
+        # up-to-date and available without any extra API calls.
+        models_cache: dict[Provider, list[str]] = {}
+        for p, combo in self._combos.items():
+            items = [combo.itemText(i) for i in range(combo.count())]
+            if items:
+                models_cache[p] = items
+        dialog = SettingsDialog(
+            self._config,
+            providers=providers,
+            models_cache=models_cache,
+            parent=self,
+        )
         if dialog.exec():
             self._init_providers()
             self._populate_model_combos()
