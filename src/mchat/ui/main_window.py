@@ -37,6 +37,12 @@ from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget, FindBar
 from mchat.ui.context_builder import build_context, compute_excluded_indices
 from mchat.ui.matrix_panel import MatrixPanel
+from mchat.ui.message_renderer import (
+    MessageRenderer,
+    PROVIDER_DISPLAY as _PROVIDER_DISPLAY_FROM_RENDERER,
+    PROVIDER_ORDER as _PROVIDER_ORDER_FROM_RENDERER,
+    strip_echoed_heading as _strip_echoed_heading,
+)
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
@@ -62,23 +68,9 @@ def _get_version() -> str:
         return "vdev"
 
 
-# Display names for provider labels in "X's take:" prefixes
-_PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
-
-# Stable display order for multi-provider responses
-_PROVIDER_ORDER = [Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI, Provider.PERPLEXITY]
-
-# Patterns the LLMs may echo at the start of their response
-import re as _re
-_TAKE_ECHO_RE = _re.compile(
-    r"^\*{0,2}(?:Claude|GPT|Gemini|Perplexity)(?:'s|'s)\s+take:?\*{0,2}\s*\n*",
-    _re.IGNORECASE,
-)
-
-
-def _strip_echoed_heading(text: str) -> str:
-    """Remove any LLM-echoed 'X's take:' heading from the start of a response."""
-    return _TAKE_ECHO_RE.sub("", text)
+# Re-exported from message_renderer for the rest of main_window.
+_PROVIDER_DISPLAY = _PROVIDER_DISPLAY_FROM_RENDERER
+_PROVIDER_ORDER = _PROVIDER_ORDER_FROM_RENDERER
 
 
 class MainWindow(QMainWindow):
@@ -108,6 +100,7 @@ class MainWindow(QMainWindow):
 
         self._init_providers()
         self._build_ui()
+        self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
@@ -904,186 +897,44 @@ class MainWindow(QMainWindow):
         return compute_excluded_indices(self._current_conv, self._db, configured)
 
     def _display_messages(self, messages: list[Message]) -> None:
-        """Load messages into chat, detecting multi-provider groups.
-
-        In list mode: adds 'X's take:' heading for multi-provider groups.
-        In column mode: renders multi-provider groups as column tables.
-        """
-        import markdown as md_lib
-        self._chat.clear_messages()
-        # Tell chat which messages are excluded (before the //limit mark)
-        self._chat.set_excluded_indices(self._compute_excluded_indices(messages))
-        self._chat.setUpdatesEnabled(False)
-        try:
-            i = 0
-            while i < len(messages):
-                msg = messages[i]
-                if msg.role != Role.ASSISTANT:
-                    self._chat._messages.append(msg)
-                    self._chat._insert_rendered(msg)
-                    i += 1
-                    continue
-
-                # Collect consecutive assistant messages from different providers
-                group: list[Message] = [msg]
-                seen_providers = {msg.provider}
-                j = i + 1
-                while j < len(messages):
-                    nxt = messages[j]
-                    if nxt.role != Role.ASSISTANT or nxt.provider in seen_providers:
-                        break
-                    group.append(nxt)
-                    seen_providers.add(nxt.provider)
-                    j += 1
-
-                if len(group) > 1:
-                    ordered = sorted(group, key=lambda m: _PROVIDER_ORDER.index(m.provider) if m.provider in _PROVIDER_ORDER else 99)
-
-                    # Use stored display_mode if available, else fall back to global toggle
-                    stored_mode = group[0].display_mode
-                    use_cols = stored_mode == "cols" if stored_mode else self._column_mode
-
-                    if use_cols:
-                        # Column table
-                        md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
-                        header_cells = []
-                        body_cells = []
-                        provider_colors = []
-                        # Check if this group is excluded (all messages at indices < limit)
-                        group_indices = [messages.index(m) for m in ordered]
-                        excluded = any(idx in self._chat._excluded_indices for idx in group_indices)
-                        for m in ordered:
-                            label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
-                            base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
-                            color = self._chat._shade(base_color) if excluded else base_color
-                            provider_colors.append(color)
-                            md.reset()
-                            rendered = md.convert(_strip_echoed_heading(m.content))
-                            header_cells.append(
-                                f'<th style="background-color:{color}; padding:8px; '
-                                f'text-align:left; vertical-align:top;">{label}\'s take</th>'
-                            )
-                            body_cells.append(
-                                f'<td style="background-color:{color}; padding:8px; '
-                                f'vertical-align:top;">{rendered}</td>'
-                            )
-                        table_html = (
-                            f'<table style="width:100%; border-collapse:collapse;">'
-                            f'<tr>{"".join(header_cells)}</tr>'
-                            f'<tr>{"".join(body_cells)}</tr>'
-                            f'</table>'
-                        )
-                        for m in ordered:
-                            self._chat._messages.append(m)
-                        self._chat._insert_column_table(table_html, provider_colors)
-                    else:
-                        # List mode with headings
-                        for m in ordered:
-                            label = _PROVIDER_DISPLAY.get(m.provider, "Assistant")
-                            clean = _strip_echoed_heading(m.content)
-                            display_msg = Message(
-                                role=m.role,
-                                content=f"**{label}'s take:**\n\n{clean}",
-                                provider=m.provider, model=m.model,
-                                conversation_id=m.conversation_id, id=m.id,
-                            )
-                            self._chat._messages.append(m)
-                            self._chat._insert_rendered(display_msg)
-                else:
-                    # Single assistant message — render as-is
-                    self._chat._messages.append(msg)
-                    self._chat._insert_rendered(msg)
-
-                i = j
-        finally:
-            self._chat.setUpdatesEnabled(True)
-        self._chat._scroll_to_bottom()
-
-    def _render_list_responses(self) -> None:
-        """Render buffered multi-provider responses as a vertical list in stable order."""
-        ordered = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
-        for p in ordered:
-            label, full_text, model, inp, out, est = self._column_buffer[p]
-            full_text = _strip_echoed_heading(full_text)
-            # Store raw content with display mode
-            msg = Message(
-                role=Role.ASSISTANT,
-                content=full_text,
-                provider=p,
-                model=model,
-                display_mode="lines",
-                conversation_id=self._current_conv.id,
-            )
-            self._db.add_message(msg)
-            self._current_conv.messages.append(msg)
-            # Display with heading
-            display_msg = Message(
-                role=msg.role, content=f"**{label}'s take:**\n\n{full_text}",
-                provider=msg.provider, model=msg.model,
-                conversation_id=msg.conversation_id, id=msg.id,
-            )
-            self._chat._messages.append(msg)
-            self._chat._insert_rendered(display_msg)
-            self._chat._scroll_to_bottom()
-
-    def _render_column_responses(self) -> None:
-        """Render buffered multi-provider responses as a side-by-side table."""
-        import html as html_mod
-        import markdown as md_lib
-
-        md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
-
-        # Build table HTML — one column per provider, in stable order
-        providers = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
-        header_cells = []
-        body_cells = []
-        for p in providers:
-            label, full_text, model, inp, out, est = self._column_buffer[p]
-            full_text = _strip_echoed_heading(full_text)
-            color = self._provider_color(p)
-            md.reset()
-            rendered = md.convert(full_text)
-            header_cells.append(
-                f'<th style="background-color:{color}; padding:8px; '
-                f'text-align:left; vertical-align:top;">{label}\'s take</th>'
-            )
-            body_cells.append(
-                f'<td style="background-color:{color}; padding:8px; '
-                f'vertical-align:top;">{rendered}</td>'
-            )
-
-        table_html = (
-            f'<table style="width:100%; border-collapse:collapse;">'
-            f'<tr>{"".join(header_cells)}</tr>'
-            f'<tr>{"".join(body_cells)}</tr>'
-            f'</table>'
+        """Delegate rendering to MessageRenderer."""
+        configured = set(self._router._providers.keys()) if self._router else set()
+        self._renderer.display_messages(
+            self._current_conv, messages, self._column_mode, configured
         )
 
-        # Save each response as a separate DB message (for persistence)
-        # but display as a single combined message
+    def _persist_buffered_responses(self, display_mode: str) -> list[Message]:
+        """Save buffered multi-provider responses to the DB and to the
+        in-memory conversation. Returns the persisted Message list in
+        stable provider order. ``display_mode`` is stored on each row
+        so a future re-render can honour the original layout choice.
+        """
+        providers = [p for p in _PROVIDER_ORDER if p in self._column_buffer]
+        persisted: list[Message] = []
         for p in providers:
-            label, full_text, model, inp, out, est = self._column_buffer[p]
+            _label, full_text, model, _inp, _out, _est = self._column_buffer[p]
             msg = Message(
                 role=Role.ASSISTANT,
                 content=_strip_echoed_heading(full_text),
                 provider=p,
                 model=model,
-                display_mode="cols",
+                display_mode=display_mode,
                 conversation_id=self._current_conv.id,
             )
             self._db.add_message(msg)
             self._current_conv.messages.append(msg)
+            persisted.append(msg)
+        return persisted
 
-        # Insert the table as a visual element
-        # Use a dummy message with the combined content for display
-        combined = Message(
-            role=Role.ASSISTANT,
-            content=table_html,
-            provider=providers[0],
-            conversation_id=self._current_conv.id,
-        )
-        provider_colors = [self._provider_color(p) for p in providers]
-        self._chat._insert_column_table(table_html, provider_colors)
+    def _render_list_responses(self) -> None:
+        """Persist buffered multi-provider responses and render as a list."""
+        persisted = self._persist_buffered_responses(display_mode="lines")
+        self._renderer.render_list_responses(persisted)
+
+    def _render_column_responses(self) -> None:
+        """Persist buffered multi-provider responses and render as a column table."""
+        persisted = self._persist_buffered_responses(display_mode="cols")
+        self._renderer.render_column_responses(persisted)
 
     def _on_multi_error(self, provider_id: Provider, error: str) -> None:
         self._set_combo_waiting(provider_id, False)
