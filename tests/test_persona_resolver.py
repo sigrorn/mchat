@@ -15,7 +15,7 @@ from mchat.models.persona import Persona, generate_persona_id
 from mchat.router import Router
 from mchat.ui.persona_resolver import PersonaResolver, ResolveError
 from mchat.ui.persona_target import PersonaTarget, synthetic_default
-from mchat.ui.state import ProviderSelectionState
+from mchat.ui.state import SelectionState
 
 
 class _FakeProvider:
@@ -39,7 +39,7 @@ def db(tmp_path):
 @pytest.fixture
 def all_providers_router():
     providers = {p: _FakeProvider(p) for p in Provider}
-    selection_state = ProviderSelectionState([Provider.CLAUDE])
+    selection_state = SelectionState([synthetic_default(Provider.CLAUDE)])
     return Router(
         providers, default=Provider.CLAUDE, selection_state=selection_state,
     )
@@ -180,7 +180,7 @@ class TestAllAndFlipped:
 
         # Set selection to just Claude synthetic default
         all_claude = synthetic_default(Provider.CLAUDE)
-        resolver._router._selection_state.set([Provider.CLAUDE])
+        resolver._router._selection_state.set([all_claude])
 
         flipped, cleaned = resolver.resolve("flipped, y", conv.id, db)
         flipped_ids = {t.persona_id for t in flipped}
@@ -225,7 +225,7 @@ class TestMixedPrefixes:
         """An input with no prefix at all uses the router's current
         selection, mapped through synthetic defaults."""
         conv = db.create_conversation()
-        resolver._router._selection_state.set([Provider.OPENAI])
+        resolver._router._selection_state.set([synthetic_default(Provider.OPENAI)])
         targets, cleaned = resolver.resolve("plain text", conv.id, db)
         assert targets == [synthetic_default(Provider.OPENAI)]
         assert cleaned == "plain text"

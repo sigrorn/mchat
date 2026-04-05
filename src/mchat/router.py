@@ -39,16 +39,23 @@ class Router:
         selection_state=None,
     ) -> None:
         self._providers = providers
-        # If the caller supplies a ProviderSelectionState, selection
-        # lives there and Router becomes a thin view over it. If no
-        # state is supplied (e.g. unit tests that only exercise parsing),
-        # we fall back to a local list so Router stays self-contained.
+        # If the caller supplies a SelectionState (formerly
+        # ProviderSelectionState), the selection lives there and
+        # Router becomes a thin view. The state holds PersonaTargets
+        # as of Stage 2.4; Router wraps providers as synthetic
+        # defaults on write and unwraps via providers_only() on read,
+        # so Router's public API stays list[Provider]-flavoured.
+        # If no state is supplied (unit tests that only exercise
+        # parsing), we fall back to a local list.
         self._selection_state = selection_state
         if selection_state is None:
             self._local_selection: list[Provider] = [default]
         else:
             if not selection_state.selection:
-                selection_state.set([default])
+                # Wrap the default as a synthetic-default PersonaTarget
+                # — state now holds list[PersonaTarget].
+                from mchat.ui.persona_target import synthetic_default
+                selection_state.set([synthetic_default(default)])
 
     # ------------------------------------------------------------------
     # Selection access — delegates to the injected state object when
@@ -59,14 +66,24 @@ class Router:
     @property
     def _selection(self) -> list[Provider]:
         if self._selection_state is not None:
-            return self._selection_state.selection
+            # SelectionState holds PersonaTargets as of Stage 2.4; we
+            # unwrap to providers here so Router's public surface stays
+            # list[Provider] and every existing caller keeps working.
+            return self._selection_state.providers_only()
         return list(self._local_selection)
 
     def _store_selection(self, providers: list[Provider]) -> None:
         if not providers:
             return
         if self._selection_state is not None:
-            self._selection_state.set(providers)
+            # Wrap each provider as its synthetic-default PersonaTarget
+            # before writing to the shared state. The state object is
+            # the source of truth for PersonaResolver and SendController;
+            # Router only ever writes through synthetic defaults, so
+            # anything that needs real personas goes through the resolver.
+            from mchat.ui.persona_target import synthetic_default
+            targets = [synthetic_default(p) for p in providers]
+            self._selection_state.set(targets)
         else:
             self._local_selection = list(providers)
 

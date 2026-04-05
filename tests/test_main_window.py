@@ -315,16 +315,28 @@ class TestStateObjectsWired:
         assert main_window._session.is_active() is False
 
     def test_selection_state_is_the_router_source_of_truth(self, main_window):
-        """Router.selection reads through ProviderSelectionState."""
+        """Router.selection reads through SelectionState.providers_only()
+        — state now holds list[PersonaTarget] (Stage 2.4), Router
+        preserves its list[Provider] interface via the dedup wrapper.
+        """
         from mchat.models.message import Provider
-        main_window._selection_state.set([Provider.OPENAI, Provider.GEMINI])
+        from mchat.ui.persona_target import synthetic_default
+        main_window._selection_state.set([
+            synthetic_default(Provider.OPENAI),
+            synthetic_default(Provider.GEMINI),
+        ])
         assert main_window._router.selection == [Provider.OPENAI, Provider.GEMINI]
 
     def test_router_set_selection_writes_to_state(self, main_window):
-        """Router.set_selection flows into the state object."""
+        """Router.set_selection takes list[Provider], but the underlying
+        state stores PersonaTargets. Router wraps via synthetic_default
+        when writing."""
         from mchat.models.message import Provider
+        from mchat.ui.persona_target import synthetic_default
         main_window._router.set_selection([Provider.CLAUDE])
-        assert main_window._selection_state.selection == [Provider.CLAUDE]
+        assert main_window._selection_state.selection == [
+            synthetic_default(Provider.CLAUDE)
+        ]
 
     def test_model_catalog_populated_after_construction(self, main_window):
         """FakeProvider.list_models returns two entries; after the

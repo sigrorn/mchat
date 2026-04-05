@@ -121,41 +121,67 @@ class ConversationSession(QObject):
         self._current.last_provider = value
 
 
-class ProviderSelectionState(QObject):
-    """The mutable "which providers does the next send address?" state.
+class SelectionState(QObject):
+    """The mutable "which personas does the next send address?" state.
 
-    Previously this lived inside Router; pulling it out gives
-    subscribers (e.g. ProviderPanel, input-colour updater) a signal to
-    listen to instead of having to be imperatively notified from
-    MainWindow.
+    Holds a list of PersonaTarget objects — one per addressed persona.
+    Before Stage 2.4 this was ``ProviderSelectionState`` holding a
+    list of Provider enum members; generalising to PersonaTarget lets
+    same-provider personas coexist in the selection (the Italian-tutor
+    scenario where three Claude personas can all be addressed at once).
+
+    Subscribers connect to ``selection_changed`` instead of being
+    imperatively notified from MainWindow. Legacy callers that just
+    want "which providers are in the selection right now" can use
+    ``providers_only()`` to get a deduplicated list[Provider].
     """
 
-    selection_changed = Signal(list)  # list[Provider]
+    selection_changed = Signal(list)  # list[PersonaTarget]
 
     def __init__(
         self,
-        default: list[Provider] | None = None,
+        default: list | None = None,  # list[PersonaTarget]
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._selection: list[Provider] = list(default) if default else []
+        self._selection: list = list(default) if default else []
 
     @property
-    def selection(self) -> list[Provider]:
+    def selection(self) -> list:
+        """Return a copy of the current selection as a list[PersonaTarget]."""
         return list(self._selection)
 
-    def set(self, providers: list[Provider]) -> None:
-        """Replace the full selection. No-op if the list is empty —
-        callers that want to 'clear' should handle the empty-selection
-        case at the UI layer (we never want to send with nothing
-        selected)."""
-        if not providers:
+    def providers_only(self) -> list[Provider]:
+        """Return the deduplicated list of Providers referenced by the
+        current selection, in order of first appearance. Used by code
+        that genuinely only cares about providers (e.g. Router's
+        public .selection property, which preserves its historical
+        list[Provider] interface for back-compat)."""
+        seen: list[Provider] = []
+        for t in self._selection:
+            if t.provider not in seen:
+                seen.append(t.provider)
+        return seen
+
+    def set(self, targets: list) -> None:
+        """Replace the full selection with ``targets`` (list[PersonaTarget]).
+        No-op if the list is empty — callers that want to 'clear' should
+        handle the empty-selection case at the UI layer (we never want
+        to send with nothing selected)."""
+        if not targets:
             return
-        new = list(providers)
+        new = list(targets)
         if new == self._selection:
             return
         self._selection = new
         self.selection_changed.emit(list(self._selection))
+
+
+# Backwards-compatibility alias. Some call sites and tests still import
+# the old name; removing those is mechanical and can happen in a
+# follow-up cleanup commit if desired. The alias lets the rename land
+# without touching every spelling in the same commit.
+ProviderSelectionState = SelectionState
 
 
 class ModelCatalog(QObject):

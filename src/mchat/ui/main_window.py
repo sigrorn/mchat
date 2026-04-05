@@ -49,7 +49,7 @@ from mchat.ui.settings_applier import SettingsApplier
 from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
 from mchat.ui.services import ServicesContext
-from mchat.ui.state import ConversationSession, ModelCatalog, ProviderSelectionState
+from mchat.ui.state import ConversationSession, ModelCatalog, SelectionState
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.sidebar import Sidebar
 from mchat.workers.stream_worker import StreamWorker
@@ -89,10 +89,11 @@ class MainWindow(QMainWindow):
 
         # Application-state objects (see ui/state.py).
         # ConversationSession owns the active conversation + its messages.
-        # ProviderSelectionState owns which providers the next send addresses.
+        # SelectionState owns which personas the next send addresses
+        # (list[PersonaTarget] as of Stage 2.4).
         # ModelCatalog owns the per-provider model-id cache.
         self._session = ConversationSession(self)
-        self._selection_state = ProviderSelectionState(parent=self)
+        self._selection_state = SelectionState(parent=self)
         self._model_catalog = ModelCatalog(self)
 
         self._init_providers()

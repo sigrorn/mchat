@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from mchat.config import Config
 from mchat.db import Database
 from mchat.router import Router
-from mchat.ui.state import ConversationSession, ModelCatalog, ProviderSelectionState
+from mchat.ui.state import ConversationSession, ModelCatalog, SelectionState
 
 
 # IMPORTANT: ServicesContext is intentionally NOT frozen.
@@ -55,8 +55,10 @@ class ServicesContext:
                       Selection state lives in ``selection`` below;
                       router.selection delegates to it.
       * ``session`` — ConversationSession (active conversation + messages)
-      * ``selection`` — ProviderSelectionState (which providers the next
-                      send addresses)
+      * ``selection`` — SelectionState (which personas the next send
+                      addresses, as list[PersonaTarget]; renamed from
+                      ProviderSelectionState in Stage 2.4 of the
+                      personas feature)
       * ``model_catalog`` — ModelCatalog (cached model ids per provider)
 
     Notable omissions:
@@ -72,7 +74,7 @@ class ServicesContext:
     db: Database
     router: Router | None
     session: ConversationSession
-    selection: ProviderSelectionState
+    selection: SelectionState
     model_catalog: ModelCatalog
 
     def set_router(self, router: Router | None) -> None:
