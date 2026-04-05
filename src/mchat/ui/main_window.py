@@ -35,6 +35,7 @@ from mchat.providers.openai_provider import OpenAIProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget, FindBar
+from mchat.ui.visibility import filter_for_provider
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
 from mchat.ui.sidebar import Sidebar
@@ -656,6 +657,18 @@ class MainWindow(QMainWindow):
             if pinned_before:
                 messages = pinned_before + list(messages)
 
+        # Apply per-provider visibility filtering (user message addressing
+        # + assistant visibility matrix). Pinned messages were already
+        # prepended and bypass these filters by design.
+        matrix = self._current_conv.visibility_matrix or {}
+        pinned_count = len(messages) - (len(all_messages) - cut_idx)
+        if pinned_count > 0:
+            pinned_prefix = messages[:pinned_count]
+            rest = messages[pinned_count:]
+            messages = pinned_prefix + filter_for_provider(rest, provider_id, matrix)
+        else:
+            messages = filter_for_provider(messages, provider_id, matrix)
+
         # Strip provider prefixes from user messages so providers don't
         # see routing metadata like "claude," or "flipped," in context
         from mchat.router import Router
@@ -803,11 +816,21 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Determine addressed_to: "all" if the user broadcast to every
+        # configured provider, otherwise a comma-separated list of the
+        # targeted provider values. This is what drives the "visible to
+        # addressed only" rule for user messages.
+        if set(targets) == configured:
+            addressed_to = "all"
+        else:
+            addressed_to = ",".join(p.value for p in targets)
+
         # Save and display user message
         user_msg = Message(
             role=Role.USER,
             content=text,
             conversation_id=self._current_conv.id,
+            addressed_to=addressed_to,
         )
         self._db.add_message(user_msg)
         self._current_conv.messages.append(user_msg)
