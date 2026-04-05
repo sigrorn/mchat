@@ -122,6 +122,56 @@ class TestDisplayMessages:
         assert text.count("Claude's take") == 1
         assert "real-body" in text
 
+    def test_grouped_shading_uses_tracked_indices_not_value_lookup(self, renderer, chat, db):
+        """Regression for #50: duplicate-valued assistant messages must
+        not confuse exclusion shading for grouped responses.
+
+        History: (a, b) round 1, (a, b) round 2 — the second pair is
+        structurally identical to the first. The renderer must resolve
+        the column-group's indices from its tracked position, not via
+        messages.index(), so shading decisions work independently for
+        each group even when their Message values are equal.
+        """
+        # Build equal-valued messages WITHOUT going through the DB so
+        # they don't get distinguishing auto-assigned ids. This is the
+        # exact condition that makes messages.index() ambiguous.
+        from datetime import datetime, timezone
+        fixed_ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        def _make(content, provider):
+            return Message(
+                role=Role.ASSISTANT, content=content,
+                provider=provider, display_mode="cols",
+                created_at=fixed_ts,
+            )
+        messages = [
+            _make("a", Provider.CLAUDE),
+            _make("b", Provider.OPENAI),
+            _make("a", Provider.CLAUDE),
+            _make("b", Provider.OPENAI),
+        ]
+        assert messages[0] == messages[2], "pre-req: messages must be value-equal"
+        chat.set_excluded_indices({0, 1})
+
+        # Spy on _render_column_group to capture the indices passed in.
+        calls: list[list[int]] = []
+        original = renderer._render_column_group
+
+        def spy(ordered, group_indices):
+            calls.append(list(group_indices))
+            return original(ordered, group_indices)
+
+        renderer._render_column_group = spy
+        renderer.display_messages(
+            None, messages, column_mode=True,
+            configured_providers={Provider.CLAUDE, Provider.OPENAI},
+        )
+        # Two groups must have been rendered with disjoint index sets:
+        # first group {0,1} (excluded), second group {2,3} (not excluded).
+        assert len(calls) == 2
+        assert set(calls[0]) == {0, 1}
+        assert set(calls[1]) == {2, 3}
+
     def test_clear_then_rerender(self, renderer, chat):
         msgs1 = [Message(role=Role.USER, content="first")]
         msgs2 = [Message(role=Role.USER, content="second")]
