@@ -356,6 +356,51 @@ class TestLayoutPersistence:
         assert main_window._config.get("column_mode") == (not initial)
 
 
+class TestSidebarPersonasAction:
+    """Stage 3A.3 — the sidebar's 'Personas...' context-menu action
+    fires the personas_requested signal, which MainWindow handles
+    by opening a PersonaDialog."""
+
+    def test_sidebar_exposes_personas_requested_signal(self, main_window):
+        """The signal exists and is connected to MainWindow's handler."""
+        # Signal attribute exists
+        assert hasattr(main_window._sidebar, "personas_requested")
+        # MainWindow has a handler method for it
+        assert hasattr(main_window, "_on_personas_requested")
+
+    def test_personas_requested_signal_opens_dialog(self, main_window, monkeypatch):
+        """Emitting the signal results in PersonaDialog being opened
+        against the current DB + Config + conversation id. We patch
+        exec() so the test doesn't block on a modal."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Spy on PersonaDialog construction + exec
+        constructed = []
+        execed = []
+
+        import mchat.ui.persona_dialog as pd_mod
+        original = pd_mod.PersonaDialog
+
+        class SpyDialog(original):
+            def __init__(self, db, config, conv_id_arg, parent=None):
+                constructed.append((db, config, conv_id_arg))
+                super().__init__(db, config, conv_id_arg, parent=parent)
+
+            def exec(self):
+                execed.append(True)
+                return 0  # don't actually show
+
+        monkeypatch.setattr(pd_mod, "PersonaDialog", SpyDialog)
+
+        # Emit the signal — same as right-click → Personas...
+        main_window._sidebar.personas_requested.emit(conv_id)
+
+        assert len(constructed) == 1
+        assert constructed[0][2] == conv_id
+        assert len(execed) == 1
+
+
 class TestSendControllerPersonas:
     """Stage 2.6 — send_controller threads PersonaTargets through the
     send/retry flow. Sends produce persisted messages tagged with

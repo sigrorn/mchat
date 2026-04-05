@@ -28,6 +28,7 @@ class Sidebar(QFrame):
     rename_requested = Signal(int, str)  # conversation id, new title
     save_requested = Signal(int)    # conversation id
     delete_requested = Signal(int)  # conversation id
+    personas_requested = Signal(int)  # conversation id — opens PersonaDialog
 
     def __init__(self, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
@@ -134,6 +135,7 @@ class Sidebar(QFrame):
         )
 
         rename_action = menu.addAction("Rename")
+        personas_action = menu.addAction("Personas...")
         save_action = menu.addAction("Save as HTML...")
         delete_action = menu.addAction("Delete")
 
@@ -145,6 +147,8 @@ class Sidebar(QFrame):
             )
             if ok and new_title.strip():
                 self.rename_requested.emit(conv_id, new_title.strip())
+        elif action == personas_action:
+            self.personas_requested.emit(conv_id)
         elif action == save_action:
             self.save_requested.emit(conv_id)
         elif action == delete_action:

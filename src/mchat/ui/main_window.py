@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         self._sidebar.rename_requested.connect(self._on_rename_conversation)
         self._sidebar.save_requested.connect(self._on_save_conversation)
         self._sidebar.delete_requested.connect(self._on_delete_conversation)
+        self._sidebar.personas_requested.connect(self._on_personas_requested)
         main_layout.addWidget(self._sidebar)
 
         # Right panel (chat + bar + input)
@@ -534,6 +535,24 @@ class MainWindow(QMainWindow):
 
     def _on_delete_conversation(self, conv_id: int) -> None:
         self._conv_mgr.on_delete(conv_id)
+
+    def _on_personas_requested(self, conv_id: int) -> None:
+        """Open the PersonaDialog for the given conversation.
+
+        Stage 3A.3: the sidebar's "Personas..." context-menu action
+        emits this signal, we construct a modal PersonaDialog bound
+        to the current DB + Config + conversation id, exec it, and
+        refresh the chat after the dialog closes so any model/
+        colour override changes take immediate effect.
+        """
+        from mchat.ui.persona_dialog import PersonaDialog
+        dialog = PersonaDialog(self._db, self._config, conv_id, parent=self)
+        dialog.exec()
+        # Any persona change should trigger a re-render so the new
+        # colour / label / cutoff takes effect. _display_messages
+        # refreshes the persona colour resolver cache internally.
+        if self._current_conv and self._current_conv.id == conv_id:
+            self._display_messages(self._current_conv.messages)
 
     # ------------------------------------------------------------------
     # Messaging
