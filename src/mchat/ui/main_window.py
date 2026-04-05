@@ -278,6 +278,13 @@ class MainWindow(QMainWindow):
         self._chat._rebuild_callback = lambda: self._display_messages(
             self._current_conv.messages if self._current_conv else []
         )
+        # Persona-aware colour resolver (Stage 3A.2). The resolver
+        # caches per-conversation persona rows; set_conversation is
+        # called on conversation switch, invalidate() after persona
+        # add/edit/remove.
+        from mchat.ui.persona_color_resolver import PersonaColorResolver
+        self._persona_color_resolver = PersonaColorResolver(self._db, self._config)
+        self._chat.set_persona_color_resolver(self._persona_color_resolver)
         self._find_bar = FindBar(self._chat)
         right_layout.addWidget(self._find_bar)
         right_layout.addWidget(self._chat, stretch=1)
@@ -684,8 +691,18 @@ class MainWindow(QMainWindow):
         return compute_excluded_indices(self._current_conv, self._db, configured)
 
     def _display_messages(self, messages: list[Message]) -> None:
-        """Delegate rendering to MessageRenderer."""
+        """Delegate rendering to MessageRenderer.
+
+        Refreshes the persona colour resolver's cache before every
+        render so persona add/edit/remove (via commands or dialog)
+        immediately takes effect. This is a cheap DB query per
+        render — much cheaper than tracking every mutation site.
+        """
         configured = set(self._router._providers.keys()) if self._router else set()
+        if self._current_conv is not None:
+            self._persona_color_resolver.set_conversation(self._current_conv.id)
+        else:
+            self._persona_color_resolver.set_conversation(None)
         self._renderer.display_messages(
             self._current_conv, messages, self._column_mode, configured
         )

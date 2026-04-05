@@ -74,6 +74,12 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self._exclude_shade_amount = exclude_shade_amount
         # Optional callback for column-aware rebuild (set by MainWindow)
         self._rebuild_callback = None
+        # Optional persona colour resolver — set by MainWindow in
+        # Stage 3A.2+. When present, ChatDocumentMixin._color_for
+        # queries this first so persona-tagged messages can render
+        # in their override colour. Defaults to None (no persona-aware
+        # resolution, legacy behaviour).
+        self._persona_color_resolver = None
         self._messages: list[Message] = []
         self._message_positions: list[int] = []  # document position of each message start
         # Message indices excluded from provider context (e.g. before //limit).
@@ -243,6 +249,18 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self._exclude_shade_mode = mode
         self._exclude_shade_amount = amount
         self._rebuild()
+
+    def set_persona_color_resolver(self, resolver) -> None:
+        """Inject a persona colour resolver (Stage 3A.2).
+
+        When set, ``_color_for(message)`` consults the resolver
+        first for persona-tagged messages and uses the persona's
+        ``color_override`` (or its resolved global colour via D6b)
+        instead of the bare provider colour. Pass ``None`` to
+        disable persona-aware colouring and fall back to the
+        original behaviour.
+        """
+        self._persona_color_resolver = resolver
 
     def _scroll_to_bottom(self) -> None:
         QTimer.singleShot(

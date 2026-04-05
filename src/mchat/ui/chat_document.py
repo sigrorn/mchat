@@ -42,6 +42,14 @@ class ChatDocumentMixin:
     # ------------------------------------------------------------------
 
     def _color_for(self, message: Message) -> str:
+        # Persona colour resolver (optional — wired by MainWindow in
+        # Stage 3A.2+). Returns None when persona-aware resolution
+        # doesn't apply; we then fall through to the legacy lookup.
+        resolver = getattr(self, "_persona_color_resolver", None)
+        if resolver is not None:
+            override = resolver.color_for_message(message)
+            if override is not None:
+                return override
         if message.role == Role.USER:
             return self._colors["user"]
         if message.provider:
