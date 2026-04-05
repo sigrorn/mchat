@@ -16,6 +16,12 @@ from mchat.models.message import Message, Provider, Role
 
 DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 
+# Schema version stored in PRAGMA user_version. Bump this and append a
+# new _migration_N method whenever the schema changes. Each migration
+# runs exactly once per database, in ascending order, and must be
+# idempotent on partially-migrated legacy DBs where safe.
+CURRENT_SCHEMA_VERSION = 1
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +74,31 @@ class Database:
         self._conn.commit()
 
     def _migrate(self) -> None:
-        """Add columns that may be missing from older databases."""
+        """Run every schema migration whose version number is newer than
+        the DB's current ``user_version``, then stamp the new version.
+
+        Each migration is a dedicated method (``_migration_N``) and runs
+        exactly once per database. Migrations must be written to be safe
+        on both fresh and partially-migrated legacy databases.
+        """
+        current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        migrations = [
+            (1, self._migration_1_initial),
+            # Future migrations: (2, self._migration_2_...)
+        ]
+        for version, fn in migrations:
+            if current < version:
+                fn()
+                # user_version is an int pragma — can't be parameterised
+                self._conn.execute(f"PRAGMA user_version = {version}")
+
+    def _migration_1_initial(self) -> None:
+        """Initial catch-all migration.
+
+        Covers every schema change made before explicit versioning was
+        introduced. Written to be idempotent because legacy DBs may be
+        at any point along the historical migration timeline.
+        """
         cols = {
             row[1]
             for row in self._conn.execute("PRAGMA table_info(conversations)")
