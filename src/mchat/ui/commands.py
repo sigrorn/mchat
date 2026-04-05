@@ -482,10 +482,7 @@ def _handle_pins(app) -> bool:
     fmt = QTextBlockFormat()
     fmt.setBackground(QColor("#f5f5f5"))
     for n, m in pinned:
-        content = m.content
-        if len(content) > 80:
-            content = content[:77] + "..."
-        line = f"  {n}: [{_label(m.pin_target)}] {content}"
+        line = f"  {n}: [{_label(m.pin_target)}] {m.content}"
         cursor.insertBlock(fmt)
         char_fmt = cursor.charFormat()
         char_fmt.setForeground(QColor("#666"))
