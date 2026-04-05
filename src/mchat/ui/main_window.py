@@ -37,6 +37,7 @@ from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.find_bar import FindBar
 from mchat.ui.context_builder import build_context, compute_excluded_indices
+from mchat.ui.conversation_manager import ConversationManager
 from mchat.ui.matrix_panel import MatrixPanel
 from mchat.ui.message_renderer import (
     MessageRenderer,
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._renderer = MessageRenderer(self._chat, self._config, self._db)
         self._send = SendController(self)
+        self._conv_mgr = ConversationManager(self)
         self._populate_model_combos_fast()  # config defaults only, no API calls
         self._apply_all_combo_styles()
         self._sync_checkboxes_from_selection()
@@ -501,34 +503,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _load_conversations(self) -> None:
-        conversations = self._db.list_conversations()
-        self._sidebar.set_conversations(conversations)
-        if conversations:
-            self._sidebar.select_conversation(conversations[0].id)
+        self._conv_mgr.load_conversations()
 
     def _on_conversation_selected(self, conv_id: int) -> None:
-        conv = self._db.get_conversation(conv_id)
-        if not conv:
-            return
-        messages = self._db.get_messages(conv_id)
-        self._current_conv = conv
-        self._current_conv.messages = messages
-
-        # Restore selection from last_provider (comma-separated)
-        if conv.last_provider and self._router:
-            try:
-                providers = [Provider(v.strip()) for v in conv.last_provider.split(",") if v.strip()]
-                if providers:
-                    self._router.set_selection(providers)
-            except ValueError:
-                pass
-        self._sync_checkboxes_from_selection()
-        self._update_input_placeholder()
-        self._update_input_color()
-        self._update_spend_labels()
-        self._sync_matrix_panel()
-
-        self._display_messages(messages)
+        self._conv_mgr.on_conversation_selected(conv_id)
 
     def _sync_matrix_panel(self) -> None:
         """Rebuild the matrix panel for the currently configured providers
@@ -545,62 +523,16 @@ class MainWindow(QMainWindow):
         self._db.set_visibility_matrix(self._current_conv.id, matrix)
 
     def _on_new_chat(self) -> None:
-        system_prompt = self._config.get("system_prompt")
-        conv = self._db.create_conversation(system_prompt=system_prompt)
-        self._current_conv = conv
-        self._chat.clear_messages()
-        self._update_spend_labels()
-        self._sync_matrix_panel()
-        self._load_conversations()
-        self._sidebar.select_conversation(conv.id)
+        self._conv_mgr.new_chat()
 
     def _on_rename_conversation(self, conv_id: int, new_title: str) -> None:
-        self._db.update_conversation_title(conv_id, new_title)
-        if self._current_conv and self._current_conv.id == conv_id:
-            self._current_conv.title = new_title
-        # Update the sidebar item in place instead of reloading every
-        # conversation and triggering a full chat re-render.
-        self._sidebar.update_conversation_title(conv_id, new_title)
+        self._conv_mgr.on_rename(conv_id, new_title)
 
     def _on_save_conversation(self, conv_id: int) -> None:
-        messages = self._db.get_messages(conv_id)
-        if not messages:
-            return
-        convs = self._db.list_conversations()
-        conv = next((c for c in convs if c.id == conv_id), None)
-        title = (conv.title if conv else "chat").replace(" ", "_")[:40]
-
-        from mchat.ui.chat_widget import ChatWidget
-        tmp = ChatWidget(font_size=self._font_size)
-        for msg in messages:
-            tmp._messages.append(msg)
-            tmp._insert_rendered(msg)
-        html = tmp.export_html()
-        tmp.deleteLater()
-
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Chat", f"{title}.html", "HTML Files (*.html)"
-        )
-        if path:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(html)
+        self._conv_mgr.on_save(conv_id)
 
     def _on_delete_conversation(self, conv_id: int) -> None:
-        reply = QMessageBox.question(
-            self, "Delete Chat",
-            "Delete this conversation? This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        was_current = self._current_conv and self._current_conv.id == conv_id
-        self._db.delete_conversation(conv_id)
-        if was_current:
-            self._current_conv = None
-            self._chat.clear_messages()
-        self._load_conversations()
-        if was_current:
-            self._on_new_chat()
+        self._conv_mgr.on_delete(conv_id)
 
     # ------------------------------------------------------------------
     # Messaging
@@ -718,13 +650,7 @@ class MainWindow(QMainWindow):
         self._send.clear_retry_stash()
 
     def _save_selection(self) -> None:
-        """Persist the current selection to the conversation."""
-        if self._current_conv and self._router:
-            sel_str = ",".join(p.value for p in self._router.selection)
-            self._current_conv.last_provider = sel_str
-            self._db.update_conversation_last_provider(
-                self._current_conv.id, sel_str
-            )
+        self._conv_mgr.save_selection()
 
     # ------------------------------------------------------------------
 
