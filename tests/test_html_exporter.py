@@ -106,3 +106,97 @@ class TestHtmlExporter:
         html = exp.export([Message(role=Role.USER, content="x")])
         assert "#111111" in html
         assert "font-size: 18px" in html
+
+
+class TestHtmlExporterPersonas:
+    """Stage 1.3 — export labels reflect persona name when persona_id
+    is set, falling back to the provider display name for legacy
+    messages."""
+
+    def _make_persona(self, **overrides):
+        from mchat.models.persona import Persona, generate_persona_id
+        fields = dict(
+            conversation_id=1,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name="Partner",
+            name_slug="partner",
+        )
+        fields.update(overrides)
+        return Persona(**fields)
+
+    def test_persona_label_used_when_persona_id_matches(self, exporter):
+        p = self._make_persona(name="Evaluator", name_slug="evaluator")
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="critique",
+                provider=Provider.CLAUDE,
+                persona_id=p.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p])
+        assert "Evaluator" in html
+        # The provider display name should NOT be the chosen label
+        # (though "Claude" may still appear in the CSS/colour comments)
+        assert ">Evaluator<" in html
+
+    def test_legacy_message_without_persona_id_uses_provider_label(
+        self, exporter
+    ):
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="hi",
+                provider=Provider.CLAUDE,
+                # persona_id defaults to None
+            ),
+        ]
+        html = exporter.export(msgs)
+        assert "Claude" in html
+
+    def test_persona_argument_optional_and_defaults_to_empty(self, exporter):
+        """export() must still work without a personas kwarg — callers
+        that haven't been updated yet keep working."""
+        msgs = [Message(role=Role.USER, content="hi")]
+        html = exporter.export(msgs)  # no personas kwarg
+        assert ">You<" in html
+
+    def test_tombstoned_persona_still_labels_message(self, exporter):
+        """The exporter should accept tombstoned personas in its
+        personas list (the db helper list_personas_including_deleted
+        returns them) and use their names for historical labels."""
+        from datetime import datetime, timezone
+        p = self._make_persona(
+            name="Archived",
+            name_slug="archived",
+            deleted_at=datetime.now(timezone.utc),
+        )
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="old reply",
+                provider=Provider.CLAUDE,
+                persona_id=p.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p])
+        assert "Archived" in html
+
+    def test_persona_id_with_no_matching_row_falls_back_to_provider(
+        self, exporter
+    ):
+        """Defensive: if a message has a persona_id but no matching
+        persona was passed in (shouldn't happen with the standard
+        db.list_personas_including_deleted call, but be robust), fall
+        back to the provider display name."""
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="orphan",
+                provider=Provider.CLAUDE,
+                persona_id="p_nonexistent",
+            ),
+        ]
+        html = exporter.export(msgs, personas=[])
+        assert "Claude" in html

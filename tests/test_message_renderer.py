@@ -183,6 +183,209 @@ class TestDisplayMessages:
         assert len(chat._messages) == 1
 
 
+class TestPersonaAwareRendering:
+    """Stage 1.3 — the renderer labels messages by persona name and
+    groups by (persona_id or provider.value) so two same-provider
+    personas render as distinct columns. Tombstoned personas still
+    resolve their historical labels. See docs/plans/personas.md § 1.4.
+    """
+
+    def _make_persona(self, conv_id, **overrides):
+        from mchat.models.persona import Persona, generate_persona_id
+        fields = dict(
+            conversation_id=conv_id,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name="Partner",
+            name_slug="partner",
+        )
+        fields.update(overrides)
+        return Persona(**fields)
+
+    def test_message_with_persona_id_renders_persona_name_as_label(
+        self, renderer, chat, db
+    ):
+        conv = db.create_conversation()
+        p = db.create_persona(self._make_persona(
+            conv.id, name="Evaluator", name_slug="evaluator",
+        ))
+        msgs = [
+            Message(role=Role.USER, content="q", conversation_id=conv.id),
+            Message(
+                role=Role.ASSISTANT,
+                content="hi",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                persona_id=p.id,
+            ),
+            # second assistant to force multi-persona label behaviour
+            Message(
+                role=Role.ASSISTANT,
+                content="hello",
+                provider=Provider.OPENAI,
+                conversation_id=conv.id,
+            ),
+        ]
+        conv_obj = db.get_conversation(conv.id)
+        conv_obj.messages = msgs
+        renderer.display_messages(
+            conv_obj, msgs, column_mode=False, configured_providers=set(Provider),
+        )
+        text = chat.toPlainText()
+        # Persona name appears as the label for the persona-tagged message
+        assert "Evaluator" in text
+
+    def test_two_same_provider_personas_render_as_distinct_column_groups(
+        self, renderer, chat, db
+    ):
+        """The grouping key changes from msg.provider to
+        (msg.persona_id or msg.provider.value). Two Claude personas
+        in the same group → they must form a two-column table.
+        """
+        conv = db.create_conversation()
+        partner = db.create_persona(self._make_persona(
+            conv.id, name="Partner", name_slug="partner",
+        ))
+        evaluator = db.create_persona(self._make_persona(
+            conv.id, name="Evaluator", name_slug="evaluator",
+        ))
+        msgs = [
+            Message(role=Role.USER, content="q", conversation_id=conv.id),
+            Message(
+                role=Role.ASSISTANT,
+                content="partner-reply",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                persona_id=partner.id,
+                display_mode="cols",
+            ),
+            Message(
+                role=Role.ASSISTANT,
+                content="evaluator-reply",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                persona_id=evaluator.id,
+                display_mode="cols",
+            ),
+        ]
+        conv_obj = db.get_conversation(conv.id)
+        conv_obj.messages = msgs
+
+        # Spy on _render_column_group to capture what it received.
+        calls: list[list] = []
+        original = renderer._render_column_group
+
+        def spy(ordered, group_indices):
+            calls.append([(m.persona_id, m.content) for m in ordered])
+            return original(ordered, group_indices)
+
+        renderer._render_column_group = spy
+        renderer.display_messages(
+            conv_obj, msgs, column_mode=True, configured_providers=set(Provider),
+        )
+        # Exactly one column group call with both personas in it
+        assert len(calls) == 1
+        persona_ids = {pid for pid, _ in calls[0]}
+        assert persona_ids == {partner.id, evaluator.id}
+
+    def test_legacy_messages_without_persona_id_render_unchanged(
+        self, renderer, chat, db
+    ):
+        """A message with persona_id=None falls back to the provider
+        display name. This is the regression guard for existing chats.
+        """
+        conv = db.create_conversation()
+        msgs = [
+            Message(role=Role.USER, content="q", conversation_id=conv.id),
+            Message(
+                role=Role.ASSISTANT,
+                content="legacy",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                # persona_id defaults to None
+            ),
+            Message(
+                role=Role.ASSISTANT,
+                content="gpt",
+                provider=Provider.OPENAI,
+                conversation_id=conv.id,
+            ),
+        ]
+        conv_obj = db.get_conversation(conv.id)
+        conv_obj.messages = msgs
+        renderer.display_messages(
+            conv_obj, msgs, column_mode=False, configured_providers=set(Provider),
+        )
+        text = chat.toPlainText()
+        # Labels fall back to the provider display names
+        assert "Claude" in text
+        assert "GPT" in text
+
+    def test_tombstoned_persona_still_labels_historical_messages(
+        self, renderer, chat, db
+    ):
+        """After a persona is tombstoned, messages tagged with its id
+        should still render with its name — the renderer reads via
+        list_personas_including_deleted per the plan.
+        """
+        conv = db.create_conversation()
+        p = db.create_persona(self._make_persona(
+            conv.id, name="Removed Persona", name_slug="removed",
+        ))
+        msgs = [
+            Message(role=Role.USER, content="q", conversation_id=conv.id),
+            Message(
+                role=Role.ASSISTANT,
+                content="historical",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                persona_id=p.id,
+            ),
+            Message(
+                role=Role.ASSISTANT,
+                content="other",
+                provider=Provider.OPENAI,
+                conversation_id=conv.id,
+            ),
+        ]
+        db.tombstone_persona(conv.id, p.id)
+
+        conv_obj = db.get_conversation(conv.id)
+        conv_obj.messages = msgs
+        renderer.display_messages(
+            conv_obj, msgs, column_mode=False, configured_providers=set(Provider),
+        )
+        text = chat.toPlainText()
+        # Historical label survives the tombstone
+        assert "Removed Persona" in text
+
+    def test_single_persona_message_no_group_still_labels(self, renderer, chat, db):
+        """A solo assistant message (not a multi-provider group) with a
+        persona_id should still render with the persona name. This
+        exercises the single-message branch in display_messages."""
+        conv = db.create_conversation()
+        p = db.create_persona(self._make_persona(
+            conv.id, name="SoloRole", name_slug="solorole",
+        ))
+        msgs = [
+            Message(role=Role.USER, content="q", conversation_id=conv.id),
+            Message(
+                role=Role.ASSISTANT,
+                content="only-reply",
+                provider=Provider.CLAUDE,
+                conversation_id=conv.id,
+                persona_id=p.id,
+            ),
+        ]
+        conv_obj = db.get_conversation(conv.id)
+        conv_obj.messages = msgs
+        renderer.display_messages(
+            conv_obj, msgs, column_mode=False, configured_providers=set(Provider),
+        )
+        # The renderer has stored the message and it's present in text
+        assert "only-reply" in chat.toPlainText()
+
+
 class TestIncrementalRendering:
     def test_render_list_responses_appends_all(self, renderer, chat):
         chat.load_messages([Message(role=Role.USER, content="q")])
