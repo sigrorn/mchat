@@ -127,6 +127,14 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE messages ADD COLUMN display_mode TEXT"
             )
+        if "pinned" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+            )
+        if "pin_target" not in msg_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN pin_target TEXT"
+            )
 
         # Strip legacy "**X's take:**\n\n" prefix from assistant messages
         # (one-time migration — these were stored with the heading before the
@@ -279,8 +287,8 @@ class Database:
     def add_message(self, msg: Message) -> Message:
         now = msg.created_at.isoformat()
         cursor = self._conn.execute(
-            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, provider, content, model, display_mode, pinned, pin_target, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 msg.conversation_id,
                 msg.role.value,
@@ -288,6 +296,8 @@ class Database:
                 msg.content,
                 msg.model,
                 msg.display_mode,
+                1 if msg.pinned else 0,
+                msg.pin_target,
                 now,
             ),
         )
@@ -306,7 +316,7 @@ class Database:
         else:
             where = "conversation_id = ? AND (hidden = 0 OR hidden IS NULL)"
         cursor = self._conn.execute(
-            f"SELECT id, conversation_id, role, provider, content, model, display_mode, created_at "
+            f"SELECT id, conversation_id, role, provider, content, model, display_mode, pinned, pin_target, created_at "
             f"FROM messages WHERE {where} ORDER BY created_at ASC",
             (conversation_id,),
         )
@@ -319,7 +329,9 @@ class Database:
                 content=row[4],
                 model=row[5] if row[5] else None,
                 display_mode=row[6],
-                created_at=datetime.fromisoformat(row[7]),
+                pinned=bool(row[7]),
+                pin_target=row[8],
+                created_at=datetime.fromisoformat(row[9]),
             )
             for row in cursor.fetchall()
         ]
@@ -341,6 +353,14 @@ class Database:
         placeholders = ",".join("?" for _ in msg_ids)
         self._conn.execute(
             f"UPDATE messages SET hidden = 1 WHERE id IN ({placeholders})", msg_ids
+        )
+        self._conn.commit()
+
+    def set_pinned(self, msg_id: int, pinned: bool, target: str | None) -> None:
+        """Set or clear the pinned state and target of a message."""
+        self._conn.execute(
+            "UPDATE messages SET pinned = ?, pin_target = ? WHERE id = ?",
+            (1 if pinned else 0, target if pinned else None, msg_id),
         )
         self._conn.commit()
 
