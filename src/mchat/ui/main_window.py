@@ -27,7 +27,6 @@ from mchat.config import Config, MAX_FONT_SIZE, MIN_FONT_SIZE, PROVIDER_META
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
-from mchat.pricing import estimate_cost, format_cost
 from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
 from mchat.providers.gemini_provider import GeminiProvider
@@ -45,6 +44,7 @@ from mchat.ui.message_renderer import (
     PROVIDER_ORDER as _PROVIDER_ORDER_FROM_RENDERER,
     strip_echoed_heading as _strip_echoed_heading,
 )
+from mchat.ui.provider_panel import ProviderPanel
 from mchat.ui.send_controller import SendController
 from mchat.ui.input_widget import InputWidget
 from mchat.ui.settings_dialog import SettingsDialog
@@ -84,11 +84,6 @@ class MainWindow(QMainWindow):
         self._current_conv: Conversation | None = None
         self._router: Router | None = None
         self._font_size = int(self._config.get("font_size") or 14)
-
-        # Per-provider UI widgets (built dynamically)
-        self._checkboxes: dict[Provider, QCheckBox] = {}
-        self._combos: dict[Provider, QComboBox] = {}
-        self._spend_labels: dict[Provider, QLabel] = {}
 
         self._init_providers()
         self._build_ui()
@@ -201,36 +196,9 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self._chat, stretch=1)
 
         # ---- Provider bar (between chat and input) ----
-        bar = QFrame()
-        bar.setStyleSheet("background-color: #f5f5f5; border-top: 1px solid #ddd;")
-        self._bar_layout = QHBoxLayout(bar)
-        self._bar_layout.setContentsMargins(16, 8, 16, 8)
-        self._bar_layout.setSpacing(8)
-
-        # Build combo + checkbox + spend label for each provider
-        providers_list = list(Provider)
-        for i, p in enumerate(providers_list):
-            if i > 0:
-                self._bar_layout.addSpacing(12)
-
-            combo = QComboBox()
-            combo.setMinimumWidth(160)
-            combo.activated.connect(lambda _, c=combo: c.hidePopup())
-            self._bar_layout.addWidget(combo)
-            self._combos[p] = combo
-
-            cb = QCheckBox()
-            cb.setToolTip(f"Include {_PROVIDER_DISPLAY[p]} in selection")
-            cb.stateChanged.connect(lambda _, pid=p: self._on_checkbox_changed(pid))
-            self._bar_layout.addWidget(cb)
-            self._checkboxes[p] = cb
-
-            label = QLabel("$0.00000")
-            self._apply_spend_label_style(label)
-            self._bar_layout.addWidget(label)
-            self._spend_labels[p] = label
-
-        self._bar_layout.addStretch()
+        self._provider_panel = ProviderPanel(self._config, self._font_size)
+        self._provider_panel.selection_changed.connect(self._on_checkbox_changed)
+        self._bar_layout = self._provider_panel.layout_ref()
 
         # Column/list mode toggle (restore from config)
         self._column_mode = bool(self._config.get("column_mode"))
@@ -251,7 +219,7 @@ class MainWindow(QMainWindow):
         self._settings_btn.clicked.connect(self._open_settings)
         self._bar_layout.addWidget(self._settings_btn)
 
-        right_layout.addWidget(bar)
+        right_layout.addWidget(self._provider_panel)
 
         # Input area + visibility matrix to its right
         input_row = QHBoxLayout()
@@ -269,103 +237,46 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(right, stretch=1)
 
-    def _set_combo_models(self, p: Provider, models: list[str]) -> None:
-        """Set a combo's model list, preserving the current selection."""
-        combo = self._combos[p]
-        meta = PROVIDER_META[p.value]
-        current = combo.currentText() or self._config.get(meta["model_key"])
-        combo.blockSignals(True)
-        combo.clear()
-        if models:
-            combo.addItems(models)
-        if current and combo.findText(current) < 0:
-            combo.insertItem(0, current)
-        if not combo.count() and current:
-            combo.addItem(current)
-        idx = combo.findText(current)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-        providers = self._router._providers if self._router else {}
-        combo.setEnabled(p in providers)
-        combo.blockSignals(False)
+    # ------------------------------------------------------------------
+    # Provider-bar delegators — the real state lives on self._provider_panel
+    # ------------------------------------------------------------------
 
-        cb = self._checkboxes[p]
-        cb.setEnabled(p in providers)
+    @property
+    def _combos(self) -> dict[Provider, "QComboBox"]:
+        return self._provider_panel.combos()
+
+    @property
+    def _checkboxes(self) -> dict[Provider, "QCheckBox"]:
+        return self._provider_panel.checkboxes()
+
+    @property
+    def _spend_labels(self) -> dict[Provider, "QLabel"]:
+        return self._provider_panel.spend_labels()
+
+    def _configured_provider_set(self) -> set[Provider]:
+        return set(self._router._providers.keys()) if self._router else set()
 
     def _populate_model_combos_fast(self) -> None:
-        """Fill combos with config defaults only — no API calls."""
-        for p in Provider:
-            meta = PROVIDER_META[p.value]
-            current = self._config.get(meta["model_key"])
-            self._set_combo_models(p, [current] if current else [])
+        self._provider_panel.populate_from_config(self._configured_provider_set())
 
     def _populate_model_combos_async(self) -> None:
-        """Fetch live model lists in a background thread, update combos when done."""
-        import concurrent.futures
-
         providers = self._router._providers if self._router else {}
-        if not providers:
-            return
-
-        def fetch_all() -> dict[Provider, list[str]]:
-            results = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                futures = {
-                    pool.submit(prov.list_models): pid
-                    for pid, prov in providers.items()
-                }
-                for future in concurrent.futures.as_completed(futures):
-                    pid = futures[future]
-                    try:
-                        results[pid] = future.result()
-                    except Exception:
-                        results[pid] = []
-            return results
-
-        from PySide6.QtCore import QThread, Signal
-
-        class _ModelFetcher(QThread):
-            done = Signal(object)
-
-            def run(self_inner):
-                self_inner.done.emit(fetch_all())
-
-        self._model_fetcher = _ModelFetcher()
-        self._model_fetcher.done.connect(self._on_models_fetched)
-        self._model_fetcher.start()
-
-    def _on_models_fetched(self, results: dict) -> None:
-        """Called on main thread when background model fetch completes."""
-        for p, models in results.items():
-            if models:
-                self._set_combo_models(p, models)
-        self._model_fetcher = None
+        self._provider_panel.populate_async(providers)
 
     def _populate_model_combos(self) -> None:
-        """Full synchronous populate — used when opening Settings."""
         providers = self._router._providers if self._router else {}
-        for p in Provider:
-            provider = providers.get(p)
-            models = provider.list_models() if provider else []
-            self._set_combo_models(p, models)
+        self._provider_panel.populate_from_providers(providers)
 
     def _sync_checkboxes_from_selection(self) -> None:
-        """Update checkboxes to reflect the router's current selection."""
         if not self._router:
             return
-        sel = set(self._router.selection)
-        for p, cb in self._checkboxes.items():
-            cb.blockSignals(True)
-            cb.setChecked(p in sel)
-            cb.blockSignals(False)
+        self._provider_panel.sync_checkboxes(set(self._router.selection))
 
     def _on_checkbox_changed(self, provider_id: Provider) -> None:
-        """Handle a checkbox toggle — update the router selection."""
         if not self._router:
             return
-        selected = [p for p, cb in self._checkboxes.items() if cb.isChecked()]
+        selected = self._provider_panel.checked_providers()
         if not selected:
-            # Don't allow empty selection — revert
             self._sync_checkboxes_from_selection()
             self._chat.add_note("Error: at least one provider must be selected")
             return
@@ -373,11 +284,6 @@ class MainWindow(QMainWindow):
         self._save_selection()
         self._update_input_placeholder()
         self._update_input_color()
-
-    def _apply_spend_label_style(self, label: QLabel) -> None:
-        label.setStyleSheet(
-            f"color: #666; font-size: {self._font_size - 1}px; padding: 0 4px;"
-        )
 
     def _apply_settings_btn_style(self) -> None:
         self._settings_btn.setStyleSheet(
@@ -389,36 +295,14 @@ class MainWindow(QMainWindow):
     def _provider_color(self, p: Provider) -> str:
         return self._config.get(PROVIDER_META[p.value]["color_key"])
 
-    def _apply_combo_provider_style(self, p: Provider) -> None:
-        color = self._provider_color(p)
-        combo = self._combos[p]
-        if combo.isEnabled():
-            combo.setStyleSheet(f"QComboBox {{ background-color: {color}; }}")
-        else:
-            combo.setStyleSheet(
-                "QComboBox { background-color: #e0e0e0; color: #999; }"
-            )
-
     def _apply_all_combo_styles(self) -> None:
-        for p in Provider:
-            self._apply_combo_provider_style(p)
+        self._provider_panel.apply_all_combo_styles()
 
     def _set_combo_waiting(self, p: Provider, waiting: bool) -> None:
-        combo = self._combos[p]
-        if waiting:
-            combo.setStyleSheet(
-                "QComboBox { border: 2px solid #e8a020; background-color: #fff8e0; "
-                "font-weight: bold; }"
-            )
-        else:
-            self._apply_combo_provider_style(p)
+        self._provider_panel.set_combo_waiting(p, waiting)
 
     def _set_combo_retrying(self, p: Provider) -> None:
-        combo = self._combos[p]
-        combo.setStyleSheet(
-            "QComboBox { border: 2px solid #d04040; background-color: #ffe0e0; "
-            "font-weight: bold; }"
-        )
+        self._provider_panel.set_combo_retrying(p)
 
     def _update_input_color(self) -> None:
         if not self._router:
@@ -435,18 +319,7 @@ class MainWindow(QMainWindow):
             spend = self._db.get_conversation_spend(self._current_conv.id)
         else:
             spend = {}
-        for p in Provider:
-            label = self._spend_labels[p]
-            entry = spend.get(p.value)
-            if entry:
-                amount, estimated = entry
-                text = format_cost(amount) if amount else "$0.00000"
-                if estimated:
-                    label.setText(f"<i>{text}</i>")
-                else:
-                    label.setText(text)
-            else:
-                label.setText("$0.00000")
+        self._provider_panel.update_spend(spend)
 
     # ------------------------------------------------------------------
     # Shortcuts
@@ -495,8 +368,7 @@ class MainWindow(QMainWindow):
         self._input.update_font_size(self._font_size)
         self._sidebar.update_font_size(self._font_size)
         self._apply_settings_btn_style()
-        for label in self._spend_labels.values():
-            self._apply_spend_label_style(label)
+        self._provider_panel.update_font_size(self._font_size)
 
     # ------------------------------------------------------------------
     # Conversations
