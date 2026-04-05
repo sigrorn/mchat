@@ -95,6 +95,19 @@ class Sidebar(QFrame):
             self._conversations[conv.id] = conv
         self._list.blockSignals(False)
 
+    def update_conversation_title(self, conv_id: int, title: str) -> None:
+        """Update a single item's displayed title in place.
+
+        Avoids a full reload+select cycle when only the title changes.
+        """
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == conv_id:
+                item.setText(title)
+                if conv_id in self._conversations:
+                    self._conversations[conv_id].title = title
+                return
+
     def select_conversation(self, conv_id: int) -> None:
         for i in range(self._list.count()):
             item = self._list.item(i)

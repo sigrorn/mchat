@@ -191,7 +191,8 @@ def _handle_rename(name: str, app) -> bool:
         return True
     app._db.update_conversation_title(app._current_conv.id, name)
     app._current_conv.title = name
-    app._load_conversations()
+    # Update the sidebar item in place — no full reload/re-render.
+    app._sidebar.update_conversation_title(app._current_conv.id, name)
     app._chat.add_note(f"renamed to '{name}'")
     return True
 

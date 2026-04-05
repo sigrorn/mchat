@@ -583,7 +583,9 @@ class MainWindow(QMainWindow):
         self._db.update_conversation_title(conv_id, new_title)
         if self._current_conv and self._current_conv.id == conv_id:
             self._current_conv.title = new_title
-        self._load_conversations()
+        # Update the sidebar item in place instead of reloading every
+        # conversation and triggering a full chat re-render.
+        self._sidebar.update_conversation_title(conv_id, new_title)
 
     def _on_save_conversation(self, conv_id: int) -> None:
         messages = self._db.get_messages(conv_id)
