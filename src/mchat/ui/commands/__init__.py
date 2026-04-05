@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-from mchat.ui.commands import history, help as _help, pins, selection
+from mchat.ui.commands import history, help as _help, personas, pins, selection
 from mchat.ui.commands.host import CommandHost
 
 __all__ = ["dispatch", "CommandHost"]
@@ -54,5 +54,15 @@ def dispatch(cmd: str, arg: str, host: CommandHost) -> bool:
         return pins.handle_unpin(arg, host)
     if cmd == "//pins":
         return pins.handle_pins(arg, host)
+
+    # Personas (Stage 2.8)
+    if cmd == "//addpersona":
+        return personas.handle_addpersona(arg, host)
+    if cmd == "//editpersona":
+        return personas.handle_editpersona(arg, host)
+    if cmd == "//removepersona":
+        return personas.handle_removepersona(arg, host)
+    if cmd == "//personas":
+        return personas.handle_personas(host)
 
     return False

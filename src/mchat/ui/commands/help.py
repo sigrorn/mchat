@@ -16,27 +16,36 @@ _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
 
 HELP_COMMANDS = (
     "Available commands:\n"
-    "  //limit <N>           — only send chat from message N onwards\n"
-    "  //limit last          — limit to the last request sent to providers\n"
-    "  //limit ALL           — remove the limit, send full chat history\n"
-    "  //pop                 — remove the last request and its responses\n"
-    "  //hide                — hide the last request+responses, copy request to input\n"
-    "  //unhide              — unhide all hidden messages\n"
-    "  //retry               — re-attempt the last failed request\n"
-    "  +<provider>           — add a provider to the current selection\n"
-    "  -<provider>           — remove a provider from the selection\n"
-    "  //select <providers>  — set target providers (e.g. //select gpt, claude)\n"
-    "  //select all          — target all configured providers\n"
-    "  //providers           — list available providers and config status\n"
-    "  //pin <target>, <instr>— pin an instruction (always sent, bypasses //limit)\n"
-    "  //unpin <N>           — remove a pin by message number\n"
-    "  //unpin ALL           — remove all pins\n"
-    "  //pins [provider]     — list pinned instructions (optionally filtered by provider)\n"
-    "  //rename <text>       — rename the current chat\n"
-    "  //columns (//cols)    — show multi-provider responses side by side\n"
-    "  //lines               — show multi-provider responses as a list (default)\n"
-    "  //help                — show this help\n"
-    "  //vacuum              — compact the database (rarely needed)"
+    "  //limit <N>                   — only send chat from message N onwards\n"
+    "  //limit last                  — limit to the last request sent to providers\n"
+    "  //limit ALL                   — remove the limit, send full chat history\n"
+    "  //pop                         — remove the last request and its responses\n"
+    "  //hide                        — hide the last request+responses\n"
+    "  //unhide                      — unhide all hidden messages\n"
+    "  //retry                       — re-attempt the last failed request\n"
+    "  +<provider>                   — add a provider to the current selection\n"
+    "  -<provider>                   — remove a provider from the selection\n"
+    "  //select <providers>          — set target providers\n"
+    "  //select all                  — target all configured providers\n"
+    "  //providers                   — list available providers and config status\n"
+    "  //pin <target>, <instr>       — pin an instruction (bypasses //limit)\n"
+    "  //unpin <N> | //unpin ALL     — remove a pin or all pins\n"
+    "  //pins [provider]             — list pinned instructions\n"
+    '  //addpersona <p> as "<n>" [inherit|new] <prompt>\n'
+    "                                — create a named persona in this chat\n"
+    '  //editpersona "<n>" <prompt>  — update a persona\'s system prompt\n'
+    '  //removepersona "<n>"         — tombstone a persona\n'
+    "  //personas                    — list personas in this chat\n"
+    "  //rename <text>               — rename the current chat\n"
+    "  //columns (//cols) / //lines  — column vs list rendering for multi-provider responses\n"
+    "  //help                        — show this help\n"
+    "  //vacuum                      — compact the database (rarely needed)\n"
+    "\n"
+    "Persona example (Italian tutor on one API key):\n"
+    '  //addpersona claude as "Partner" new Start an Italian conversation\n'
+    '  //addpersona claude as "Evaluator" new Review my replies for mistakes\n'
+    '  //addpersona claude as "Translator" new Word-level translations only\n'
+    "  partner, ciao come stai?"
 )
 
 HELP_PROVIDERS = [
