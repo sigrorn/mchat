@@ -96,31 +96,34 @@ class MessageRenderer:
                     continue
 
                 # Collect consecutive assistant messages from distinct providers
-                group: list[Message] = [msg]
+                # as (original_index, message) pairs so we never have to
+                # re-derive positions via value-based list.index().
+                group: list[tuple[int, Message]] = [(i, msg)]
                 seen_providers = {msg.provider}
                 j = i + 1
                 while j < len(messages):
                     nxt = messages[j]
                     if nxt.role != Role.ASSISTANT or nxt.provider in seen_providers:
                         break
-                    group.append(nxt)
+                    group.append((j, nxt))
                     seen_providers.add(nxt.provider)
                     j += 1
 
                 if len(group) > 1:
-                    ordered = sorted(
+                    ordered_pairs = sorted(
                         group,
-                        key=lambda m: (
-                            PROVIDER_ORDER.index(m.provider)
-                            if m.provider in PROVIDER_ORDER else 99
+                        key=lambda pair: (
+                            PROVIDER_ORDER.index(pair[1].provider)
+                            if pair[1].provider in PROVIDER_ORDER else 99
                         ),
                     )
-                    stored_mode = group[0].display_mode
+                    ordered = [m for _idx, m in ordered_pairs]
+                    stored_mode = group[0][1].display_mode
                     use_cols = (
                         stored_mode == "cols" if stored_mode else column_mode
                     )
                     if use_cols:
-                        group_indices = [messages.index(m) for m in ordered]
+                        group_indices = [idx for idx, _m in ordered_pairs]
                         self._render_column_group(ordered, group_indices)
                     else:
                         self._render_list_group(ordered)
