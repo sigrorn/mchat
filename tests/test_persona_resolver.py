@@ -189,6 +189,59 @@ class TestAllAndFlipped:
         assert flipped_ids == full - {all_claude.persona_id}
 
 
+class TestAllFlippedNoSyntheticDefaults:
+    """#94 — all/flipped must only include explicit personas from the
+    conversation, not synthetic defaults for unconfigured providers."""
+
+    def test_all_with_three_personas_returns_only_those_three(
+        self, resolver, db,
+    ):
+        """all, with Partner(claude), Checker(openai), Translator(mistral)
+        should return exactly 3 targets — not 5 (no Gemini/Perplexity)."""
+        conv = db.create_conversation()
+        p1 = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner", Provider.CLAUDE)
+        )
+        p2 = db.create_persona(
+            _make_persona(conv.id, "Checker", "checker", Provider.OPENAI)
+        )
+        p3 = db.create_persona(
+            _make_persona(conv.id, "Translator", "translator", Provider.MISTRAL)
+        )
+        targets, _ = resolver.resolve("all, hello", conv.id, db)
+        assert len(targets) == 3
+        persona_ids = {t.persona_id for t in targets}
+        assert persona_ids == {p1.id, p2.id, p3.id}
+
+    def test_flipped_with_personas_no_synthetic_defaults(
+        self, resolver, db,
+    ):
+        """flipped, with 1 of 3 personas selected should return the
+        other 2 — not 2 + synthetic defaults for uncovered providers."""
+        conv = db.create_conversation()
+        p1 = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner", Provider.CLAUDE)
+        )
+        p2 = db.create_persona(
+            _make_persona(conv.id, "Checker", "checker", Provider.OPENAI)
+        )
+        p3 = db.create_persona(
+            _make_persona(conv.id, "Translator", "translator", Provider.MISTRAL)
+        )
+        target1 = PersonaTarget(persona_id=p1.id, provider=Provider.CLAUDE)
+        resolver._router._selection_state.set([target1])
+        flipped, _ = resolver.resolve("flipped, go", conv.id, db)
+        assert len(flipped) == 2
+        flipped_ids = {t.persona_id for t in flipped}
+        assert flipped_ids == {p2.id, p3.id}
+
+    def test_all_with_zero_personas_returns_empty(self, resolver, db):
+        """all, with no personas in the conversation returns empty."""
+        conv = db.create_conversation()
+        targets, _ = resolver.resolve("all, hello", conv.id, db)
+        assert targets == []
+
+
 class TestFlippedPersonaLevel:
     """#84 — flipped must compare by persona_id, not provider.
     Two Claude personas selected: flipping should flip at persona
