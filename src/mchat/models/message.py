@@ -21,6 +21,7 @@ class Provider(Enum):
     OPENAI = "openai"
     GEMINI = "gemini"
     PERPLEXITY = "perplexity"
+    MISTRAL = "mistral"
 
 
 @dataclass

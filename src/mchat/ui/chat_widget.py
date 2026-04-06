@@ -33,6 +33,7 @@ COLOR_CLAUDE = "#b0b0b0"
 COLOR_OPENAI = "#e8e8e8"
 COLOR_GEMINI = "#c8d8e8"
 COLOR_PERPLEXITY = "#d8c8e8"
+COLOR_MISTRAL = "#ffe0c8"
 
 # Document-level stylesheet applied to rendered HTML
 _DOC_CSS = """
@@ -56,6 +57,7 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         color_openai: str = COLOR_OPENAI,
         color_gemini: str = COLOR_GEMINI,
         color_perplexity: str = COLOR_PERPLEXITY,
+        color_mistral: str = COLOR_MISTRAL,
         exclude_shade_mode: str = "darken",
         exclude_shade_amount: int = 20,
         parent=None,
@@ -69,6 +71,7 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
             "openai": color_openai,
             "gemini": color_gemini,
             "perplexity": color_perplexity,
+            "mistral": color_mistral,
         }
         self._exclude_shade_mode = exclude_shade_mode
         self._exclude_shade_amount = exclude_shade_amount

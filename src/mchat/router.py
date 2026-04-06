@@ -12,7 +12,7 @@ from mchat.providers.base import BaseProvider
 
 # Single-word prefix pattern (used for iterative parsing)
 _WORD_PREFIX = re.compile(
-    r"^(claude|gpt|gemini|perplexity|pplx|all|flipped)\s*[,:]\s*",
+    r"^(claude|gpt|gemini|perplexity|pplx|mistral|all|flipped)\s*[,:]\s*",
     re.IGNORECASE,
 )
 
@@ -25,6 +25,7 @@ PREFIX_TO_PROVIDER = {
     "gemini": Provider.GEMINI,
     "perplexity": Provider.PERPLEXITY,
     "pplx": Provider.PERPLEXITY,
+    "mistral": Provider.MISTRAL,
 }
 
 # Special prefixes that are not combinable with others

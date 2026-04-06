@@ -16,17 +16,20 @@ DEFAULTS = {
     "openai_api_key": "",
     "gemini_api_key": "",
     "perplexity_api_key": "",
+    "mistral_api_key": "",
     "default_provider": "claude",
     "claude_model": "claude-sonnet-4-20250514",
     "openai_model": "gpt-4.1",
     "gemini_model": "gemini-2.5-flash",
     "perplexity_model": "sonar",
+    "mistral_model": "mistral-large-latest",
     "font_size": 14,
     "color_user": "#d4d4d4",
     "color_claude": "#b0b0b0",
     "color_openai": "#e8e8e8",
     "color_gemini": "#c8d8e8",
     "color_perplexity": "#d8c8e8",
+    "color_mistral": "#ffe0c8",
     "column_mode": False,
     "exclude_shade_mode": "darken",  # "darken" or "lighten"
     "exclude_shade_amount": 20,  # percentage (0-100)
@@ -35,7 +38,7 @@ DEFAULTS = {
         "Be aware, I'm addressing you from a chat client that is connected and talking to multiple providers "
         "-- if a block begins with \"GPT's take\", it indicates that what you're seeing is a response from one "
         "of OpenAI's GPT models, \"Claude's take\" for answers from Anthropic models, \"Gemini's take\" one of "
-        "Google's Gemini models, \"Perplexity's take\" for Perplexity models.\n"
+        "Google's Gemini models, \"Perplexity's take\" for Perplexity models, \"Mistral's take\" for Mistral models.\n"
         "(If I refer to 'all of you', that means all of the AI models that responded before)\n\n"
         "So, when I ask whether something is agreeable to all of you, only answer whether it's agreeable "
         "from your own perspective."
@@ -44,6 +47,7 @@ DEFAULTS = {
     "system_prompt_openai": "",
     "system_prompt_gemini": "",
     "system_prompt_perplexity": "",
+    "system_prompt_mistral": "",
 }
 
 # Per-provider metadata: (api_key_config, model_config, color_config, display_name)
@@ -75,6 +79,13 @@ PROVIDER_META: dict[str, dict] = {
         "color_key": "color_perplexity",
         "system_prompt_key": "system_prompt_perplexity",
         "display": "Perplexity",
+    },
+    "mistral": {
+        "api_key": "mistral_api_key",
+        "model_key": "mistral_model",
+        "color_key": "color_mistral",
+        "system_prompt_key": "system_prompt_mistral",
+        "display": "Mistral",
     },
 }
 

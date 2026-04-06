@@ -30,6 +30,7 @@ PROVIDER_ORDER: list[Provider] = [
     Provider.OPENAI,
     Provider.GEMINI,
     Provider.PERPLEXITY,
+    Provider.MISTRAL,
 ]
 
 PROVIDER_DISPLAY: dict[Provider, str] = {
@@ -76,7 +77,7 @@ def resolve_message_label(
 
 # Patterns the LLMs may echo at the start of their response.
 _TAKE_ECHO_RE = re.compile(
-    r"^\*{0,2}(?:Claude|GPT|Gemini|Perplexity)(?:'s|'s)\s+take:?\*{0,2}\s*\n*",
+    r"^\*{0,2}(?:Claude|GPT|Gemini|Perplexity|Mistral)(?:'s|'s)\s+take:?\*{0,2}\s*\n*",
     re.IGNORECASE,
 )
 

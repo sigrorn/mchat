@@ -31,6 +31,7 @@ from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
 from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
+from mchat.providers.mistral_provider import MistralProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget
@@ -218,6 +219,13 @@ class MainWindow(QMainWindow):
                 default_model=self._config.get("perplexity_model"),
             )
 
+        mistral_key = self._config.get("mistral_api_key")
+        if mistral_key:
+            providers[Provider.MISTRAL] = MistralProvider(
+                api_key=mistral_key,
+                default_model=self._config.get("mistral_model"),
+            )
+
         try:
             default = Provider(self._config.get("default_provider"))
         except ValueError:
@@ -271,6 +279,7 @@ class MainWindow(QMainWindow):
             color_openai=self._config.get("color_openai"),
             color_gemini=self._config.get("color_gemini"),
             color_perplexity=self._config.get("color_perplexity"),
+            color_mistral=self._config.get("color_mistral"),
             exclude_shade_mode=str(self._config.get("exclude_shade_mode") or "darken"),
             exclude_shade_amount=int(self._config.get("exclude_shade_amount") or 20),
         )

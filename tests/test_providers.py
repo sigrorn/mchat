@@ -75,7 +75,7 @@ class TestMistralProvider:
         # Can't instantiate without a real key, but we can check the class
         # provides provider_id == Provider.MISTRAL
         from unittest.mock import patch, MagicMock
-        with patch("mchat.providers.mistral_provider.Mistral") as mock_cls:
+        with patch("mistralai.client.Mistral") as mock_cls:
             mock_cls.return_value = MagicMock()
             p = MistralProvider(api_key="fake", default_model="mistral-large-latest")
             assert p.provider_id == Provider.MISTRAL
