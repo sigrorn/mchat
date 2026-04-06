@@ -640,45 +640,93 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _handle_selection_adjust(self, text: str) -> bool:
-        """Handle +provider / -provider selection adjustments."""
+        """Handle +name / -name selection adjustments.
+
+        Stage 4.3: resolves persona names first, then falls back to
+        provider shorthands. Provider shorthands expand to all active
+        personas on that provider (or the synthetic default if none).
+        """
+        from mchat.models.persona import slugify_persona_name
         from mchat.router import PREFIX_TO_PROVIDER
+        from mchat.ui.persona_target import PersonaTarget, synthetic_default
+
         op = text[0]  # '+' or '-'
         name = text[1:].strip().lower()
-        provider = PREFIX_TO_PROVIDER.get(name)
-        if provider is None:
-            return False  # not a provider name — let normal parsing handle it
 
         if not self._router:
             self._chat.add_note("Error: no providers configured")
             return True
 
-        configured = set(self._router._providers.keys())
-        if provider not in configured:
-            self._chat.add_note(f"Error: {_PROVIDER_DISPLAY[provider]} has no API key")
-            return True
+        # Build the targets to add/remove
+        targets_to_adjust: list[PersonaTarget] = []
+        display_name = name
 
-        current = list(self._router.selection)
+        # Try persona name first (if a conversation is active)
+        if self._current_conv:
+            try:
+                slug = slugify_persona_name(name)
+            except ValueError:
+                slug = ""
+            if slug:
+                personas = self._db.list_personas(self._current_conv.id)
+                matched = [p for p in personas if p.name_slug == slug]
+                if matched:
+                    for p in matched:
+                        targets_to_adjust.append(
+                            PersonaTarget(persona_id=p.id, provider=p.provider)
+                        )
+                    display_name = matched[0].name
+
+        # Fall back to provider shorthand
+        if not targets_to_adjust:
+            provider = PREFIX_TO_PROVIDER.get(name)
+            if provider is None:
+                return False  # not a provider or persona name
+
+            configured = set(self._router._providers.keys())
+            if provider not in configured:
+                self._chat.add_note(f"Error: {_PROVIDER_DISPLAY[provider]} has no API key")
+                return True
+
+            display_name = _PROVIDER_DISPLAY[provider]
+            # Expand to all active personas on this provider, or synthetic default
+            if self._current_conv:
+                personas = self._db.list_personas(self._current_conv.id)
+                provider_personas = [p for p in personas if p.provider == provider]
+                if provider_personas:
+                    for p in provider_personas:
+                        targets_to_adjust.append(
+                            PersonaTarget(persona_id=p.id, provider=p.provider)
+                        )
+                else:
+                    targets_to_adjust.append(synthetic_default(provider))
+            else:
+                targets_to_adjust.append(synthetic_default(provider))
+
+        # Apply the adjustment to the current selection
+        current = list(self._selection_state.selection)
 
         if op == "+":
-            if provider not in current:
-                current.append(provider)
-                self._router.set_selection(current)
-            names = ", ".join(_PROVIDER_DISPLAY[p] for p in self._router.selection)
-            self._chat.add_note(f"selected: {names}")
+            changed = False
+            for t in targets_to_adjust:
+                if t not in current:
+                    current.append(t)
+                    changed = True
+            if changed:
+                self._selection_state.set(current)
+            self._chat.add_note(f"selected: +{display_name}")
         else:  # '-'
-            if provider not in current:
-                self._chat.add_note(f"{_PROVIDER_DISPLAY[provider]} is not in current selection")
+            to_remove = set(targets_to_adjust)
+            new_selection = [t for t in current if t not in to_remove]
+            if len(new_selection) == len(current):
+                self._chat.add_note(f"{display_name} is not in current selection")
                 return True
-            if len(current) <= 1:
-                self._chat.add_note("Error: cannot remove the last provider from selection")
+            if not new_selection:
+                self._chat.add_note("Error: cannot remove the last target from selection")
                 return True
-            current.remove(provider)
-            self._router.set_selection(current)
-            names = ", ".join(_PROVIDER_DISPLAY[p] for p in self._router.selection)
-            self._chat.add_note(f"selected: {names}")
+            self._selection_state.set(new_selection)
+            self._chat.add_note(f"selected: -{display_name}")
 
-        # set_selection fires ProviderSelectionState.selection_changed
-        # which drives sync/placeholder/color via the fan-out handler.
         self._save_selection()
         return True
 

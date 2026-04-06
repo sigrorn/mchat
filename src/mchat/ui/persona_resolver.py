@@ -123,12 +123,23 @@ class PersonaResolver:
                 remaining = remaining[match.end():]
                 continue
 
-            # Provider shorthand?
+            # Provider shorthand? If the conversation has explicit personas
+            # on this provider, resolve to all of them; otherwise fall back
+            # to the synthetic default (Stage 4.3).
             if token in PREFIX_TO_PROVIDER:
                 provider = PREFIX_TO_PROVIDER[token]
-                target = synthetic_default(provider)
-                if target not in collected:
-                    collected.append(target)
+                provider_personas = [
+                    p for p in slug_map.values() if p.provider == provider
+                ]
+                if provider_personas:
+                    for p in provider_personas:
+                        t = PersonaTarget(persona_id=p.id, provider=p.provider)
+                        if t not in collected:
+                            collected.append(t)
+                else:
+                    target = synthetic_default(provider)
+                    if target not in collected:
+                        collected.append(target)
                 remaining = remaining[match.end():]
                 continue
 

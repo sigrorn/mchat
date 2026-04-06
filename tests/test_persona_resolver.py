@@ -107,20 +107,20 @@ class TestExplicitPersonaName:
 
 
 class TestProviderShorthandSyntheticDefault:
-    def test_claude_shorthand_always_resolves_to_synthetic_default(
+    def test_claude_shorthand_resolves_to_explicit_personas(
         self, resolver, db,
     ):
-        """D1: claude, always resolves to the synthetic default,
-        even when explicit Claude personas exist. Never ambiguous.
-        """
+        """Stage 4.3: claude, with explicit Claude personas resolves
+        to all of them (not the synthetic default)."""
         conv = db.create_conversation()
-        # Create two explicit Claude personas
-        db.create_persona(_make_persona(conv.id, "Partner", "partner"))
-        db.create_persona(_make_persona(conv.id, "Evaluator", "evaluator"))
+        partner = db.create_persona(_make_persona(conv.id, "Partner", "partner"))
+        evaluator = db.create_persona(_make_persona(conv.id, "Evaluator", "evaluator"))
 
         targets, cleaned = resolver.resolve("claude, hi", conv.id, db)
-        assert len(targets) == 1
-        assert targets[0] == synthetic_default(Provider.CLAUDE)
+        assert len(targets) == 2
+        persona_ids = {t.persona_id for t in targets}
+        assert partner.id in persona_ids
+        assert evaluator.id in persona_ids
         assert cleaned == "hi"
 
     def test_legacy_conversation_with_no_personas_uses_synthetic(
