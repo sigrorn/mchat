@@ -162,11 +162,13 @@ class PersonaResolver:
             self._write_selection(collected)
             return collected, remaining.strip()
 
-        # No prefix at all — use current selection as provider synthetic
-        # defaults. (The current selection is stored as Providers for
-        # backwards compatibility; Stage 2.4 migrates it to PersonaTargets.)
-        current_providers = self._router.selection
-        targets = [synthetic_default(p) for p in current_providers]
+        # No prefix at all — use current selection directly. The
+        # SelectionState holds the real PersonaTargets (explicit personas
+        # or synthetic defaults), not the provider-collapsed view.
+        if self._router._selection_state is not None:
+            targets = list(self._router._selection_state.selection)
+        else:
+            targets = [synthetic_default(p) for p in self._router.selection]
         return targets, text
 
     def _expand_special(
