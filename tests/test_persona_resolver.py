@@ -141,52 +141,40 @@ class TestProviderShorthandSyntheticDefault:
 
 
 class TestAllAndFlipped:
-    def test_all_expands_to_every_configured_provider(self, resolver, db):
-        """`all,` with no explicit personas expands to every configured
-        synthetic default — matching today's behaviour."""
+    def test_all_with_no_personas_returns_empty(self, resolver, db):
+        """Stage 4.4: `all,` with no explicit personas returns empty."""
         conv = db.create_conversation()
         targets, cleaned = resolver.resolve("all, hi everyone", conv.id, db)
-        provider_set = {t.provider for t in targets}
-        assert provider_set == set(Provider)
+        assert targets == []
         assert cleaned == "hi everyone"
 
-    def test_all_includes_explicit_personas_and_synthetic_defaults(
-        self, resolver, db,
-    ):
-        """`all,` includes every active persona plus synthetic defaults
-        for providers that also have configured slots. (The exact
-        expansion rule per D1: every active persona plus synthetic
-        defaults for providers with none.)"""
+    def test_all_returns_only_explicit_personas(self, resolver, db):
+        """Stage 4.4: `all,` includes only the conversation's active
+        personas — no synthetic defaults for uncovered providers."""
         conv = db.create_conversation()
-        # Explicit Claude persona — other providers have no explicit personas
         partner = db.create_persona(
             _make_persona(conv.id, "Partner", "partner")
         )
         targets, cleaned = resolver.resolve("all, hi", conv.id, db)
-        persona_ids = {t.persona_id for t in targets}
-        # Includes the explicit persona
-        assert partner.id in persona_ids
-        # Plus synthetic defaults for the other three providers
-        assert "openai" in persona_ids
-        assert "gemini" in persona_ids
-        assert "perplexity" in persona_ids
+        assert len(targets) == 1
+        assert targets[0].persona_id == partner.id
 
-    def test_flipped_complements_current_selection(self, resolver, db):
-        """`flipped,` returns the complement of the current selection
-        over active personas + synthetic defaults."""
+    def test_flipped_complements_over_explicit_personas(self, resolver, db):
+        """Stage 4.4: `flipped,` returns the complement of the current
+        selection over explicit personas only."""
         conv = db.create_conversation()
-        targets, _ = resolver.resolve("all, x", conv.id, db)
-        full = {t.persona_id for t in targets}
+        p1 = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner", Provider.CLAUDE)
+        )
+        p2 = db.create_persona(
+            _make_persona(conv.id, "Checker", "checker", Provider.OPENAI)
+        )
+        t1 = PersonaTarget(persona_id=p1.id, provider=Provider.CLAUDE)
+        resolver._router._selection_state.set([t1])
 
-        # Set selection to just Claude synthetic default
-        all_claude = synthetic_default(Provider.CLAUDE)
-        resolver._router._selection_state.set([all_claude])
-
-        flipped, cleaned = resolver.resolve("flipped, y", conv.id, db)
-        flipped_ids = {t.persona_id for t in flipped}
-        assert all_claude.persona_id not in flipped_ids
-        # Should be everything else from the full set
-        assert flipped_ids == full - {all_claude.persona_id}
+        flipped, _ = resolver.resolve("flipped, y", conv.id, db)
+        assert len(flipped) == 1
+        assert flipped[0].persona_id == p2.id
 
 
 class TestAllFlippedNoSyntheticDefaults:

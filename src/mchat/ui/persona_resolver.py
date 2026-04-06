@@ -175,27 +175,20 @@ class PersonaResolver:
         self, special: str, conv_id: int, db: Database,
     ) -> list[PersonaTarget]:
         """Expand an ``all,`` or ``flipped,`` prefix into a list of
-        PersonaTargets over the universe of (active personas +
-        synthetic defaults for providers with no explicit personas).
+        PersonaTargets over the conversation's active personas only.
+        No synthetic defaults for providers without explicit personas.
         """
         active = db.list_personas(conv_id)
-        active_providers = {p.provider for p in active}
 
-        # Build the "universe" — all active personas plus synthetic
-        # defaults for providers not covered by explicit personas.
+        # Build the universe from explicit personas only, ordered by
+        # Provider enum declaration order for stability.
         universe: list[PersonaTarget] = []
-        # Preserve a stable order: iterate Provider enum in declaration order.
         for provider in Provider:
-            # Add any explicit personas for this provider first (sort
-            # by sort_order then id, matching list_personas).
-            provider_personas = [p for p in active if p.provider == provider]
-            for p in provider_personas:
-                universe.append(
-                    PersonaTarget(persona_id=p.id, provider=p.provider)
-                )
-            # If no explicit personas for this provider, add the synthetic default.
-            if provider not in active_providers:
-                universe.append(synthetic_default(provider))
+            for p in active:
+                if p.provider == provider:
+                    universe.append(
+                        PersonaTarget(persona_id=p.id, provider=p.provider)
+                    )
 
         if special == ALL:
             return universe

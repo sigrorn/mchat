@@ -261,12 +261,15 @@ class TestPrefixOnlySelection:
         # but the DB would have a user message).
         assert main_window._send._multi_workers == {}
 
-    def test_all_prefix_selects_every_configured_provider(self, main_window):
+    def test_all_prefix_with_no_personas_stays_unchanged(self, main_window):
+        """Stage 4.4: all, with no explicit personas in the conversation
+        returns empty — selection stays unchanged."""
         from mchat.models.message import Provider
         main_window._router.set_selection([Provider.CLAUDE])
         main_window._on_message_submitted("all,")
-        # All four fake providers should now be selected
-        assert set(main_window._router.selection) == set(Provider)
+        # No personas in this conversation → all, resolves to empty →
+        # selection stays as it was (prefix-only path doesn't change
+        # selection when targets are empty)
         assert main_window._input.isEnabled() is True
 
     def test_prefix_only_does_not_save_user_message(self, main_window):
