@@ -301,16 +301,16 @@ class SendController:
         original_msg = edit_state["original_msg"]
 
         if not text:
-            # Empty submit → remove the message, clear edit state
+            # Empty submit → remove the message, continue replay chain
             if original_msg.id is not None:
                 svc.db.delete_messages([original_msg.id])
-            host._edit_state = None
             host._chat.add_note("message removed")
-            # Reload conversation
             conv = svc.session.current
             if conv:
                 conv.messages = svc.db.get_messages(conv.id)
                 host._display_messages(conv.messages)
+            # Advance to the next queued message (don't break the chain)
+            self._advance_edit_replay()
             return
 
         conv = svc.session.current
