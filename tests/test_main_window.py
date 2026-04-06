@@ -778,6 +778,44 @@ class TestDialogCreatedPersonasPinsAndSelection:
         assert Provider.OPENAI in providers
 
 
+    def test_existing_persona_missing_pins_gets_backfilled(
+        self, main_window, monkeypatch,
+    ):
+        """Personas created before the pin code existed should get
+        their pins backfilled when the dialog is opened."""
+        from mchat.models.persona import Persona, generate_persona_id
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Directly insert a persona via DB (simulating pre-existing persona
+        # that was created before pin logic existed — no pins)
+        p = Persona(
+            conversation_id=conv_id,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name="OldPartner",
+            name_slug="oldpartner",
+            system_prompt_override="Be helpful",
+        )
+        main_window._db.create_persona(p)
+
+        # No pins exist yet
+        msgs = main_window._db.get_messages(conv_id)
+        assert not any(m.pinned for m in msgs)
+
+        # Open the dialog (no-op, just closes) — should backfill pins
+        import mchat.ui.persona_dialog as pd_mod
+        monkeypatch.setattr(pd_mod.PersonaDialog, "exec", lambda self: 0)
+        main_window._on_personas_requested(conv_id)
+
+        msgs = main_window._db.get_messages(conv_id)
+        pinned = [m for m in msgs if m.pinned]
+        assert len(pinned) >= 2
+        assert any("use OldPartner as your name" in m.content for m in pinned)
+        assert any("Added persona" in m.content and "OldPartner" in m.content
+                    for m in pinned)
+
+
 class TestPersonasButton:
     """#93 follow-up — a Personas button in the bar opens the dialog."""
 

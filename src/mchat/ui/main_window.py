@@ -579,15 +579,12 @@ class MainWindow(QMainWindow):
     def _on_personas_requested(self, conv_id: int) -> None:
         """Open the PersonaDialog for the given conversation.
 
-        After the dialog closes, diff the persona list to detect newly
-        created personas and generate the same pinned instructions +
-        selection updates that the command-line //addpersona path does.
+        After the dialog closes, ensure every active persona has its
+        pinned instructions (name identity + setup note) and is in the
+        selection. Handles both newly created personas and existing
+        ones that were created before this code existed.
         """
         from mchat.ui.persona_dialog import PersonaDialog
-        from mchat.ui.persona_target import PersonaTarget
-
-        # Snapshot before
-        before_ids = {p.id for p in self._db.list_personas(conv_id)}
 
         dialog = PersonaDialog(
             self._db, self._config, conv_id, parent=self,
@@ -595,14 +592,40 @@ class MainWindow(QMainWindow):
         )
         dialog.exec()
 
-        # Diff: find newly created personas
-        after = self._db.list_personas(conv_id)
-        new_personas = [p for p in after if p.id not in before_ids]
+        conv = self._current_conv
+        if conv and conv.id == conv_id:
+            self._ensure_persona_pins(conv_id)
+            self._display_messages(conv.messages)
+            self._sync_matrix_panel()
+
+    def _ensure_persona_pins(self, conv_id: int) -> None:
+        """For every active persona in the conversation, create pinned
+        instruction messages if they don't already exist. Also ensures
+        each persona is in the current selection."""
+        from mchat.ui.persona_target import PersonaTarget
 
         conv = self._current_conv
-        if conv and conv.id == conv_id and new_personas:
-            for persona in new_personas:
-                # Pinned name instruction
+        if conv is None or conv.id != conv_id:
+            return
+
+        personas = self._db.list_personas(conv_id)
+        if not personas:
+            return
+
+        # Scan existing pinned messages to see which personas already
+        # have their pins. We check for the name instruction pattern.
+        existing_pins = {
+            m.content
+            for m in conv.messages
+            if m.pinned
+        }
+
+        for persona in personas:
+            name_marker = f"use {persona.name} as your name"
+            has_name_pin = any(name_marker in pin for pin in existing_pins)
+
+            if not has_name_pin:
+                # Create pinned name instruction
                 name_instruction = Message(
                     role=Role.USER,
                     content=(
@@ -619,9 +642,10 @@ class MainWindow(QMainWindow):
                 self._db.add_message(name_instruction)
                 conv.messages.append(name_instruction)
 
-                # Pinned setup note
+                # Create pinned setup note
                 mode_label = (
-                    "inherit" if persona.created_at_message_index is None else "new"
+                    "inherit" if persona.created_at_message_index is None
+                    else "new"
                 )
                 prompt_text = persona.system_prompt_override or ""
                 note_text = (
@@ -639,19 +663,14 @@ class MainWindow(QMainWindow):
                 self._db.add_message(note_msg)
                 conv.messages.append(note_msg)
 
-                # Add to selection
-                target = PersonaTarget(
-                    persona_id=persona.id, provider=persona.provider,
-                )
-                current = list(self._selection_state.selection)
-                if target not in current:
-                    current.append(target)
+            # Ensure persona is in the selection
+            target = PersonaTarget(
+                persona_id=persona.id, provider=persona.provider,
+            )
+            current = list(self._selection_state.selection)
+            if target not in current:
+                current.append(target)
                 self._selection_state.set(current)
-
-        # Re-render so colour / label / cutoff / new pins take effect.
-        if conv and conv.id == conv_id:
-            self._display_messages(conv.messages)
-            self._sync_matrix_panel()
 
     # ------------------------------------------------------------------
     # Messaging
