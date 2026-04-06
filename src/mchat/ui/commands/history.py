@@ -131,7 +131,9 @@ def handle_hide(host: CommandHost) -> bool:
     del host._current_conv.messages[last_user_idx:]
     host._display_messages(host._current_conv.messages)
     host._chat.add_note(f"hidden {count} message(s)")
-    host._input._text_edit.setPlainText(user_text)
+    # Deferred: _submit() clears the input after command handler returns
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(user_text))
     return True
 
 
@@ -302,9 +304,16 @@ def handle_edit(arg: str, host: CommandHost) -> bool:
         "replay_index": 0,
     }
 
-    # Pre-fill the input with the original message text
-    host._input._text_edit.setPlainText(target_msg.content)
-    host._input._edit_mode = True
+    # Pre-fill the input with the original message text. Deferred via
+    # QTimer.singleShot because _submit() clears the input after the
+    # command handler returns — we need the fill to happen after that.
+    from PySide6.QtCore import QTimer
+
+    def _fill_input():
+        host._input._text_edit.setPlainText(target_msg.content)
+        host._input._edit_mode = True
+
+    QTimer.singleShot(0, _fill_input)
     host._chat.add_note(
         f"editing message {target_idx + 1} → {target_msg.addressed_to or 'current selection'}"
         f" — submit to re-send, empty to remove"

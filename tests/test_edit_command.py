@@ -76,18 +76,20 @@ class TestEditParsing:
 
         from mchat.ui.commands.history import handle_edit
         handle_edit("", host)
-        # Should have set the input text to "second question"
-        host._input._text_edit.setPlainText.assert_called_with("second question")
+        # Edit state should target the last user message
+        assert host._edit_state is not None
+        assert host._edit_state["original_msg"].content == "second question"
 
     def test_edit_absolute_number(self, db):
         host = _build_host(db)
-        m1 = _add_user_msg(db, host._current_conv, "first")
+        _add_user_msg(db, host._current_conv, "first")
         _add_asst_msg(db, host._current_conv, "reply")
         _add_user_msg(db, host._current_conv, "second")
 
         from mchat.ui.commands.history import handle_edit
         handle_edit("1", host)
-        host._input._text_edit.setPlainText.assert_called_with("first")
+        assert host._edit_state is not None
+        assert host._edit_state["original_msg"].content == "first"
 
     def test_edit_negative_offset(self, db):
         """//edit -2 loads the 2nd-last user message."""
@@ -100,7 +102,8 @@ class TestEditParsing:
 
         from mchat.ui.commands.history import handle_edit
         handle_edit("-2", host)
-        host._input._text_edit.setPlainText.assert_called_with("second")
+        assert host._edit_state is not None
+        assert host._edit_state["original_msg"].content == "second"
 
     def test_edit_negative_too_large_errors(self, db):
         """//edit -5 with only 2 user messages → error."""
