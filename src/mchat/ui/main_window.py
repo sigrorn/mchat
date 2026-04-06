@@ -724,7 +724,10 @@ class MainWindow(QMainWindow):
         cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
         from mchat.ui.commands import dispatch
-        return dispatch(cmd, arg, self)
+        handled = dispatch(cmd, arg, self)
+        if not handled:
+            self._chat.add_note(f"Unknown command: {cmd} — type //help for a list")
+        return True  # always consume // input, even if unrecognized
 
     def _toggle_column_mode(self) -> None:
         self._column_mode = not self._column_mode

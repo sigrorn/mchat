@@ -167,6 +167,15 @@ class SendController:
             host._handle_command(text)
             return
 
+        # Single-/ typo guard: /command looks like a mistyped //command
+        if text.strip().startswith("/") and not text.strip().startswith("//"):
+            word = text.strip().split()[0] if text.strip() else ""
+            if len(word) > 1 and word[1:].isalpha():
+                host._chat.add_note(
+                    f"Did you mean //{word[1:]}? Commands use // prefix"
+                )
+                return
+
         # +provider / -provider selection adjustment
         stripped = text.strip()
         if len(stripped) > 1 and stripped[0] in ("+", "-"):
@@ -292,13 +301,22 @@ class SendController:
     def _handle_edit_submit(self, text: str, edit_state: dict) -> None:
         """Handle a submit while in edit mode (set by //edit).
 
-        Empty text → remove the original message and stop.
+        Empty text → remove the original message, continue replay.
+        // command → exit edit mode, dispatch as command.
         Non-empty → send to the original recipients, then queue
         subsequent user messages for review.
         """
         host = self._host
         svc = self._services
         original_msg = edit_state["original_msg"]
+
+        # If the user typed a // command while editing, exit edit mode
+        # and dispatch it normally instead of sending it as a message.
+        if text.strip().startswith("//"):
+            host._edit_state = None
+            host._input._edit_mode = False
+            host._handle_command(text)
+            return
 
         if not text:
             # Empty submit → remove the message, continue replay chain
