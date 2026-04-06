@@ -572,7 +572,10 @@ class MainWindow(QMainWindow):
         colour override changes take immediate effect.
         """
         from mchat.ui.persona_dialog import PersonaDialog
-        dialog = PersonaDialog(self._db, self._config, conv_id, parent=self)
+        dialog = PersonaDialog(
+            self._db, self._config, conv_id, parent=self,
+            models_cache=self._model_catalog.all(),
+        )
         dialog.exec()
         # Any persona change should trigger a re-render so the new
         # colour / label / cutoff takes effect. _display_messages

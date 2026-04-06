@@ -60,17 +60,21 @@ class PersonaDialog(QDialog):
     simulating clicks, which keeps them fast and stable.
     """
 
+    _MODEL_DEFAULT_LABEL = "Use provider default"
+
     def __init__(
         self,
         db: Database,
         config: Config,
         conversation_id: int,
         parent: QWidget | None = None,
+        models_cache: dict[Provider, list[str]] | None = None,
     ) -> None:
         super().__init__(parent)
         self._db = db
         self._config = config
         self._conv_id = conversation_id
+        self._models_cache: dict[Provider, list[str]] = models_cache or {}
         self.setWindowTitle("Personas")
         self.setMinimumSize(700, 450)
         self._build_ui()
@@ -199,12 +203,10 @@ class PersonaDialog(QDialog):
         self._prompt_effective.setWordWrap(True)
         form.addRow("", self._prompt_effective)
 
-        # Model override + effective-value label
-        self._model_edit = QLineEdit()
-        self._model_edit.setPlaceholderText(
-            "(leave blank to inherit the global provider model)"
-        )
-        form.addRow("Model override:", self._model_edit)
+        # Model override combo + effective-value label
+        self._model_combo = QComboBox()
+        self._model_combo.setEditable(False)
+        form.addRow("Model:", self._model_combo)
         self._model_effective = QLabel()
         self._model_effective.setStyleSheet("color: #888; font-style: italic;")
         form.addRow("", self._model_effective)
@@ -287,11 +289,34 @@ class PersonaDialog(QDialog):
         if not enabled:
             self._name_edit.clear()
             self._prompt_edit.clear()
-            self._model_edit.clear()
+            self._model_combo.clear()
             self._color_edit.clear()
             self._prompt_effective.clear()
             self._model_effective.clear()
             self._color_effective.clear()
+
+    def _populate_model_combo(
+        self, provider: Provider, current_override: str | None,
+    ) -> None:
+        """Fill the model combo for the given provider. First item is
+        always 'Use provider default'; remaining items come from
+        models_cache. If current_override is set and not in the list,
+        it is inserted so the combo shows the current value."""
+        self._model_combo.blockSignals(True)
+        self._model_combo.clear()
+        self._model_combo.addItem(self._MODEL_DEFAULT_LABEL)
+        models = self._models_cache.get(provider, [])
+        for m in models:
+            self._model_combo.addItem(m)
+        if current_override:
+            idx = self._model_combo.findText(current_override)
+            if idx < 0:
+                self._model_combo.addItem(current_override)
+                idx = self._model_combo.findText(current_override)
+            self._model_combo.setCurrentIndex(idx)
+        else:
+            self._model_combo.setCurrentIndex(0)
+        self._model_combo.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -314,7 +339,7 @@ class PersonaDialog(QDialog):
         if idx >= 0:
             self._provider_combo.setCurrentIndex(idx)
         self._prompt_edit.setPlainText(persona.system_prompt_override or "")
-        self._model_edit.setText(persona.model_override or "")
+        self._populate_model_combo(persona.provider, persona.model_override)
         self._color_edit.setText(persona.color_override or "")
         self._refresh_effective_labels(persona)
 
@@ -407,8 +432,10 @@ class PersonaDialog(QDialog):
         # Read override inputs — empty string = None (inherit)
         prompt_text = self._prompt_edit.toPlainText().strip()
         prompt_override: str | None = prompt_text if prompt_text else None
-        model_text = self._model_edit.text().strip()
-        model_override: str | None = model_text if model_text else None
+        model_text = self._model_combo.currentText()
+        model_override: str | None = (
+            None if model_text == self._MODEL_DEFAULT_LABEL else model_text
+        )
         color_text = self._color_edit.text().strip()
         color_override: str | None = color_text if color_text else None
 

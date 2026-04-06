@@ -414,9 +414,9 @@ class TestSidebarPersonasAction:
         original = pd_mod.PersonaDialog
 
         class SpyDialog(original):
-            def __init__(self, db, config, conv_id_arg, parent=None):
+            def __init__(self, db, config, conv_id_arg, parent=None, **kwargs):
                 constructed.append((db, config, conv_id_arg))
-                super().__init__(db, config, conv_id_arg, parent=parent)
+                super().__init__(db, config, conv_id_arg, parent=parent, **kwargs)
 
             def exec(self):
                 execed.append(True)

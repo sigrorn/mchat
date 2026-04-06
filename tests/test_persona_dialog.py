@@ -287,7 +287,7 @@ class TestModelOverrideCombo:
         dialog_with_models.create_persona(
             provider=Provider.CLAUDE, name="Test",
         )
-        # Select the persona to populate the form
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         assert dialog_with_models._model_combo.itemText(0) == "Use provider default"
 
@@ -296,6 +296,7 @@ class TestModelOverrideCombo:
         dialog_with_models.create_persona(
             provider=Provider.CLAUDE, name="Test",
         )
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         items = [
             dialog_with_models._model_combo.itemText(i)
@@ -312,6 +313,7 @@ class TestModelOverrideCombo:
         dialog_with_models.create_persona(
             provider=Provider.CLAUDE, name="Test", model_override=None,
         )
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         assert dialog_with_models._model_combo.currentText() == "Use provider default"
 
@@ -323,6 +325,7 @@ class TestModelOverrideCombo:
             provider=Provider.CLAUDE, name="Test",
             model_override="claude-opus-4",
         )
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         assert dialog_with_models._model_combo.currentText() == "claude-opus-4"
 
@@ -333,6 +336,7 @@ class TestModelOverrideCombo:
         dialog_with_models.create_persona(
             provider=Provider.CLAUDE, name="Test",
         )
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         # Select a specific model
         idx = dialog_with_models._model_combo.findText("claude-opus-4")
@@ -349,6 +353,7 @@ class TestModelOverrideCombo:
             provider=Provider.CLAUDE, name="Test",
             model_override="claude-opus-4",
         )
+        dialog_with_models._refresh_list()
         dialog_with_models._list.setCurrentRow(0)
         # Select "Use provider default"
         dialog_with_models._model_combo.setCurrentIndex(0)
