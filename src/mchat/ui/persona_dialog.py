@@ -189,6 +189,9 @@ class PersonaDialog(QDialog):
             self._provider_combo.addItem(
                 PROVIDER_META[p.value]["display"], p,
             )
+        self._provider_combo.currentIndexChanged.connect(
+            self._on_provider_changed
+        )
         form.addRow("Provider:", self._provider_combo)
 
         # System prompt override + effective-value label
@@ -322,6 +325,16 @@ class PersonaDialog(QDialog):
     # Event handlers
     # ------------------------------------------------------------------
 
+    def _on_provider_changed(self, _index: int) -> None:
+        """Repopulate the model combo when the provider combo changes.
+
+        Stage 3A.6: switching a persona's backing provider updates the
+        model list and resets the selection to 'Use provider default'.
+        """
+        provider = self._provider_combo.currentData()
+        if provider is not None:
+            self._populate_model_combo(provider, None)
+
     def _on_selection_changed(
         self, current: QListWidgetItem | None, _previous,
     ) -> None:
@@ -335,9 +348,11 @@ class PersonaDialog(QDialog):
 
         self._set_form_enabled(True)
         self._name_edit.setText(persona.name)
+        self._provider_combo.blockSignals(True)
         idx = self._provider_combo.findData(persona.provider)
         if idx >= 0:
             self._provider_combo.setCurrentIndex(idx)
+        self._provider_combo.blockSignals(False)
         self._prompt_edit.setPlainText(persona.system_prompt_override or "")
         self._populate_model_combo(persona.provider, persona.model_override)
         self._color_edit.setText(persona.color_override or "")
