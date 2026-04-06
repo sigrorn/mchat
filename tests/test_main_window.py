@@ -661,3 +661,39 @@ class TestPersonaSelectionAdjust:
         persona_ids = {t.persona_id for t in selection}
         assert partner.id in persona_ids
         assert evaluator.id in persona_ids
+
+
+class TestUnknownCommandHandling:
+    """#92 — unknown // commands and single-/ typos should show an error,
+    not be sent to a provider."""
+
+    def test_unknown_command_shows_error(self, main_window):
+        """//unknowncmd should produce an error note."""
+        main_window._on_new_chat()
+        notes = []
+        original = main_window._chat.add_note
+        main_window._chat.add_note = lambda msg: notes.append(msg)
+        main_window._on_message_submitted("//unknowncmd hello")
+        assert any("unknown" in n.lower() for n in notes)
+        # No worker should have started
+        assert main_window._send._multi_workers == {}
+        main_window._chat.add_note = original
+
+    def test_unknown_command_does_not_persist_message(self, main_window):
+        """An unrecognized // command must not be saved as a user message."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        main_window._on_message_submitted("//notacommand")
+        msgs = main_window._db.get_messages(conv_id)
+        assert len(msgs) == 0
+
+    def test_single_slash_command_shows_hint(self, main_window):
+        """/addpersona (single slash) should show a hint about //."""
+        main_window._on_new_chat()
+        notes = []
+        original = main_window._chat.add_note
+        main_window._chat.add_note = lambda msg: notes.append(msg)
+        main_window._on_message_submitted("/addpersona")
+        assert any("//" in n for n in notes)
+        assert main_window._send._multi_workers == {}
+        main_window._chat.add_note = original
