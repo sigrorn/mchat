@@ -44,7 +44,15 @@ class TestSettingsDialogGeneralOnly:
         assert d._system_prompt.toPlainText() == "global default prompt"
         assert d._exclude_shade_mode.currentText() == "darken"
         assert d._exclude_shade_amount.value() == 20
-        assert d._default_provider.currentText() == "claude"
+
+    def test_no_default_provider_control(self, qtbot, config):
+        """Stage 3A.4 — default_provider UI control removed from
+        SettingsDialog (kept in config as fallback for all,/flipped,
+        only)."""
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        assert not hasattr(d, "_default_provider")
 
     def test_does_not_expose_provider_widgets(self, qtbot, config):
         """API keys, model combos, provider colours, and provider

@@ -122,10 +122,14 @@ class TestSelectionState:
         s.set([self._claude()])
         assert received == []  # identical set → no signal
 
-    def test_set_empty_rejected(self, qtbot):
+    def test_set_empty_clears_selection(self, qtbot):
+        """Stage 3A.4 — set([]) must write through so new chats can
+        start with zero providers selected."""
         s = SelectionState([self._claude()])
-        s.set([])
-        assert s.selection == [self._claude()]  # unchanged
+        with qtbot.waitSignal(s.selection_changed, timeout=500) as blocker:
+            s.set([])
+        assert blocker.args[0] == []
+        assert s.selection == []
 
     def test_selection_returns_copy_not_ref(self, qtbot):
         s = SelectionState([self._claude()])

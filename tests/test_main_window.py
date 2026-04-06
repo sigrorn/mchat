@@ -126,14 +126,13 @@ class TestSelectionSync:
             p for p, c in main_window._checkboxes.items() if c.isChecked()
         )
 
-    def test_empty_selection_rejected(self, main_window):
-        """Unchecking the last provider must revert — at least one must stay selected."""
-        # Ensure only one is checked
+    def test_empty_selection_allowed(self, main_window):
+        """Stage 3A.4 — unchecking the last provider should be allowed;
+        the selection becomes empty (persona-first UX)."""
         main_window._router.set_selection([Provider.CLAUDE])
         main_window._sync_checkboxes_from_selection()
         main_window._checkboxes[Provider.CLAUDE].setChecked(False)
-        # The router selection must still be non-empty
-        assert len(main_window._router.selection) >= 1
+        assert main_window._router.selection == []
 
 
 class TestCommandDrivenState:
@@ -204,6 +203,37 @@ class TestConversationSwitching:
         assert found_label == "renamed title"
         # DB updated
         assert main_window._db.get_conversation(cid).title == "renamed title"
+
+
+class TestEmptySelectionSend:
+    """Stage 3A.4 — sending with zero targets must produce a clear
+    user-facing message, not a silent no-op or crash."""
+
+    def test_send_with_zero_targets_shows_note(self, main_window):
+        """When the selection is empty and the user sends a message,
+        a note should appear telling them to add a persona first."""
+        main_window._on_new_chat()
+        main_window._router.set_selection([])
+        # Spy on chat notes
+        notes = []
+        original_add_note = main_window._chat.add_note
+        main_window._chat.add_note = lambda msg: notes.append(msg)
+        main_window._on_message_submitted("hello world")
+        assert len(notes) >= 1
+        assert any("persona" in n.lower() or "select" in n.lower() for n in notes)
+        # No worker should have started
+        assert main_window._send._multi_workers == {}
+        # Restore
+        main_window._chat.add_note = original_add_note
+
+    def test_send_with_zero_targets_does_not_persist_message(self, main_window):
+        """No user message should be persisted when the selection is empty."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        main_window._router.set_selection([])
+        main_window._on_message_submitted("hello world")
+        msgs = main_window._db.get_messages(conv_id)
+        assert len(msgs) == 0
 
 
 class TestPrefixOnlySelection:

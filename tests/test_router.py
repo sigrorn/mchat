@@ -11,6 +11,8 @@ import pytest
 
 from mchat.models.message import Provider
 from mchat.router import Router
+from mchat.ui.persona_target import synthetic_default
+from mchat.ui.state import SelectionState
 
 
 @pytest.fixture
@@ -191,3 +193,45 @@ class TestRouter:
         targets, text = router.parse("claude, claude, hello")
         assert targets == [Provider.CLAUDE]
         assert text == "hello"
+
+
+class TestRouterEmptySelection:
+    """Stage 3A.4 — empty selection is a valid state. Router must not
+    auto-seed a default when the SelectionState is empty, and
+    _store_selection([]) must write through instead of silently
+    no-opping."""
+
+    def test_empty_selection_state_not_seeded(self, mock_providers):
+        """When Router receives an empty SelectionState, it must NOT
+        force-seed a synthetic default. The selection stays empty."""
+        state = SelectionState()
+        assert state.selection == []
+        Router(mock_providers, default=Provider.CLAUDE, selection_state=state)
+        assert state.selection == []
+
+    def test_store_selection_empty_writes_through(self, mock_providers):
+        """set_selection([]) must actually clear the selection, not
+        silently no-op."""
+        state = SelectionState([synthetic_default(Provider.CLAUDE)])
+        router = Router(mock_providers, default=Provider.CLAUDE, selection_state=state)
+        router.set_selection([])
+        assert state.selection == []
+        assert router.selection == []
+
+    def test_parse_with_empty_selection_returns_empty(self, mock_providers):
+        """Unprefixed input with an empty selection returns [] — there
+        is no implicit fallback to any provider."""
+        state = SelectionState()
+        router = Router(mock_providers, default=Provider.CLAUDE, selection_state=state)
+        targets, text = router.parse("hello world")
+        assert targets == []
+        assert text == "hello world"
+
+    def test_all_prefix_from_empty_selection(self, mock_providers):
+        """'all,' from an empty selection selects every configured
+        provider (same as today)."""
+        state = SelectionState()
+        router = Router(mock_providers, default=Provider.CLAUDE, selection_state=state)
+        targets, text = router.parse("all, compare these")
+        assert set(targets) == set(mock_providers.keys())
+        assert text == "compare these"
