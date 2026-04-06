@@ -98,6 +98,7 @@ class ConversationManager:
             host._update_input_placeholder()
             host._update_input_color()
         host._update_spend_labels()
+        host._sync_toolbar_personas()
         host._sync_matrix_panel()
         host._display_messages(messages)
 
@@ -112,6 +113,7 @@ class ConversationManager:
         self._services.session.set_current(conv)
         host._chat.clear_messages()
         host._update_spend_labels()
+        host._sync_toolbar_personas()
         host._sync_matrix_panel()
         self.load_conversations()
         host._sidebar.select_conversation(conv.id)
