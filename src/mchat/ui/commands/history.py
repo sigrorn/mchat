@@ -306,7 +306,8 @@ def handle_edit(arg: str, host: CommandHost) -> bool:
     host._input._text_edit.setPlainText(target_msg.content)
     host._input._edit_mode = True
     host._chat.add_note(
-        f"editing message {target_idx + 1} — submit to re-send, empty to remove"
+        f"editing message {target_idx + 1} → {target_msg.addressed_to or 'current selection'}"
+        f" — submit to re-send, empty to remove"
     )
     return True
 

@@ -401,8 +401,9 @@ class SendController:
 
         host._input._text_edit.setPlainText(next_msg.content)
         host._input._edit_mode = True
+        targets_label = next_msg.addressed_to or "current selection"
         host._chat.add_note(
-            f"replaying message — edit or submit as-is (empty to remove)"
+            f"replaying message → {targets_label} — edit or submit as-is (empty to remove)"
         )
 
     # ------------------------------------------------------------------
