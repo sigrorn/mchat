@@ -208,6 +208,109 @@ def handle_retry(host: CommandHost) -> bool:
     return True
 
 
+def handle_edit(arg: str, host: CommandHost) -> bool:
+    """//edit [n] — load a user message into the input box for editing.
+
+    - //edit        → last user message
+    - //edit 5      → message #5 (1-indexed, error if not a user msg)
+    - //edit -2     → 2nd-last user message
+
+    After submit, the amended text is sent to the original recipients.
+    Old assistant responses following the edited message are hidden.
+    Subsequent user messages are queued for review one at a time.
+    """
+    if not host._current_conv or not host._current_conv.messages:
+        host._chat.add_note("Error: no user message to edit")
+        return True
+
+    messages = host._current_conv.messages
+    arg = arg.strip()
+
+    target_idx: int | None = None
+
+    if not arg:
+        # No arg → last user message
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == Role.USER:
+                target_idx = i
+                break
+        if target_idx is None:
+            host._chat.add_note("Error: no user message to edit")
+            return True
+
+    elif arg.lstrip("-").isdigit() and arg[0] == "-":
+        # Negative offset: -N = Nth-last user message
+        n = int(arg)  # negative
+        user_indices = [i for i, m in enumerate(messages) if m.role == Role.USER]
+        offset = abs(n)
+        if offset < 1 or offset > len(user_indices):
+            host._chat.add_note(
+                f"Error: not enough user messages (have {len(user_indices)}, "
+                f"requested {offset}th-last)"
+            )
+            return True
+        target_idx = user_indices[-offset]
+
+    elif arg.isdigit():
+        # Absolute message number (1-indexed)
+        idx = int(arg)
+        if idx < 1 or idx > len(messages):
+            host._chat.add_note(f"Error: message {idx} out of range (1–{len(messages)})")
+            return True
+        if messages[idx - 1].role != Role.USER:
+            host._chat.add_note(
+                f"Error: message {idx} is not a user message"
+            )
+            return True
+        target_idx = idx - 1
+
+    else:
+        host._chat.add_note("Error: //edit [n] — n must be a message number or negative offset")
+        return True
+
+    target_msg = messages[target_idx]
+
+    # Hide all messages after the target (assistant responses + subsequent pairs)
+    to_hide = messages[target_idx + 1:]
+    ids_to_hide = [m.id for m in to_hide if m.id is not None]
+    if ids_to_hide:
+        host._db.hide_messages(ids_to_hide)
+
+    # Also hide the original user message itself (it will be re-sent)
+    if target_msg.id is not None:
+        host._db.hide_messages([target_msg.id])
+
+    # Remove hidden messages from the in-memory list
+    hidden_ids = set(ids_to_hide)
+    if target_msg.id is not None:
+        hidden_ids.add(target_msg.id)
+    host._current_conv.messages = [
+        m for m in messages if m.id not in hidden_ids
+    ]
+    host._display_messages(host._current_conv.messages)
+
+    # Build the replay queue: subsequent user messages after the target
+    replay_queue = [
+        m for m in to_hide if m.role == Role.USER
+        and not (m.content or "").strip().startswith("//")
+    ]
+
+    # Store edit state on the host for the send path to use
+    host._edit_state = {
+        "original_msg": target_msg,
+        "replay_queue": replay_queue,
+        "replay_index": 0,
+    }
+
+    # Pre-fill the input with the original message text
+    host._input._text_edit.setPlainText(target_msg.content)
+    host._input._edit_mode = True
+    host._chat.add_note(
+        f"editing message {target_idx + 1} — submit to re-send, empty to remove"
+    )
+    return True
+
+
 def handle_vacuum(host: CommandHost) -> bool:
     import os
     db_path = host._db._path

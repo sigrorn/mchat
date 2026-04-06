@@ -44,6 +44,7 @@ class InputWidget(QWidget):
     def __init__(self, font_size: int = 14, parent=None) -> None:
         super().__init__(parent)
         self._font_size = font_size
+        self._edit_mode = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -91,9 +92,11 @@ class InputWidget(QWidget):
 
     def _submit(self) -> None:
         text = self._text_edit.toPlainText().strip()
-        if text:
+        if text or self._edit_mode:
             self.message_submitted.emit(text)
             self._text_edit.clear()
+            if self._edit_mode:
+                self._edit_mode = False
 
     def set_enabled(self, enabled: bool) -> None:
         self._text_edit.setEnabled(enabled)

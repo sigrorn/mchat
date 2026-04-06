@@ -157,6 +157,12 @@ class SendController:
         host = self._host
         svc = self._services
 
+        # Edit mode: intercept before normal command/resolve paths
+        edit_state = getattr(host, "_edit_state", None)
+        if edit_state is not None:
+            self._handle_edit_submit(text, edit_state)
+            return
+
         if text.strip().startswith("//"):
             host._handle_command(text)
             return
@@ -280,6 +286,126 @@ class SendController:
             self.send_multi(targets)
 
     # ------------------------------------------------------------------
+    # Edit-mode submit
+    # ------------------------------------------------------------------
+
+    def _handle_edit_submit(self, text: str, edit_state: dict) -> None:
+        """Handle a submit while in edit mode (set by //edit).
+
+        Empty text → remove the original message and stop.
+        Non-empty → send to the original recipients, then queue
+        subsequent user messages for review.
+        """
+        host = self._host
+        svc = self._services
+        original_msg = edit_state["original_msg"]
+
+        if not text:
+            # Empty submit → remove the message, clear edit state
+            if original_msg.id is not None:
+                svc.db.delete_messages([original_msg.id])
+            host._edit_state = None
+            host._chat.add_note("message removed")
+            # Reload conversation
+            conv = svc.session.current
+            if conv:
+                conv.messages = svc.db.get_messages(conv.id)
+                host._display_messages(conv.messages)
+            return
+
+        conv = svc.session.current
+        if conv is None:
+            host._edit_state = None
+            return
+
+        # Parse original addressed_to to build targets
+        addressed = original_msg.addressed_to or ""
+        if addressed and addressed != "all":
+            tokens = [t.strip() for t in addressed.split(",") if t.strip()]
+        else:
+            # Fall back to current selection
+            tokens = [t.persona_id for t in svc.selection.selection]
+
+        # Build PersonaTargets from the tokens
+        targets: list[PersonaTarget] = []
+        for token in tokens:
+            # Check if token is a provider value (synthetic default)
+            provider_match = None
+            for p in Provider:
+                if p.value == token:
+                    provider_match = p
+                    break
+            if provider_match:
+                targets.append(synthetic_default(provider_match))
+            else:
+                # Explicit persona — look up provider from DB
+                personas = svc.db.list_personas(conv.id)
+                persona = next((p for p in personas if p.id == token), None)
+                if persona:
+                    targets.append(PersonaTarget(persona_id=persona.id, provider=persona.provider))
+                else:
+                    targets.append(PersonaTarget(persona_id=token, provider=Provider.CLAUDE))
+
+        if not targets:
+            host._chat.add_note("Error: no targets for edit re-send")
+            host._edit_state = None
+            return
+
+        # Build addressed_to for the new message
+        seen_pids: list[str] = []
+        for t in targets:
+            if t.persona_id not in seen_pids:
+                seen_pids.append(t.persona_id)
+        addressed_to = ",".join(seen_pids)
+
+        # Persist the new user message
+        user_msg = Message(
+            role=Role.USER,
+            content=text,
+            conversation_id=conv.id,
+            addressed_to=addressed_to,
+        )
+        svc.db.add_message(user_msg)
+        svc.session.append_message(user_msg)
+        host._chat.add_message(user_msg)
+
+        host._input.set_enabled(False)
+        self.clear_retry_stash()
+
+        if len(targets) == 1:
+            self.send_single(targets[0])
+        else:
+            self.send_multi(targets)
+
+    def _advance_edit_replay(self) -> None:
+        """Called after a send completes in edit mode. Loads the next
+        user message from the replay queue into the input, or exits
+        edit mode if the queue is exhausted."""
+        host = self._host
+        edit_state = getattr(host, "_edit_state", None)
+        if edit_state is None:
+            return
+
+        queue = edit_state["replay_queue"]
+        idx = edit_state["replay_index"]
+
+        if idx >= len(queue):
+            # Queue exhausted — return to normal mode
+            host._edit_state = None
+            host._chat.add_note("edit replay complete")
+            return
+
+        next_msg = queue[idx]
+        edit_state["replay_index"] = idx + 1
+        edit_state["original_msg"] = next_msg
+
+        host._input._text_edit.setPlainText(next_msg.content)
+        host._input._edit_mode = True
+        host._chat.add_note(
+            f"replaying message — edit or submit as-is (empty to remove)"
+        )
+
+    # ------------------------------------------------------------------
     # Fan-out
     # ------------------------------------------------------------------
 
@@ -393,6 +519,8 @@ class SendController:
             host._input.set_enabled(True)
             host._update_input_placeholder()
             host._update_input_color()
+            # If in edit mode, advance the replay queue
+            self._advance_edit_replay()
 
     def _on_error(self, target: PersonaTarget, error: str) -> None:
         host = self._host

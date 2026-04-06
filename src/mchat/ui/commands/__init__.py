@@ -34,6 +34,8 @@ def dispatch(cmd: str, arg: str, host: CommandHost) -> bool:
         return history.handle_retry(host)
     if cmd == "//rename":
         return history.handle_rename(arg, host)
+    if cmd == "//edit":
+        return history.handle_edit(arg, host)
     if cmd == "//vacuum":
         return history.handle_vacuum(host)
 
