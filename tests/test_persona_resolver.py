@@ -277,6 +277,38 @@ class TestMixedPrefixes:
         assert cleaned == ""
 
 
+class TestProviderShorthandExpandsToPersonas:
+    """#85 — when a conversation has explicit personas on a provider,
+    `claude, message` should resolve to all active Claude personas
+    (not just the synthetic default)."""
+
+    def test_provider_shorthand_with_explicit_personas(self, resolver, db):
+        """'claude, hello' with two active Claude personas should
+        resolve to both, not the synthetic default."""
+        conv = db.create_conversation()
+        partner = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner")
+        )
+        evaluator = db.create_persona(
+            _make_persona(conv.id, "Evaluator", "evaluator")
+        )
+        targets, cleaned = resolver.resolve("claude, hello", conv.id, db)
+        persona_ids = {t.persona_id for t in targets}
+        assert partner.id in persona_ids
+        assert evaluator.id in persona_ids
+        # Synthetic default should NOT be included when explicit personas exist
+        assert "claude" not in persona_ids
+        assert cleaned == "hello"
+
+    def test_provider_shorthand_without_explicit_personas(self, resolver, db):
+        """'gpt, hello' with no explicit GPT personas should still
+        resolve to the synthetic default (backwards compat)."""
+        conv = db.create_conversation()
+        targets, cleaned = resolver.resolve("gpt, hello", conv.id, db)
+        assert targets == [synthetic_default(Provider.OPENAI)]
+        assert cleaned == "hello"
+
+
 class TestSelectionStateUpdate:
     def test_resolve_updates_current_selection(self, resolver, db):
         """After resolve, the router's selection state should reflect

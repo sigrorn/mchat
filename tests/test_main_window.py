@@ -592,3 +592,72 @@ class TestSendControllerPersonas:
         # No worker should have started
         assert main_window._send._multi_workers == {}
         assert main_window._router.selection == [Provider.OPENAI]
+
+
+class TestPersonaSelectionAdjust:
+    """#85 — +/- selection adjust should resolve persona names, not
+    just provider shorthands."""
+
+    def _make_persona(self, db, conv_id, name, slug, provider=Provider.CLAUDE):
+        from mchat.models.persona import Persona, generate_persona_id
+        p = Persona(
+            conversation_id=conv_id,
+            id=generate_persona_id(),
+            provider=provider,
+            name=name,
+            name_slug=slug,
+        )
+        return db.create_persona(p)
+
+    def test_plus_persona_name_adds_to_selection(self, main_window):
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        partner = self._make_persona(
+            main_window._db, conv_id, "Partner", "partner",
+        )
+        # Start with empty selection
+        main_window._selection_state.set([])
+        handled = main_window._handle_selection_adjust("+partner")
+        assert handled is True
+        selection = main_window._selection_state.selection
+        assert any(t.persona_id == partner.id for t in selection)
+
+    def test_minus_persona_name_removes_from_selection(self, main_window):
+        from mchat.ui.persona_target import PersonaTarget
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        partner = self._make_persona(
+            main_window._db, conv_id, "Partner", "partner",
+        )
+        evaluator = self._make_persona(
+            main_window._db, conv_id, "Evaluator", "evaluator",
+        )
+        # Select both
+        main_window._selection_state.set([
+            PersonaTarget(persona_id=partner.id, provider=Provider.CLAUDE),
+            PersonaTarget(persona_id=evaluator.id, provider=Provider.CLAUDE),
+        ])
+        handled = main_window._handle_selection_adjust("-partner")
+        assert handled is True
+        selection = main_window._selection_state.selection
+        assert not any(t.persona_id == partner.id for t in selection)
+        assert any(t.persona_id == evaluator.id for t in selection)
+
+    def test_plus_provider_adds_all_active_personas(self, main_window):
+        """'+claude' with active Claude personas should add them all."""
+        from mchat.ui.persona_target import synthetic_default
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        partner = self._make_persona(
+            main_window._db, conv_id, "Partner", "partner",
+        )
+        evaluator = self._make_persona(
+            main_window._db, conv_id, "Evaluator", "evaluator",
+        )
+        main_window._selection_state.set([])
+        handled = main_window._handle_selection_adjust("+claude")
+        assert handled is True
+        selection = main_window._selection_state.selection
+        persona_ids = {t.persona_id for t in selection}
+        assert partner.id in persona_ids
+        assert evaluator.id in persona_ids
