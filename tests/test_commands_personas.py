@@ -147,27 +147,28 @@ class TestAddPersona:
         handle_addpersona('claude as Name new text', host)
         assert len(db.list_personas(host._current_conv.id)) == 0
 
-    def test_creates_pinned_note_in_transcript(self, host, db):
+    def test_creates_pinned_notes_in_transcript(self, host, db):
         from mchat.ui.commands.personas import handle_addpersona
         handle_addpersona('claude as "Partner" new start it', host)
-        # A pinned note should have been added to the conversation.
-        # (We check via DB since host is a mock — the real flow writes
-        # to DB and appends to conv.messages.)
         messages = db.get_messages(host._current_conv.id)
         pinned = [m for m in messages if m.pinned]
-        assert len(pinned) == 1
-        assert "Partner" in pinned[0].content
-        assert pinned[0].role == Role.USER
+        # Two pins: name instruction + setup note
+        assert len(pinned) == 2
+        # First pin is the name instruction
+        assert "use Partner as your name" in pinned[0].content
+        # Second pin is the setup note
+        assert "Added persona" in pinned[1].content
+        assert "Partner" in pinned[1].content
 
     def test_pin_target_is_persona_provider_not_all(self, host, db):
-        """Pin must target only the persona's provider so other
+        """All pins must target only the persona's provider so other
         providers don't see this persona's setup instructions."""
         from mchat.ui.commands.personas import handle_addpersona
         handle_addpersona('claude as "Partner" new be kind', host)
         messages = db.get_messages(host._current_conv.id)
         pinned = [m for m in messages if m.pinned]
-        assert len(pinned) == 1
-        assert pinned[0].pin_target == "claude"
+        assert len(pinned) == 2
+        assert all(p.pin_target == "claude" for p in pinned)
 
     def test_addpersona_adds_to_selection(self, host, db):
         """After //addpersona, the new persona should be added to

@@ -123,6 +123,23 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         )
         return True
 
+    # Pinned name instruction — tells the provider to use the persona
+    # name as its identity for the duration of the chat.
+    name_instruction = Message(
+        role=Role.USER,
+        content=(
+            f"Unless I say otherwise, for the scope of our chat, if my inputs "
+            f"refer to your name, use {name} as your name. I might refer to it "
+            f"in order to use it as a placeholder, and I want you to refer to "
+            f"yourself as {name}."
+        ),
+        conversation_id=host._current_conv.id,
+        pinned=True,
+        pin_target=provider.value,
+    )
+    host._db.add_message(name_instruction)
+    host._current_conv.messages.append(name_instruction)
+
     # Pinned transcript note for visibility — survives //limit.
     # Pin targets only this persona's provider so other providers
     # don't see this persona's setup instructions.
