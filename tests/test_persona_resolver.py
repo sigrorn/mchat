@@ -189,6 +189,45 @@ class TestAllAndFlipped:
         assert flipped_ids == full - {all_claude.persona_id}
 
 
+class TestFlippedPersonaLevel:
+    """#84 — flipped must compare by persona_id, not provider.
+    Two Claude personas selected: flipping should flip at persona
+    level, not exclude all Claude personas."""
+
+    def test_flipped_persona_level_not_provider_level(self, resolver, db):
+        """With one of two Claude personas selected, flipped should
+        include the other Claude persona (not exclude all Claude)."""
+        conv = db.create_conversation()
+        partner = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner")
+        )
+        evaluator = db.create_persona(
+            _make_persona(conv.id, "Evaluator", "evaluator")
+        )
+        partner_target = PersonaTarget(persona_id=partner.id, provider=Provider.CLAUDE)
+        # Select only Partner
+        resolver._router._selection_state.set([partner_target])
+        flipped, _ = resolver.resolve("flipped, go", conv.id, db)
+        flipped_ids = {t.persona_id for t in flipped}
+        # Evaluator should be in the flipped set (same provider, different persona)
+        assert evaluator.id in flipped_ids
+        # Partner should NOT be in the flipped set
+        assert partner.id not in flipped_ids
+
+    def test_write_selection_preserves_persona_targets(self, resolver, db):
+        """_write_selection should write full PersonaTargets to the
+        selection state, not collapse to providers."""
+        conv = db.create_conversation()
+        partner = db.create_persona(
+            _make_persona(conv.id, "Partner", "partner")
+        )
+        partner_target = PersonaTarget(persona_id=partner.id, provider=Provider.CLAUDE)
+        resolver.resolve("partner, hi", conv.id, db)
+        # The selection state should hold the actual PersonaTarget
+        selection = resolver._router._selection_state.selection
+        assert partner_target in selection
+
+
 class TestUnknownName:
     def test_unknown_token_raises(self, resolver, db):
         conv = db.create_conversation()
