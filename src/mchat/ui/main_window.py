@@ -360,43 +360,48 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     @property
-    def _combos(self) -> dict[Provider, "QComboBox"]:
+    def _combos(self) -> dict[str, "QComboBox"]:
         return self._provider_panel.combos()
 
     @property
-    def _checkboxes(self) -> dict[Provider, "QCheckBox"]:
+    def _checkboxes(self) -> dict[str, "QCheckBox"]:
         return self._provider_panel.checkboxes()
 
     @property
-    def _spend_labels(self) -> dict[Provider, "QLabel"]:
+    def _spend_labels(self) -> dict[str, "QLabel"]:
         return self._provider_panel.spend_labels()
 
     def _configured_provider_set(self) -> set[Provider]:
         return set(self._router._providers.keys()) if self._router else set()
 
+    def _sync_toolbar_personas(self) -> None:
+        """Rebuild the toolbar rows from the current conversation's
+        personas. Called on conversation switch and after persona changes."""
+        entries: list[tuple[str, str, Provider]] = []
+        if self._current_conv:
+            for p in self._db.list_personas(self._current_conv.id):
+                entries.append((p.id, p.name, p.provider))
+        self._provider_panel.set_personas(entries)
+        if entries:
+            self._populate_model_combos_fast()
+            self._apply_all_combo_styles()
+            self._sync_checkboxes_from_selection()
+
     def _populate_model_combos_fast(self) -> None:
         configured = self._configured_provider_set()
         self._provider_panel.populate_from_config(configured)
-        # Seed the catalog with whatever ended up in the combos so it's
-        # never empty for configured providers (later async refresh
-        # overwrites with the live lists).
-        for p in configured:
-            items = [
-                self._provider_panel.combos()[p].itemText(i)
-                for i in range(self._provider_panel.combos()[p].count())
-            ]
-            if items:
-                self._model_catalog.set(p, items)
 
     def _populate_model_combos_async(self) -> None:
         providers = self._router._providers if self._router else {}
 
         def _on_async_done() -> None:
-            # Sync the catalog from the newly-populated combos.
-            for p, combo in self._provider_panel.combos().items():
-                items = [combo.itemText(i) for i in range(combo.count())]
-                if items:
-                    self._model_catalog.set(p, items)
+            # Sync the model catalog from fetched results
+            for prov, combo in self._provider_panel.combos().items():
+                items = [combo.itemText(i) for i in range(combo.count())
+                         if combo.itemText(i) != "Use provider default"]
+                provider = self._provider_panel._persona_providers.get(prov)
+                if items and provider:
+                    self._model_catalog.set(provider, items)
 
         self._provider_panel.populate_async(providers, on_done=_on_async_done)
 
@@ -409,30 +414,33 @@ class MainWindow(QMainWindow):
                 self._model_catalog.set(p, items)
 
     def _sync_checkboxes_from_selection(self) -> None:
-        if not self._router:
-            return
-        self._provider_panel.sync_checkboxes(set(self._router.selection))
+        selected_ids = {t.persona_id for t in self._selection_state.selection}
+        self._provider_panel.sync_checkboxes(selected_ids)
 
     def _on_selection_state_changed(self, _selection) -> None:
         """Action bundle: runs every UI refresh that depends on the
-        current provider selection. Connected to
-        ``ProviderSelectionState.selection_changed`` in __init__, so
-        any code path that mutates selection via ``router.set_selection``
-        or parse-driven updates automatically triggers the fan-out.
-        """
+        current persona selection."""
         self._sync_checkboxes_from_selection()
         self._update_input_placeholder()
         self._update_input_color()
 
-    def _on_checkbox_changed(self, provider_id: Provider) -> None:
-        if not self._router:
-            return
-        selected = self._provider_panel.checked_providers()
-        # Stage 3A.4: empty selection is valid (persona-first UX).
-        # set_selection writes through SelectionState which emits
-        # selection_changed → _on_selection_state_changed fan-out
-        # handles sync/placeholder/color. We still need to persist.
-        self._router.set_selection(selected)
+    def _on_checkbox_changed(self, persona_id: str) -> None:
+        """Handle a checkbox toggle in the toolbar. persona_id is the
+        persona whose checkbox changed."""
+        from mchat.ui.persona_target import PersonaTarget
+        checked_ids = set(self._provider_panel.checked_persona_ids())
+        # Build new selection from checked persona_ids
+        new_selection = [
+            t for t in self._selection_state.selection
+            if t.persona_id in checked_ids
+        ]
+        # Add any newly checked that aren't in the current selection
+        existing_ids = {t.persona_id for t in new_selection}
+        for pid in checked_ids - existing_ids:
+            provider = self._provider_panel._persona_providers.get(pid)
+            if provider:
+                new_selection.append(PersonaTarget(persona_id=pid, provider=provider))
+        self._selection_state.set(new_selection)
         self._save_selection()
 
     def _apply_settings_btn_style(self, btn=None) -> None:
@@ -459,20 +467,22 @@ class MainWindow(QMainWindow):
     def _apply_all_combo_styles(self) -> None:
         self._provider_panel.apply_all_combo_styles()
 
-    def _set_combo_waiting(self, p: Provider, waiting: bool) -> None:
-        self._provider_panel.set_combo_waiting(p, waiting)
+    def _set_combo_waiting(self, p, waiting: bool) -> None:
+        """Accept either a Provider or a persona_id string."""
+        pid = p.value if isinstance(p, Provider) else p
+        self._provider_panel.set_combo_waiting(pid, waiting)
 
-    def _set_combo_retrying(self, p: Provider) -> None:
-        self._provider_panel.set_combo_retrying(p)
+    def _set_combo_retrying(self, p) -> None:
+        pid = p.value if isinstance(p, Provider) else p
+        self._provider_panel.set_combo_retrying(pid)
 
     def _update_input_color(self) -> None:
         if not self._router:
             return
-        sel = self._router.selection
+        sel = self._selection_state.selection
         if len(sel) == 1:
-            color = self._provider_color(sel[0])
+            color = self._provider_color(sel[0].provider)
         else:
-            # Multi-provider or empty selection → user colour
             color = self._config.get("color_user")
         self._input.set_background(color)
 
@@ -597,6 +607,7 @@ class MainWindow(QMainWindow):
             self._ensure_persona_pins(conv_id)
             self._display_messages(conv.messages)
             self._sync_matrix_panel()
+            self._sync_toolbar_personas()
 
     def _ensure_persona_pins(self, conv_id: int) -> None:
         """For every active persona in the conversation, create pinned
@@ -680,20 +691,37 @@ class MainWindow(QMainWindow):
         if not self._router:
             self._input.set_placeholder("Configure an API key in Settings to start chatting")
             return
-        sel = self._router.selection
+        sel = self._selection_state.selection
         if not sel:
             self._input.set_placeholder(
-                "No personas selected \u2014 use //addpersona or prefix a provider name"
+                "No personas selected \u2014 use //addpersona or prefix a persona name"
             )
         elif len(sel) == 1:
-            name = _PROVIDER_DISPLAY[sel[0]]
-            self._input.set_placeholder(f"Message {name} \u2014 prefix another provider or use //select")
+            # Show persona name if we can find it, else provider display name
+            pid = sel[0].persona_id
+            label = _PROVIDER_DISPLAY.get(sel[0].provider, pid)
+            if self._current_conv:
+                for p in self._db.list_personas(self._current_conv.id):
+                    if p.id == pid:
+                        label = p.name
+                        break
+            self._input.set_placeholder(f"Message {label}")
         else:
-            names = ", ".join(_PROVIDER_DISPLAY[p] for p in sel)
-            self._input.set_placeholder(f"Message {names} \u2014 use //select to change")
+            labels = []
+            personas = (
+                self._db.list_personas(self._current_conv.id)
+                if self._current_conv else []
+            )
+            pid_to_name = {p.id: p.name for p in personas}
+            for t in sel:
+                labels.append(pid_to_name.get(t.persona_id, t.persona_id))
+            self._input.set_placeholder(f"Message {', '.join(labels)}")
 
-    def _selected_model(self, p: Provider) -> str:
-        return self._combos[p].currentText()
+    def _selected_model(self, p) -> str:
+        """Accept either a Provider or a persona_id string."""
+        key = p.value if isinstance(p, Provider) else p
+        combo = self._combos.get(key)
+        return combo.currentText() if combo else ""
 
     def _build_context(self, target) -> list[Message]:
         """Delegate to ui.context_builder — MainWindow is just the host.

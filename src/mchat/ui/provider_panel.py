@@ -1,11 +1,11 @@
 # ------------------------------------------------------------------
 # Component: ProviderPanel
-# Responsibility: Compose the per-provider bar that sits between the
-#                 chat view and the input area: model combos, include
-#                 checkboxes, and spend labels. Owns all their styling
-#                 (provider colours, waiting/retrying states) and model
-#                 list fetching (fast local, async background refresh).
-# Collaborators: config, router, PySide6, pricing (format_cost)
+# Responsibility: Compose the toolbar bar between the chat view and
+#                 the input area. Stage 4.5: one row per persona
+#                 (model combo + include checkbox + spend label),
+#                 keyed by persona_id. Owns styling (provider colours,
+#                 waiting/retrying states) and model list population.
+# Collaborators: config, PySide6, pricing (format_cost)
 # ------------------------------------------------------------------
 from __future__ import annotations
 
@@ -27,22 +27,21 @@ from mchat.config import PROVIDER_META, Config
 from mchat.models.message import Provider
 from mchat.pricing import format_cost
 
-_PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
+# Each entry is (persona_id, display_label, provider).
+PersonaEntry = tuple[str, str, Provider]
 
 
 class ProviderPanel(QFrame):
-    """The per-provider bar (combos + checkboxes + spend labels).
+    """Toolbar bar: one row per persona (combo + checkbox + spend).
 
-    Emits signals for selection / model-selection changes. The host
-    is responsible for driving the router, saving state, and reacting
-    to combo changes (e.g. restyling the input background).
+    Emits signals keyed by persona_id for selection / model changes.
+    The host drives the router, saves state, and reacts to changes.
     """
 
-    # pid
-    selection_changed = Signal(Provider)
-    # pid
-    combo_changed = Signal(Provider)
-
+    # persona_id
+    selection_changed = Signal(str)
+    # persona_id
+    combo_changed = Signal(str)
     # Emitted when the Personas... button in the empty state is clicked.
     personas_requested = Signal()
 
@@ -50,9 +49,12 @@ class ProviderPanel(QFrame):
         super().__init__(parent)
         self._config = config
         self._font_size = font_size
-        self._combos: dict[Provider, QComboBox] = {}
-        self._checkboxes: dict[Provider, QCheckBox] = {}
-        self._spend_labels: dict[Provider, QLabel] = {}
+        self._personas: list[PersonaEntry] = []
+        self._combos: dict[str, QComboBox] = {}
+        self._checkboxes: dict[str, QCheckBox] = {}
+        self._spend_labels: dict[str, QLabel] = {}
+        self._persona_providers: dict[str, Provider] = {}
+        self._row_widgets: list[QWidget] = []
         self._model_fetcher: QThread | None = None
         self._empty_hint: QLabel | None = None
         self._personas_btn: QPushButton | None = None
@@ -69,32 +71,9 @@ class ProviderPanel(QFrame):
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(16, 8, 16, 8)
         self._layout.setSpacing(8)
-
-        for i, p in enumerate(Provider):
-            if i > 0:
-                self._layout.addSpacing(12)
-
-            combo = QComboBox()
-            combo.setMinimumWidth(160)
-            combo.activated.connect(lambda _, c=combo: c.hidePopup())
-            combo.currentTextChanged.connect(lambda _, pid=p: self.combo_changed.emit(pid))
-            self._layout.addWidget(combo)
-            self._combos[p] = combo
-
-            cb = QCheckBox()
-            cb.setToolTip(f"Include {_PROVIDER_DISPLAY[p]} in selection")
-            cb.stateChanged.connect(lambda _, pid=p: self.selection_changed.emit(pid))
-            self._layout.addWidget(cb)
-            self._checkboxes[p] = cb
-
-            label = QLabel("$0.00000")
-            self._apply_spend_label_style(label)
-            self._layout.addWidget(label)
-            self._spend_labels[p] = label
-
         self._layout.addStretch()
 
-        # Empty-state widgets (hidden by default — shown via show_empty_state)
+        # Empty-state widgets (hidden by default)
         self._empty_hint = QLabel(
             'No personas yet \u2014 use <code>//addpersona &lt;provider&gt; as "&lt;name&gt;" ...'
             "</code> or click below"
@@ -116,135 +95,186 @@ class ProviderPanel(QFrame):
         self._layout.insertWidget(1, self._personas_btn)
 
     # ------------------------------------------------------------------
-    # Empty state / provider rows toggle (Stage 3A.4)
+    # Persona rows
+    # ------------------------------------------------------------------
+
+    def set_personas(self, entries: list[PersonaEntry]) -> None:
+        """(Re)build the bar with one row per persona entry.
+
+        Each entry is ``(persona_id, display_label, provider)``.
+        """
+        # Clear existing rows
+        for w in self._row_widgets:
+            self._layout.removeWidget(w)
+            w.deleteLater()
+        self._row_widgets.clear()
+        self._combos.clear()
+        self._checkboxes.clear()
+        self._spend_labels.clear()
+        self._persona_providers.clear()
+        self._personas = list(entries)
+
+        if not entries:
+            self.show_empty_state()
+            return
+
+        # Hide empty state
+        if self._empty_hint:
+            self._empty_hint.setVisible(False)
+        if self._personas_btn:
+            self._personas_btn.setVisible(False)
+
+        insert_pos = 0
+        for i, (pid, label, provider) in enumerate(entries):
+            self._persona_providers[pid] = provider
+
+            if i > 0:
+                spacer = QWidget()
+                spacer.setFixedWidth(12)
+                self._layout.insertWidget(insert_pos, spacer)
+                self._row_widgets.append(spacer)
+                insert_pos += 1
+
+            # Persona label
+            name_lbl = QLabel(label)
+            name_lbl.setStyleSheet(f"color: #444; font-size: {self._font_size - 1}px; font-weight: bold;")
+            self._layout.insertWidget(insert_pos, name_lbl)
+            self._row_widgets.append(name_lbl)
+            insert_pos += 1
+
+            combo = QComboBox()
+            combo.setMinimumWidth(140)
+            combo.activated.connect(lambda _, c=combo: c.hidePopup())
+            combo.currentTextChanged.connect(lambda _, p=pid: self.combo_changed.emit(p))
+            self._layout.insertWidget(insert_pos, combo)
+            self._row_widgets.append(combo)
+            self._combos[pid] = combo
+            insert_pos += 1
+
+            cb = QCheckBox()
+            cb.setToolTip(f"Include {label} in selection")
+            cb.stateChanged.connect(lambda _, p=pid: self.selection_changed.emit(p))
+            self._layout.insertWidget(insert_pos, cb)
+            self._row_widgets.append(cb)
+            self._checkboxes[pid] = cb
+            insert_pos += 1
+
+            spend_lbl = QLabel("$0.00000")
+            self._apply_spend_label_style(spend_lbl)
+            self._layout.insertWidget(insert_pos, spend_lbl)
+            self._row_widgets.append(spend_lbl)
+            self._spend_labels[pid] = spend_lbl
+            insert_pos += 1
+
+    def set_providers(self, configured: list[Provider] | set[Provider]) -> None:
+        """Backwards-compat: builds persona entries from Provider list
+        (synthetic defaults with persona_id == provider.value)."""
+        entries: list[PersonaEntry] = [
+            (p.value, PROVIDER_META[p.value]["display"], p)
+            for p in Provider if p in set(configured)
+        ]
+        self.set_personas(entries)
+
+    # ------------------------------------------------------------------
+    # Empty state
     # ------------------------------------------------------------------
 
     def show_empty_state(self) -> None:
-        """Hide provider rows and show the empty-state hint + Personas button."""
-        for combo in self._combos.values():
-            combo.setVisible(False)
-        for cb in self._checkboxes.values():
-            cb.setVisible(False)
-        for label in self._spend_labels.values():
-            label.setVisible(False)
+        for w in self._row_widgets:
+            w.setVisible(False)
         if self._empty_hint:
             self._empty_hint.setVisible(True)
         if self._personas_btn:
             self._personas_btn.setVisible(True)
 
     def show_provider_rows(self) -> None:
-        """Show provider rows and hide the empty-state hint."""
-        for combo in self._combos.values():
-            combo.setVisible(True)
-        for cb in self._checkboxes.values():
-            cb.setVisible(True)
-        for label in self._spend_labels.values():
-            label.setVisible(True)
+        for w in self._row_widgets:
+            w.setVisible(True)
         if self._empty_hint:
             self._empty_hint.setVisible(False)
         if self._personas_btn:
             self._personas_btn.setVisible(False)
 
     # ------------------------------------------------------------------
-    # Public accessors (used by MainWindow)
+    # Public accessors
     # ------------------------------------------------------------------
 
-    def combos(self) -> dict[Provider, QComboBox]:
+    def combos(self) -> dict[str, QComboBox]:
         return self._combos
 
-    def checkboxes(self) -> dict[Provider, QCheckBox]:
+    def checkboxes(self) -> dict[str, QCheckBox]:
         return self._checkboxes
 
-    def spend_labels(self) -> dict[Provider, QLabel]:
+    def spend_labels(self) -> dict[str, QLabel]:
         return self._spend_labels
 
-    def selected_model(self, p: Provider) -> str:
-        return self._combos[p].currentText()
+    def selected_model(self, persona_id: str) -> str:
+        return self._combos[persona_id].currentText()
 
     def layout_ref(self) -> QHBoxLayout:
-        """Expose the HBox so MainWindow can append trailing widgets
-        (column button, settings button) after the panel is built."""
         return self._layout
 
     # ------------------------------------------------------------------
     # Selection sync
     # ------------------------------------------------------------------
 
-    def sync_checkboxes(self, selected: set[Provider]) -> None:
-        """Set checkbox state to match the given selection without
-        re-emitting stateChanged signals."""
-        for p, cb in self._checkboxes.items():
+    def sync_checkboxes(self, selected_ids: set[str]) -> None:
+        """Set checkbox state to match the given persona_id set."""
+        for pid, cb in self._checkboxes.items():
             cb.blockSignals(True)
-            cb.setChecked(p in selected)
+            cb.setChecked(pid in selected_ids)
             cb.blockSignals(False)
 
-    def checked_providers(self) -> list[Provider]:
-        return [p for p, cb in self._checkboxes.items() if cb.isChecked()]
+    def checked_persona_ids(self) -> list[str]:
+        return [pid for pid, cb in self._checkboxes.items() if cb.isChecked()]
 
     # ------------------------------------------------------------------
     # Model combos
     # ------------------------------------------------------------------
 
-    def set_models(
+    def set_persona_models(
         self,
-        p: Provider,
+        persona_id: str,
         models: list[str],
-        configured_providers: set[Provider],
+        current_override: str | None = None,
     ) -> None:
-        """Fill a combo's model list, preserve the current selection,
-        and disable combo + checkbox when the provider has no API key."""
-        combo = self._combos[p]
-        meta = PROVIDER_META[p.value]
-        current = combo.currentText() or self._config.get(meta["model_key"])
+        """Fill a persona's model combo. First item is always
+        'Use provider default'."""
+        if persona_id not in self._combos:
+            return
+        combo = self._combos[persona_id]
+        provider = self._persona_providers.get(persona_id)
         combo.blockSignals(True)
         combo.clear()
+        combo.addItem("Use provider default")
         if models:
             combo.addItems(models)
-        if current and combo.findText(current) < 0:
-            combo.insertItem(0, current)
-        if not combo.count() and current:
-            combo.addItem(current)
-        idx = combo.findText(current)
-        if idx >= 0:
+        if current_override:
+            idx = combo.findText(current_override)
+            if idx < 0:
+                combo.addItem(current_override)
+                idx = combo.findText(current_override)
             combo.setCurrentIndex(idx)
-        combo.setEnabled(p in configured_providers)
+        else:
+            combo.setCurrentIndex(0)
         combo.blockSignals(False)
-        self._checkboxes[p].setEnabled(p in configured_providers)
 
     def populate_from_config(self, configured_providers: set[Provider]) -> None:
-        """Fill combos with config defaults only — no API calls."""
-        for p in Provider:
-            meta = PROVIDER_META[p.value]
-            current = self._config.get(meta["model_key"])
-            self.set_models(p, [current] if current else [], configured_providers)
-
-    def populate_from_providers(
-        self,
-        providers: dict[Provider, object],
-    ) -> None:
-        """Full synchronous populate — calls provider.list_models() directly."""
-        configured = set(providers.keys())
-        for p in Provider:
-            provider = providers.get(p)
-            models: list[str] = []
-            if provider:
-                try:
-                    models = provider.list_models()
-                except Exception:
-                    models = []
-            self.set_models(p, models, configured)
+        """Fill combos with config defaults — no API calls."""
+        for pid, _label, provider in self._personas:
+            if provider in configured_providers:
+                meta = PROVIDER_META[provider.value]
+                current = self._config.get(meta["model_key"])
+                self.set_persona_models(pid, [current] if current else [])
 
     def populate_async(
         self,
         providers: dict[Provider, object],
         on_done: Callable[[], None] | None = None,
     ) -> None:
-        """Fetch model lists in a background QThread and update combos
-        on the main thread when done. The optional callback runs after
-        combos have been updated."""
+        """Fetch model lists in background and update persona combos."""
         if not providers:
             return
-        configured = set(providers.keys())
 
         def fetch_all() -> dict[Provider, list[str]]:
             results: dict[Provider, list[str]] = {}
@@ -270,9 +300,12 @@ class ProviderPanel(QFrame):
         self._model_fetcher = _ModelFetcher()
 
         def _on_done(results: dict) -> None:
-            for p, models in results.items():
+            for provider, models in results.items():
                 if models:
-                    self.set_models(p, models, configured)
+                    # Update every persona that uses this provider
+                    for pid, _label, prov in self._personas:
+                        if prov == provider:
+                            self.set_persona_models(pid, models)
             self._model_fetcher = None
             if on_done is not None:
                 on_done()
@@ -284,35 +317,37 @@ class ProviderPanel(QFrame):
     # Styling
     # ------------------------------------------------------------------
 
-    def _provider_color(self, p: Provider) -> str:
-        return self._config.get(PROVIDER_META[p.value]["color_key"])
+    def _provider_color(self, provider: Provider) -> str:
+        return self._config.get(PROVIDER_META[provider.value]["color_key"])
 
-    def apply_combo_provider_style(self, p: Provider) -> None:
-        color = self._provider_color(p)
-        combo = self._combos[p]
-        if combo.isEnabled():
-            combo.setStyleSheet(f"QComboBox {{ background-color: {color}; }}")
-        else:
-            combo.setStyleSheet(
-                "QComboBox { background-color: #e0e0e0; color: #999; }"
-            )
+    def apply_combo_style(self, persona_id: str) -> None:
+        provider = self._persona_providers.get(persona_id)
+        if provider is None:
+            return
+        color = self._provider_color(provider)
+        combo = self._combos[persona_id]
+        combo.setStyleSheet(f"QComboBox {{ background-color: {color}; }}")
 
     def apply_all_combo_styles(self) -> None:
-        for p in Provider:
-            self.apply_combo_provider_style(p)
+        for pid in self._combos:
+            self.apply_combo_style(pid)
 
-    def set_combo_waiting(self, p: Provider, waiting: bool) -> None:
-        combo = self._combos[p]
+    def set_combo_waiting(self, persona_id: str, waiting: bool) -> None:
+        if persona_id not in self._combos:
+            return
+        combo = self._combos[persona_id]
         if waiting:
             combo.setStyleSheet(
                 "QComboBox { border: 2px solid #e8a020; background-color: #fff8e0; "
                 "font-weight: bold; }"
             )
         else:
-            self.apply_combo_provider_style(p)
+            self.apply_combo_style(persona_id)
 
-    def set_combo_retrying(self, p: Provider) -> None:
-        combo = self._combos[p]
+    def set_combo_retrying(self, persona_id: str) -> None:
+        if persona_id not in self._combos:
+            return
+        combo = self._combos[persona_id]
         combo.setStyleSheet(
             "QComboBox { border: 2px solid #d04040; background-color: #ffe0e0; "
             "font-weight: bold; }"
@@ -333,9 +368,8 @@ class ProviderPanel(QFrame):
     # ------------------------------------------------------------------
 
     def update_spend(self, spend: dict[str, tuple[float, bool]]) -> None:
-        for p in Provider:
-            label = self._spend_labels[p]
-            entry = spend.get(p.value)
+        for pid, label in self._spend_labels.items():
+            entry = spend.get(pid)
             if entry:
                 amount, estimated = entry
                 text = format_cost(amount) if amount else "$0.00000"

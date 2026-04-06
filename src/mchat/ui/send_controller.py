@@ -430,7 +430,7 @@ class SendController:
 
     def send_single(self, target: PersonaTarget) -> None:
         """Send to a single persona (kept distinct for clarity)."""
-        self._host._set_combo_waiting(target.provider, True)
+        self._host._set_combo_waiting(target.persona_id, True)
         self.send_multi([target])
 
     def send_multi(
@@ -454,7 +454,7 @@ class SendController:
             persona = load_persona_for_target(conv, target, svc.db)
             model = resolve_persona_model(persona, svc.config)
             provider = svc.router.get_provider(target.provider)
-            host._set_combo_waiting(target.provider, True)
+            host._set_combo_waiting(target.persona_id, True)
 
             if context_override and target.persona_id in context_override:
                 context_messages = context_override[target.persona_id]
@@ -485,7 +485,7 @@ class SendController:
                 lambda error, t=target: self._on_error(t, error)
             )
             worker.retrying.connect(
-                lambda attempt, mx, t=target: host._set_combo_retrying(t.provider)
+                lambda attempt, mx, t=target: host._set_combo_retrying(t.persona_id)
             )
             self._multi_workers[target.persona_id] = worker
             worker.start()
@@ -505,16 +505,15 @@ class SendController:
     ) -> None:
         host = self._host
         svc = self._services
-        host._set_combo_waiting(target.provider, False)
+        host._set_combo_waiting(target.persona_id, False)
         self._multi_workers.pop(target.persona_id, None)
 
-        # Update spend (still per-provider — billing unit is the provider,
-        # not the persona. Per-persona spend breakdown is FE3.)
+        # Per-persona spend tracking (Stage 4.5)
         cost = estimate_cost(model, input_tokens, output_tokens)
         current = svc.session.current
         if cost is not None and current is not None:
             svc.db.add_conversation_spend(
-                current.id, target.provider.value, cost, estimated
+                current.id, target.persona_id, cost, estimated
             )
         host._update_spend_labels()
 
@@ -544,7 +543,7 @@ class SendController:
     def _on_error(self, target: PersonaTarget, error: str) -> None:
         host = self._host
         svc = self._services
-        host._set_combo_waiting(target.provider, False)
+        host._set_combo_waiting(target.persona_id, False)
         worker = self._multi_workers.pop(target.persona_id, None)
         transient = worker.last_error_transient if worker else False
 
