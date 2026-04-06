@@ -556,6 +556,10 @@ class MainWindow(QMainWindow):
 
     def _on_new_chat(self) -> None:
         self._conv_mgr.new_chat()
+        # Auto-open PersonaDialog so the user can set up their first
+        # persona immediately (persona-first UX).
+        if self._current_conv:
+            self._on_personas_requested(self._current_conv.id)
 
     def _on_rename_conversation(self, conv_id: int, new_title: str) -> None:
         self._conv_mgr.on_rename(conv_id, new_title)

@@ -69,6 +69,11 @@ def main_window(qtbot, tmp_path, monkeypatch):
 
     db = Database(db_path=tmp_path / "test.db")
 
+    # Patch PersonaDialog.exec so _on_new_chat's auto-open doesn't
+    # block tests on a modal dialog.
+    import mchat.ui.persona_dialog as pd_mod
+    monkeypatch.setattr(pd_mod.PersonaDialog, "exec", lambda self: 0)
+
     from mchat.ui.main_window import MainWindow
     window = MainWindow(cfg, db)
     qtbot.addWidget(window)

@@ -57,9 +57,10 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
 
     match = _ADDPERSONA_RE.match(arg)
     if not match:
-        host._chat.add_note(
-            'Error: //addpersona <provider> as "<name>" [inherit|new] <prompt>'
-        )
+        # No args (or malformed): open the PersonaDialog instead of
+        # showing a usage error. The dialog provides a full GUI for
+        # creating personas.
+        host._on_personas_requested(host._current_conv.id)
         return True
 
     provider_token = match.group(1).lower()
