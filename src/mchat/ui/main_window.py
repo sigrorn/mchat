@@ -317,6 +317,12 @@ class MainWindow(QMainWindow):
         self._column_btn.clicked.connect(self._toggle_column_mode)
         self._bar_layout.addWidget(self._column_btn)
 
+        # Personas button — opens PersonaDialog for the current conversation
+        self._personas_btn = QPushButton("👤 Personas")
+        self._apply_settings_btn_style(self._personas_btn)
+        self._personas_btn.clicked.connect(self._open_personas)
+        self._bar_layout.addWidget(self._personas_btn)
+
         # Providers button (per-provider config — API keys, models,
         # provider colours, provider system prompts) next to Settings.
         self._providers_btn = QPushButton("☁ Providers")
@@ -442,7 +448,7 @@ class MainWindow(QMainWindow):
             btn.setStyleSheet(style)
             return
         # No argument → style every bar button that exists
-        for attr in ("_settings_btn", "_providers_btn"):
+        for attr in ("_settings_btn", "_providers_btn", "_personas_btn"):
             b = getattr(self, attr, None)
             if b is not None:
                 b.setStyleSheet(style)
@@ -573,23 +579,79 @@ class MainWindow(QMainWindow):
     def _on_personas_requested(self, conv_id: int) -> None:
         """Open the PersonaDialog for the given conversation.
 
-        Stage 3A.3: the sidebar's "Personas..." context-menu action
-        emits this signal, we construct a modal PersonaDialog bound
-        to the current DB + Config + conversation id, exec it, and
-        refresh the chat after the dialog closes so any model/
-        colour override changes take immediate effect.
+        After the dialog closes, diff the persona list to detect newly
+        created personas and generate the same pinned instructions +
+        selection updates that the command-line //addpersona path does.
         """
         from mchat.ui.persona_dialog import PersonaDialog
+        from mchat.ui.persona_target import PersonaTarget
+
+        # Snapshot before
+        before_ids = {p.id for p in self._db.list_personas(conv_id)}
+
         dialog = PersonaDialog(
             self._db, self._config, conv_id, parent=self,
             models_cache=self._model_catalog.all(),
         )
         dialog.exec()
-        # Any persona change should trigger a re-render so the new
-        # colour / label / cutoff takes effect. _display_messages
-        # refreshes the persona colour resolver cache internally.
-        if self._current_conv and self._current_conv.id == conv_id:
-            self._display_messages(self._current_conv.messages)
+
+        # Diff: find newly created personas
+        after = self._db.list_personas(conv_id)
+        new_personas = [p for p in after if p.id not in before_ids]
+
+        conv = self._current_conv
+        if conv and conv.id == conv_id and new_personas:
+            for persona in new_personas:
+                # Pinned name instruction
+                name_instruction = Message(
+                    role=Role.USER,
+                    content=(
+                        f"Unless I say otherwise, for the scope of our chat, "
+                        f"if my inputs refer to your name, use {persona.name} "
+                        f"as your name. I might refer to it in order to use it "
+                        f"as a placeholder, and I want you to refer to yourself "
+                        f"as {persona.name}."
+                    ),
+                    conversation_id=conv_id,
+                    pinned=True,
+                    pin_target=persona.provider.value,
+                )
+                self._db.add_message(name_instruction)
+                conv.messages.append(name_instruction)
+
+                # Pinned setup note
+                mode_label = (
+                    "inherit" if persona.created_at_message_index is None else "new"
+                )
+                prompt_text = persona.system_prompt_override or ""
+                note_text = (
+                    f'Added persona "{persona.name}" '
+                    f"({persona.provider.value}, {mode_label})"
+                    + (f": {prompt_text}" if prompt_text else "")
+                )
+                note_msg = Message(
+                    role=Role.USER,
+                    content=note_text,
+                    conversation_id=conv_id,
+                    pinned=True,
+                    pin_target=persona.provider.value,
+                )
+                self._db.add_message(note_msg)
+                conv.messages.append(note_msg)
+
+                # Add to selection
+                target = PersonaTarget(
+                    persona_id=persona.id, provider=persona.provider,
+                )
+                current = list(self._selection_state.selection)
+                if target not in current:
+                    current.append(target)
+                self._selection_state.set(current)
+
+        # Re-render so colour / label / cutoff / new pins take effect.
+        if conv and conv.id == conv_id:
+            self._display_messages(conv.messages)
+            self._sync_matrix_panel()
 
     # ------------------------------------------------------------------
     # Messaging
@@ -829,6 +891,12 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._prefs.save_geometry()
         super().closeEvent(event)
+
+    def _open_personas(self) -> None:
+        if self._current_conv:
+            self._on_personas_requested(self._current_conv.id)
+        else:
+            self._chat.add_note("Error: no active conversation")
 
     def _open_settings(self) -> None:
         self._settings_applier.open_settings()
