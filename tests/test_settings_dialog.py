@@ -154,3 +154,12 @@ class TestProvidersDialog:
         d._color_btns["claude"].setProperty("hex_color", "#ffffff")
         d._reset_colors()
         assert d._color_btns["claude"].property("hex_color") == DEFAULTS["color_claude"]
+
+    def test_mistral_tab_exists(self, qtbot, config):
+        """#80 — ProvidersDialog must have a Mistral tab."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        assert "mistral" in d._api_key_edits
+        assert "mistral" in d._color_btns
+        assert "mistral" in d._system_prompt_edits

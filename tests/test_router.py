@@ -235,3 +235,13 @@ class TestRouterEmptySelection:
         targets, text = router.parse("all, compare these")
         assert set(targets) == set(mock_providers.keys())
         assert text == "compare these"
+
+
+class TestMistralPrefix:
+    """#80 — Mistral as a provider must be routable via a prefix."""
+
+    def test_mistral_prefix(self, mock_providers):
+        router = Router(mock_providers, default=Provider.CLAUDE)
+        targets, text = router.parse("mistral, explain this")
+        assert targets == [Provider.MISTRAL]
+        assert text == "explain this"

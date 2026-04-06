@@ -30,6 +30,20 @@ class TestEstimateCost:
         assert cost == 0.0
 
 
+class TestMistralPricing:
+    """#80 — Mistral model families must have pricing entries."""
+
+    def test_mistral_large_pricing(self):
+        cost = estimate_cost("mistral-large-latest", 1000, 500)
+        assert cost is not None
+        assert cost > 0
+
+    def test_mistral_small_pricing(self):
+        cost = estimate_cost("mistral-small-latest", 1000, 500)
+        assert cost is not None
+        assert cost > 0
+
+
 class TestFormatCost:
     def test_format(self):
         assert format_cost(0.00123) == "$0.00123"

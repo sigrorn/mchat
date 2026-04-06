@@ -57,3 +57,23 @@ class TestConfig:
         path.write_text("", encoding="utf-8")
         config = Config(config_path=path)
         assert config.get("default_provider") == "claude"
+
+
+class TestMistralConfig:
+    """#80 — Mistral config keys must exist in DEFAULTS and PROVIDER_META."""
+
+    def test_mistral_defaults_exist(self, config):
+        assert config.get("mistral_api_key") == ""
+        assert config.get("mistral_model") != ""  # has a default model
+        assert config.get("color_mistral") != ""
+        assert config.get("system_prompt_mistral") == ""
+
+    def test_mistral_provider_meta(self):
+        from mchat.config import PROVIDER_META
+        assert "mistral" in PROVIDER_META
+        meta = PROVIDER_META["mistral"]
+        assert "api_key" in meta
+        assert "model_key" in meta
+        assert "color_key" in meta
+        assert "system_prompt_key" in meta
+        assert "display" in meta

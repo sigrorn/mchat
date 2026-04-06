@@ -59,10 +59,11 @@ def main_window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(mw_mod, "OpenAIProvider", make_fake_provider_class(Provider.OPENAI))
     monkeypatch.setattr(mw_mod, "GeminiProvider", make_fake_provider_class(Provider.GEMINI))
     monkeypatch.setattr(mw_mod, "PerplexityProvider", make_fake_provider_class(Provider.PERPLEXITY))
+    monkeypatch.setattr(mw_mod, "MistralProvider", make_fake_provider_class(Provider.MISTRAL))
 
     cfg = Config(config_path=tmp_path / "cfg.json")
     # Populate fake keys so every provider is "configured"
-    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "perplexity_api_key"):
+    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "perplexity_api_key", "mistral_api_key"):
         cfg.set(k, "fake-key")
     cfg.save()
 
@@ -90,7 +91,7 @@ class TestComposition:
         assert main_window._router is not None
 
     def test_all_providers_wired_when_all_keys_present(self, main_window):
-        """With fake keys for all four providers, the router contains all of them."""
+        """With fake keys for all providers, the router contains all of them."""
         assert set(main_window._router._providers.keys()) == set(Provider)
 
     def test_combos_and_checkboxes_built_per_provider(self, main_window):

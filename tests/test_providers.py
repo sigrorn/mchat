@@ -61,3 +61,32 @@ class TestFormatMessagesOpenai:
         result = BaseProvider.format_messages_openai(msgs, Provider.GEMINI)
         assert result[0]["role"] == "user"
         assert "[OPENAI responded]" in result[0]["content"]
+
+
+class TestMistralProvider:
+    """#80 — MistralProvider must exist and implement BaseProvider."""
+
+    def test_provider_class_exists(self):
+        from mchat.providers.mistral_provider import MistralProvider
+        assert issubclass(MistralProvider, BaseProvider)
+
+    def test_provider_id(self):
+        from mchat.providers.mistral_provider import MistralProvider
+        # Can't instantiate without a real key, but we can check the class
+        # provides provider_id == Provider.MISTRAL
+        from unittest.mock import patch, MagicMock
+        with patch("mchat.providers.mistral_provider.Mistral") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            p = MistralProvider(api_key="fake", default_model="mistral-large-latest")
+            assert p.provider_id == Provider.MISTRAL
+            assert p.display_name == "Mistral"
+
+    def test_cross_provider_formatting_with_mistral(self):
+        """Messages from Mistral should be reformatted as user context
+        when sent to another provider."""
+        msgs = [
+            Message(role=Role.ASSISTANT, content="I think Y", provider=Provider.MISTRAL),
+        ]
+        result = BaseProvider.format_messages_openai(msgs, Provider.OPENAI)
+        assert result[0]["role"] == "user"
+        assert "[MISTRAL responded]" in result[0]["content"]
