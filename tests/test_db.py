@@ -121,6 +121,17 @@ class TestConversationSpend:
         spend = db.get_conversation_spend(conv.id)
         assert spend["gemini"][1] is True
 
+    def test_per_persona_spend(self, db):
+        """#95 — spend should be trackable per persona_id, not just
+        per provider. Two Claude personas accumulate separately."""
+        conv = db.create_conversation()
+        db.add_conversation_spend(conv.id, "p_partner", 0.005)
+        db.add_conversation_spend(conv.id, "p_evaluator", 0.003)
+        db.add_conversation_spend(conv.id, "p_partner", 0.002)
+        spend = db.get_conversation_spend(conv.id)
+        assert abs(spend["p_partner"][0] - 0.007) < 1e-9
+        assert abs(spend["p_evaluator"][0] - 0.003) < 1e-9
+
     def test_spend_deleted_with_conversation(self, db):
         conv = db.create_conversation()
         db.add_conversation_spend(conv.id, "claude", 0.005)

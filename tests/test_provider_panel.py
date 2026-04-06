@@ -18,6 +18,49 @@ def config(tmp_path):
     return cfg
 
 
+class TestProviderPanelPersonaRows:
+    """#95 — toolbar shows one row per persona, not per provider."""
+
+    def test_persona_rows_built(self, qtbot, config):
+        """set_personas should build one row per persona entry."""
+        from mchat.ui.provider_panel import ProviderPanel
+        from mchat.models.message import Provider
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas([
+            ("p_partner", "Partner", Provider.CLAUDE),
+            ("p_checker", "Checker", Provider.OPENAI),
+        ])
+        # Should have checkboxes and combos keyed by persona_id
+        assert "p_partner" in panel._checkboxes
+        assert "p_checker" in panel._checkboxes
+        assert "p_partner" in panel._combos
+        assert "p_checker" in panel._combos
+
+    def test_checkbox_keyed_by_persona_id(self, qtbot, config):
+        """Checkboxes should be keyed by persona_id string, not Provider."""
+        from mchat.ui.provider_panel import ProviderPanel
+        from mchat.models.message import Provider
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas([
+            ("p_partner", "Partner", Provider.CLAUDE),
+        ])
+        # Should NOT have Provider-keyed checkboxes
+        assert Provider.CLAUDE not in panel._checkboxes
+        assert "p_partner" in panel._checkboxes
+
+    def test_spend_label_keyed_by_persona_id(self, qtbot, config):
+        from mchat.ui.provider_panel import ProviderPanel
+        from mchat.models.message import Provider
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas([
+            ("p_partner", "Partner", Provider.CLAUDE),
+        ])
+        assert "p_partner" in panel._spend_labels
+
+
 class TestProviderPanelEmptyState:
     """Stage 3A.4 — when the selection is empty, the panel should
     show an empty-state hint and a Personas... button instead of
