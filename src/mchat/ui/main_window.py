@@ -537,10 +537,28 @@ class MainWindow(QMainWindow):
         self._conv_mgr.on_conversation_selected(conv_id)
 
     def _sync_matrix_panel(self) -> None:
-        """Rebuild the matrix panel for the currently configured providers
-        and populate it from the current conversation's visibility matrix."""
-        configured = list(self._router._providers.keys()) if self._router else []
-        self._matrix_panel.set_providers(configured)
+        """Rebuild the matrix panel for the current conversation's
+        personas (explicit + synthetic defaults for uncovered providers)
+        and populate it from the stored visibility matrix."""
+        configured = set(self._router._providers.keys()) if self._router else set()
+        entries: list[tuple[str, str, Provider]] = []
+        if self._current_conv:
+            from mchat.config import PROVIDER_META
+            personas = self._db.list_personas(self._current_conv.id)
+            covered_providers: set[Provider] = set()
+            for p in personas:
+                entries.append((p.id, p.name, p.provider))
+                covered_providers.add(p.provider)
+            # Synthetic defaults for configured providers with no explicit personas
+            for prov in Provider:
+                if prov in configured and prov not in covered_providers:
+                    entries.append((prov.value, PROVIDER_META[prov.value]["display"], prov))
+        else:
+            from mchat.config import PROVIDER_META
+            for prov in Provider:
+                if prov in configured:
+                    entries.append((prov.value, PROVIDER_META[prov.value]["display"], prov))
+        self._matrix_panel.set_personas(entries)
         if self._current_conv:
             self._matrix_panel.load_matrix(self._current_conv.visibility_matrix or {})
 

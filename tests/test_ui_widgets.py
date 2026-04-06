@@ -105,22 +105,22 @@ class TestMatrixPanel:
         panel.set_providers([Provider.CLAUDE, Provider.OPENAI])
         panel.show()
         qtbot.waitExposed(panel)
-        # Off-diagonal checkboxes exist for both directions
-        assert (Provider.CLAUDE, Provider.OPENAI) in panel._checkboxes
-        assert (Provider.OPENAI, Provider.CLAUDE) in panel._checkboxes
+        # Off-diagonal checkboxes exist for both directions (string keys)
+        assert ("claude", "openai") in panel._checkboxes
+        assert ("openai", "claude") in panel._checkboxes
         # Diagonal exists and is disabled
-        diag = panel._checkboxes[(Provider.CLAUDE, Provider.CLAUDE)]
+        diag = panel._checkboxes[("claude", "claude")]
         assert diag.isChecked() is True
         assert diag.isEnabled() is False
 
     def test_load_matrix_applies_restrictions(self, panel):
         panel.set_providers([Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI])
         panel.load_matrix({"openai": ["claude"]})  # openai cannot see gemini
-        assert panel._checkboxes[(Provider.OPENAI, Provider.CLAUDE)].isChecked() is True
-        assert panel._checkboxes[(Provider.OPENAI, Provider.GEMINI)].isChecked() is False
+        assert panel._checkboxes[("openai", "claude")].isChecked() is True
+        assert panel._checkboxes[("openai", "gemini")].isChecked() is False
         # Other observers remain fully visible (full visibility)
-        assert panel._checkboxes[(Provider.CLAUDE, Provider.OPENAI)].isChecked() is True
-        assert panel._checkboxes[(Provider.CLAUDE, Provider.GEMINI)].isChecked() is True
+        assert panel._checkboxes[("claude", "openai")].isChecked() is True
+        assert panel._checkboxes[("claude", "gemini")].isChecked() is True
 
     def test_to_matrix_omits_full_visibility(self, panel):
         panel.set_providers([Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI])
@@ -142,19 +142,19 @@ class TestMatrixPanel:
         assert result.get("openai") == ["claude"]
 
     def test_state_cached_across_rebuild(self, panel):
-        # Start with all four providers, uncheck claude->openai
+        # Start with all providers, uncheck claude->openai
         panel.set_providers(list(Provider))
-        panel._checkboxes[(Provider.CLAUDE, Provider.OPENAI)].setChecked(False)
+        panel._checkboxes[("claude", "openai")].setChecked(False)
         # Remove perplexity (simulating API key removal) and put it back
         panel.set_providers([Provider.CLAUDE, Provider.OPENAI, Provider.GEMINI])
         panel.set_providers(list(Provider))
         # The claude->openai restriction must have survived the rebuild
-        assert panel._checkboxes[(Provider.CLAUDE, Provider.OPENAI)].isChecked() is False
+        assert panel._checkboxes[("claude", "openai")].isChecked() is False
 
     def test_toggle_emits_signal(self, panel, qtbot):
         panel.set_providers([Provider.CLAUDE, Provider.OPENAI])
         with qtbot.waitSignal(panel.matrix_changed, timeout=1000) as blocker:
-            panel._checkboxes[(Provider.CLAUDE, Provider.OPENAI)].setChecked(False)
+            panel._checkboxes[("claude", "openai")].setChecked(False)
         emitted_matrix = blocker.args[0]
         assert "claude" in emitted_matrix
         assert "openai" not in emitted_matrix["claude"]

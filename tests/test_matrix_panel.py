@@ -81,11 +81,14 @@ class TestMatrixPanelPersonaKeying:
         panel.set_personas([
             ("claude", "Claude", Provider.CLAUDE),
             ("openai", "GPT", Provider.OPENAI),
+            ("gemini", "Gemini", Provider.GEMINI),
         ])
+        # openai can see claude but NOT gemini
         panel.load_matrix({"openai": ["claude"]})
         matrix = panel.to_matrix()
         assert "openai" in matrix
-        assert matrix["openai"] == ["claude"]
+        assert "claude" in matrix["openai"]
+        assert "gemini" not in matrix["openai"]
 
     def test_single_persona_hides_panel(self, qtbot):
         from mchat.ui.matrix_panel import MatrixPanel
