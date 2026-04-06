@@ -378,12 +378,29 @@ class MainWindow(QMainWindow):
         """Rebuild the toolbar rows from the current conversation's
         personas. Called on conversation switch and after persona changes."""
         entries: list[tuple[str, str, Provider]] = []
+        personas = []
         if self._current_conv:
-            for p in self._db.list_personas(self._current_conv.id):
+            personas = self._db.list_personas(self._current_conv.id)
+            for p in personas:
                 entries.append((p.id, p.name, p.provider))
         self._provider_panel.set_personas(entries)
         if entries:
-            self._populate_model_combos_fast()
+            # Populate model combos from the catalog (full model lists
+            # fetched at startup) rather than just the config default.
+            for p in personas:
+                cached = self._model_catalog.get(p.provider)
+                if cached:
+                    self._provider_panel.set_persona_models(
+                        p.id, cached, p.model_override,
+                    )
+                else:
+                    # Fall back to config default only
+                    meta = PROVIDER_META.get(p.provider.value, {})
+                    model_key = meta.get("model_key", "")
+                    default = self._config.get(model_key) if model_key else ""
+                    self._provider_panel.set_persona_models(
+                        p.id, [default] if default else [], p.model_override,
+                    )
             self._apply_all_combo_styles()
             self._sync_checkboxes_from_selection()
 
@@ -392,18 +409,51 @@ class MainWindow(QMainWindow):
         self._provider_panel.populate_from_config(configured)
 
     def _populate_model_combos_async(self) -> None:
+        """Fetch model lists in background. Updates the model catalog
+        directly from fetch results (not from combos, which may not
+        exist yet if no personas are in the current conversation).
+        Then refreshes the toolbar if persona rows exist."""
         providers = self._router._providers if self._router else {}
+        if not providers:
+            return
 
-        def _on_async_done() -> None:
-            # Sync the model catalog from fetched results
-            for prov, combo in self._provider_panel.combos().items():
-                items = [combo.itemText(i) for i in range(combo.count())
-                         if combo.itemText(i) != "Use provider default"]
-                provider = self._provider_panel._persona_providers.get(prov)
-                if items and provider:
-                    self._model_catalog.set(provider, items)
+        import concurrent.futures
 
-        self._provider_panel.populate_async(providers, on_done=_on_async_done)
+        def fetch_all() -> dict[Provider, list[str]]:
+            results: dict[Provider, list[str]] = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {
+                    pool.submit(prov.list_models): pid
+                    for pid, prov in providers.items()
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    pid = futures[future]
+                    try:
+                        results[pid] = future.result()
+                    except Exception:
+                        results[pid] = []
+            return results
+
+        from PySide6.QtCore import QThread, Signal as _Sig
+
+        class _Fetcher(QThread):
+            done = _Sig(object)
+            def run(self_inner):
+                self_inner.done.emit(fetch_all())
+
+        self._model_fetcher = _Fetcher()
+
+        def _on_done(results: dict) -> None:
+            for provider, models in results.items():
+                if models:
+                    self._model_catalog.set(provider, models)
+            # Refresh toolbar combos if persona rows exist
+            if self._provider_panel._personas:
+                self._sync_toolbar_personas()
+            self._model_fetcher = None
+
+        self._model_fetcher.done.connect(_on_done)
+        self._model_fetcher.start()
 
     def _populate_model_combos(self) -> None:
         providers = self._router._providers if self._router else {}
