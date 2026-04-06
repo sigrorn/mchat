@@ -663,6 +663,53 @@ class TestPersonaSelectionAdjust:
         assert evaluator.id in persona_ids
 
 
+class TestNewChatOpensPersonaDialog:
+    """#93 — new chat should auto-open PersonaDialog."""
+
+    def test_new_chat_opens_persona_dialog(self, main_window, monkeypatch):
+        """_on_new_chat should open PersonaDialog after creating
+        the conversation."""
+        constructed = []
+
+        import mchat.ui.persona_dialog as pd_mod
+        original = pd_mod.PersonaDialog
+
+        class SpyDialog(original):
+            def __init__(self, db, config, conv_id_arg, parent=None, **kwargs):
+                constructed.append(conv_id_arg)
+                super().__init__(db, config, conv_id_arg, parent=parent, **kwargs)
+
+            def exec(self):
+                return 0  # don't block
+
+        monkeypatch.setattr(pd_mod, "PersonaDialog", SpyDialog)
+        main_window._on_new_chat()
+        assert len(constructed) == 1
+        assert constructed[0] == main_window._current_conv.id
+
+    def test_closing_dialog_without_persona_leaves_empty_chat(
+        self, main_window, monkeypatch,
+    ):
+        """Closing the dialog without creating a persona should leave
+        the chat in the empty state (no crash)."""
+        import mchat.ui.persona_dialog as pd_mod
+        original = pd_mod.PersonaDialog
+
+        class NoOpDialog(original):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def exec(self):
+                return 0  # close without creating anything
+
+        monkeypatch.setattr(pd_mod, "PersonaDialog", NoOpDialog)
+        main_window._on_new_chat()
+        # Should have a conversation but no personas
+        assert main_window._current_conv is not None
+        personas = main_window._db.list_personas(main_window._current_conv.id)
+        assert len(personas) == 0
+
+
 class TestUnknownCommandHandling:
     """#92 — unknown // commands and single-/ typos should show an error,
     not be sent to a provider."""

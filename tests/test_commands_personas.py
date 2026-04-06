@@ -358,6 +358,32 @@ class TestListPersonas:
         assert "no personas" in notes.lower() or "none" in notes.lower()
 
 
+class TestAddPersonaOpensDialog:
+    """#93 — //addpersona with no args should open the PersonaDialog."""
+
+    def test_no_args_opens_dialog(self, host, db):
+        """//addpersona (no args) should call _on_personas_requested."""
+        from mchat.ui.commands.personas import handle_addpersona
+        handle_addpersona("", host)
+        host._on_personas_requested.assert_called_once_with(
+            host._current_conv.id
+        )
+
+    def test_no_args_does_not_show_error(self, host, db):
+        """//addpersona (no args) should NOT show the usage error."""
+        from mchat.ui.commands.personas import handle_addpersona
+        handle_addpersona("", host)
+        assert not any("Error" in n for n in host._chat.notes)
+
+    def test_with_args_still_uses_command_path(self, host, db):
+        """//addpersona with args should NOT open the dialog."""
+        from mchat.ui.commands.personas import handle_addpersona
+        handle_addpersona('claude as "Partner" new hello', host)
+        host._on_personas_requested.assert_not_called()
+        personas = db.list_personas(host._current_conv.id)
+        assert len(personas) == 1
+
+
 class TestDispatch:
     """Verify the dispatch router in commands/__init__.py wires the
     new handlers correctly."""
