@@ -715,6 +715,77 @@ class TestNewChatOpensPersonaDialog:
         assert len(personas) == 0
 
 
+class TestDialogCreatedPersonasPinsAndSelection:
+    """#93 follow-up — personas created via the PersonaDialog should
+    get the same pinned instructions and selection updates as the
+    command-line path."""
+
+    def test_dialog_created_persona_gets_pins(self, main_window, monkeypatch):
+        """After closing the PersonaDialog with a newly created persona,
+        pinned name instruction + setup note should exist."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        import mchat.ui.persona_dialog as pd_mod
+        original = pd_mod.PersonaDialog
+
+        class AutoCreateDialog(original):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def exec(self):
+                self.create_persona(
+                    provider=Provider.CLAUDE,
+                    name="Partner",
+                    system_prompt_override="Be kind",
+                )
+                return 1
+
+        monkeypatch.setattr(pd_mod, "PersonaDialog", AutoCreateDialog)
+        main_window._on_personas_requested(conv_id)
+
+        messages = main_window._db.get_messages(conv_id)
+        pinned = [m for m in messages if m.pinned]
+        assert len(pinned) >= 2
+        assert any("use Partner as your name" in m.content for m in pinned)
+        assert any("Added persona" in m.content and "Partner" in m.content for m in pinned)
+
+    def test_dialog_created_persona_added_to_selection(self, main_window, monkeypatch):
+        """After closing the PersonaDialog with a new persona, the
+        persona should be in the selection."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        import mchat.ui.persona_dialog as pd_mod
+        original = pd_mod.PersonaDialog
+
+        class AutoCreateDialog(original):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def exec(self):
+                self.create_persona(
+                    provider=Provider.OPENAI,
+                    name="Checker",
+                )
+                return 1
+
+        monkeypatch.setattr(pd_mod, "PersonaDialog", AutoCreateDialog)
+        main_window._on_personas_requested(conv_id)
+
+        selection = main_window._selection_state.selection
+        providers = {t.provider for t in selection}
+        assert Provider.OPENAI in providers
+
+
+class TestPersonasButton:
+    """#93 follow-up — a Personas button in the bar opens the dialog."""
+
+    def test_personas_button_exists(self, main_window):
+        assert hasattr(main_window, "_personas_btn")
+        assert main_window._personas_btn is not None
+
+
 class TestUnknownCommandHandling:
     """#92 — unknown // commands and single-/ typos should show an error,
     not be sent to a provider."""
