@@ -360,3 +360,96 @@ class TestModelOverrideCombo:
         dialog_with_models._on_save_clicked()
         p = db.list_personas(conv.id)[0]
         assert p.model_override is None
+
+
+class TestProviderModelSwitch:
+    """#82 — changing a persona's provider in the dialog should
+    repopulate the model combo and, on save, write both provider
+    and model_override atomically. persona_id stays stable."""
+
+    @pytest.fixture
+    def dialog_with_models(self, qtbot, db, config, conv):
+        from mchat.ui.persona_dialog import PersonaDialog
+        cache = {
+            Provider.CLAUDE: ["claude-sonnet-4", "claude-opus-4"],
+            Provider.OPENAI: ["gpt-4.1", "gpt-4.1-mini"],
+            Provider.MISTRAL: ["mistral-large-latest", "mistral-small-latest"],
+        }
+        d = PersonaDialog(db, config, conv.id, models_cache=cache)
+        qtbot.addWidget(d)
+        return d
+
+    def test_changing_provider_repopulates_model_combo(
+        self, dialog_with_models, db, conv,
+    ):
+        """When the provider combo changes, the model combo should
+        list the new provider's models."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Switcher",
+        )
+        dialog_with_models._refresh_list()
+        dialog_with_models._list.setCurrentRow(0)
+        # Switch provider to OpenAI
+        idx = dialog_with_models._provider_combo.findData(Provider.OPENAI)
+        dialog_with_models._provider_combo.setCurrentIndex(idx)
+        items = [
+            dialog_with_models._model_combo.itemText(i)
+            for i in range(dialog_with_models._model_combo.count())
+        ]
+        assert "gpt-4.1" in items
+        assert "claude-sonnet-4" not in items
+        assert items[0] == "Use provider default"
+
+    def test_changing_provider_resets_model_to_default(
+        self, dialog_with_models, db, conv,
+    ):
+        """After a provider switch, the model combo should reset to
+        'Use provider default'."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Switcher",
+            model_override="claude-opus-4",
+        )
+        dialog_with_models._refresh_list()
+        dialog_with_models._list.setCurrentRow(0)
+        idx = dialog_with_models._provider_combo.findData(Provider.OPENAI)
+        dialog_with_models._provider_combo.setCurrentIndex(idx)
+        assert dialog_with_models._model_combo.currentText() == "Use provider default"
+
+    def test_save_after_provider_switch_writes_both(
+        self, dialog_with_models, db, conv,
+    ):
+        """Saving after a provider switch should write both the new
+        provider and the new model_override."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Switcher",
+        )
+        dialog_with_models._refresh_list()
+        dialog_with_models._list.setCurrentRow(0)
+        original_id = db.list_personas(conv.id)[0].id
+        # Switch to Mistral + pick a specific model
+        idx = dialog_with_models._provider_combo.findData(Provider.MISTRAL)
+        dialog_with_models._provider_combo.setCurrentIndex(idx)
+        midx = dialog_with_models._model_combo.findText("mistral-large-latest")
+        dialog_with_models._model_combo.setCurrentIndex(midx)
+        dialog_with_models._on_save_clicked()
+        p = db.list_personas(conv.id)[0]
+        assert p.id == original_id  # persona_id unchanged
+        assert p.provider == Provider.MISTRAL
+        assert p.model_override == "mistral-large-latest"
+
+    def test_persona_id_unchanged_after_provider_switch(
+        self, dialog_with_models, db, conv,
+    ):
+        """persona_id must be stable across provider switches."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Switcher",
+        )
+        dialog_with_models._refresh_list()
+        dialog_with_models._list.setCurrentRow(0)
+        original_id = db.list_personas(conv.id)[0].id
+        idx = dialog_with_models._provider_combo.findData(Provider.OPENAI)
+        dialog_with_models._provider_combo.setCurrentIndex(idx)
+        dialog_with_models._on_save_clicked()
+        p = db.list_personas(conv.id)[0]
+        assert p.id == original_id
+        assert p.provider == Provider.OPENAI
