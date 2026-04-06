@@ -256,3 +256,102 @@ class TestEffectiveValueDisplay:
             color_override=None,
         )
         assert dialog.effective_color(p) == "#b0b0b0"
+
+
+class TestModelOverrideCombo:
+    """#81 — per-persona model override via a combo in PersonaDialog.
+
+    The dialog should show a QComboBox populated from the provider's
+    model list, with a 'Use provider default' option that maps to
+    model_override=None."""
+
+    @pytest.fixture
+    def dialog_with_models(self, qtbot, db, config, conv):
+        from mchat.ui.persona_dialog import PersonaDialog
+        cache = {
+            Provider.CLAUDE: ["claude-sonnet-4", "claude-opus-4", "claude-haiku-4"],
+            Provider.OPENAI: ["gpt-4.1", "gpt-4.1-mini"],
+        }
+        d = PersonaDialog(db, config, conv.id, models_cache=cache)
+        qtbot.addWidget(d)
+        return d
+
+    def test_model_combo_exists(self, dialog_with_models):
+        """PersonaDialog should have a _model_combo QComboBox."""
+        assert hasattr(dialog_with_models, "_model_combo")
+        from PySide6.QtWidgets import QComboBox
+        assert isinstance(dialog_with_models._model_combo, QComboBox)
+
+    def test_model_combo_has_use_provider_default(self, dialog_with_models, db, conv):
+        """The first item in the model combo should be 'Use provider default'."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test",
+        )
+        # Select the persona to populate the form
+        dialog_with_models._list.setCurrentRow(0)
+        assert dialog_with_models._model_combo.itemText(0) == "Use provider default"
+
+    def test_model_combo_populated_from_cache(self, dialog_with_models, db, conv):
+        """Model combo should contain the provider's models from cache."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test",
+        )
+        dialog_with_models._list.setCurrentRow(0)
+        items = [
+            dialog_with_models._model_combo.itemText(i)
+            for i in range(dialog_with_models._model_combo.count())
+        ]
+        assert "claude-sonnet-4" in items
+        assert "claude-opus-4" in items
+
+    def test_persona_with_none_override_shows_default_selected(
+        self, dialog_with_models, db, conv,
+    ):
+        """A persona with model_override=None should show 'Use provider
+        default' selected."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test", model_override=None,
+        )
+        dialog_with_models._list.setCurrentRow(0)
+        assert dialog_with_models._model_combo.currentText() == "Use provider default"
+
+    def test_persona_with_explicit_override_shows_that_model(
+        self, dialog_with_models, db, conv,
+    ):
+        """A persona with model_override set should show that model selected."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test",
+            model_override="claude-opus-4",
+        )
+        dialog_with_models._list.setCurrentRow(0)
+        assert dialog_with_models._model_combo.currentText() == "claude-opus-4"
+
+    def test_save_with_explicit_model_writes_override(
+        self, dialog_with_models, db, conv,
+    ):
+        """Saving with a specific model selected should write model_override."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test",
+        )
+        dialog_with_models._list.setCurrentRow(0)
+        # Select a specific model
+        idx = dialog_with_models._model_combo.findText("claude-opus-4")
+        dialog_with_models._model_combo.setCurrentIndex(idx)
+        dialog_with_models._on_save_clicked()
+        p = db.list_personas(conv.id)[0]
+        assert p.model_override == "claude-opus-4"
+
+    def test_save_with_default_writes_none(
+        self, dialog_with_models, db, conv,
+    ):
+        """Saving with 'Use provider default' selected should write None."""
+        dialog_with_models.create_persona(
+            provider=Provider.CLAUDE, name="Test",
+            model_override="claude-opus-4",
+        )
+        dialog_with_models._list.setCurrentRow(0)
+        # Select "Use provider default"
+        dialog_with_models._model_combo.setCurrentIndex(0)
+        dialog_with_models._on_save_clicked()
+        p = db.list_personas(conv.id)[0]
+        assert p.model_override is None
