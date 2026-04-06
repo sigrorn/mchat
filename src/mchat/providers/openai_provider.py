@@ -8,8 +8,6 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 
-import openai
-
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
@@ -30,8 +28,15 @@ _CHAT_PREFIXES = re.compile(r"^(gpt-|o\d|chatgpt-)")
 class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "gpt-4.1") -> None:
         super().__init__()
-        self._client = openai.OpenAI(api_key=api_key)
+        self._api_key = api_key
         self._default_model = default_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import openai
+            self._client = openai.OpenAI(api_key=self._api_key)
+        return self._client
 
     @property
     def provider_id(self) -> Provider:
@@ -45,7 +50,7 @@ class OpenAIProvider(BaseProvider):
         self.last_usage = None
         api_messages = self._format_messages(messages)
         try:
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,
@@ -53,7 +58,7 @@ class OpenAIProvider(BaseProvider):
             )
         except TypeError:
             # Older SDK versions may not accept stream_options
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,
@@ -73,7 +78,7 @@ class OpenAIProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
-            resp = self._client.models.list()
+            resp = self._get_client().models.list()
             models = sorted(
                 [m.id for m in resp.data if _CHAT_PREFIXES.match(m.id)],
                 reverse=True,

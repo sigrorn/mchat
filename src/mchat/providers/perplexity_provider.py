@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import openai
-
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
@@ -25,11 +23,18 @@ _PERPLEXITY_BASE_URL = "https://api.perplexity.ai"
 class PerplexityProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "sonar") -> None:
         super().__init__()
-        self._client = openai.OpenAI(
-            api_key=api_key,
-            base_url=_PERPLEXITY_BASE_URL,
-        )
+        self._api_key = api_key
         self._default_model = default_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import openai
+            self._client = openai.OpenAI(
+                api_key=self._api_key,
+                base_url=_PERPLEXITY_BASE_URL,
+            )
+        return self._client
 
     @property
     def provider_id(self) -> Provider:
@@ -43,14 +48,14 @@ class PerplexityProvider(BaseProvider):
         self.last_usage = None
         api_messages = self._format_messages(messages)
         try:
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,
                 stream_options={"include_usage": True},
             )
         except TypeError:
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,

@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import openai
-
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
@@ -24,11 +22,18 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 class GeminiProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "gemini-2.5-flash") -> None:
         super().__init__()
-        self._client = openai.OpenAI(
-            api_key=api_key,
-            base_url=_GEMINI_BASE_URL,
-        )
+        self._api_key = api_key
         self._default_model = default_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import openai
+            self._client = openai.OpenAI(
+                api_key=self._api_key,
+                base_url=_GEMINI_BASE_URL,
+            )
+        return self._client
 
     @property
     def provider_id(self) -> Provider:
@@ -43,14 +48,14 @@ class GeminiProvider(BaseProvider):
         self.last_usage_estimated = False
         api_messages = self._format_messages(messages)
         try:
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,
                 stream_options={"include_usage": True},
             )
         except TypeError:
-            response = self._client.chat.completions.create(
+            response = self._get_client().chat.completions.create(
                 model=model or self._default_model,
                 messages=api_messages,
                 stream=True,
@@ -80,7 +85,7 @@ class GeminiProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
-            resp = self._client.models.list()
+            resp = self._get_client().models.list()
             models = sorted(
                 [m.id for m in resp.data if "gemini" in m.id.lower()],
                 reverse=True,

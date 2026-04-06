@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import anthropic
-
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
@@ -22,8 +20,15 @@ FALLBACK_MODELS = [
 class ClaudeProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "claude-sonnet-4-20250514") -> None:
         super().__init__()
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._api_key = api_key
         self._default_model = default_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic
+            self._client = anthropic.Anthropic(api_key=self._api_key)
+        return self._client
 
     @property
     def provider_id(self) -> Provider:
@@ -43,7 +48,7 @@ class ClaudeProvider(BaseProvider):
         )
         if system_text:
             kwargs["system"] = system_text
-        with self._client.messages.stream(**kwargs) as stream:
+        with self._get_client().messages.stream(**kwargs) as stream:
             for text in stream.text_stream:
                 yield text
             final = stream.get_final_message()
@@ -51,7 +56,7 @@ class ClaudeProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
-            resp = self._client.models.list(limit=100)
+            resp = self._get_client().models.list(limit=100)
             models = sorted(
                 [m.id for m in resp.data],
                 reverse=True,

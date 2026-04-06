@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from mistralai.client import Mistral
-
 from mchat.models.message import Message, Provider, Role
 from mchat.providers.base import BaseProvider
 
@@ -23,8 +21,15 @@ FALLBACK_MODELS = [
 class MistralProvider(BaseProvider):
     def __init__(self, api_key: str, default_model: str = "mistral-large-latest") -> None:
         super().__init__()
-        self._client = Mistral(api_key=api_key)
+        self._api_key = api_key
         self._default_model = default_model
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from mistralai.client import Mistral
+            self._client = Mistral(api_key=self._api_key)
+        return self._client
 
     @property
     def provider_id(self) -> Provider:
@@ -37,7 +42,7 @@ class MistralProvider(BaseProvider):
     def stream(self, messages: list[Message], model: str | None = None) -> Iterator[str]:
         self.last_usage = None
         api_messages = self._format_messages(messages)
-        response = self._client.chat.stream(
+        response = self._get_client().chat.stream(
             model=model or self._default_model,
             messages=api_messages,
         )
@@ -55,7 +60,7 @@ class MistralProvider(BaseProvider):
 
     def list_models(self) -> list[str]:
         try:
-            resp = self._client.models.list()
+            resp = self._get_client().models.list()
             models = sorted(
                 [m.id for m in resp.data],
                 reverse=True,
