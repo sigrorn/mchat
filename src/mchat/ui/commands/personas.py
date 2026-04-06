@@ -124,6 +124,8 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         return True
 
     # Pinned transcript note for visibility — survives //limit.
+    # Pin targets only this persona's provider so other providers
+    # don't see this persona's setup instructions.
     mode_label = "inherit" if cutoff is None else "new"
     note_text = (
         f'Added persona "{name}" ({provider.value}, {mode_label})'
@@ -134,11 +136,15 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         content=note_text,
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target="all",
+        pin_target=provider.value,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)
     host._display_messages(host._current_conv.messages)
+
+    # Add the new persona to the current selection so it participates
+    # in the next send, while preserving the existing selection.
+    _add_persona_to_selection(host, persona)
 
     host._chat.add_note(f'persona "{name}" added ({provider.value})')
     return True
@@ -180,7 +186,7 @@ def handle_editpersona(arg: str, host: CommandHost) -> bool:
     target.system_prompt_override = new_prompt if new_prompt else None
     host._db.update_persona(target)
 
-    # Pinned note recording the edit
+    # Pinned note recording the edit — targets only this persona's provider.
     note_msg = Message(
         role=Role.USER,
         content=(
@@ -189,7 +195,7 @@ def handle_editpersona(arg: str, host: CommandHost) -> bool:
         ),
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target="all",
+        pin_target=target.provider.value,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)
@@ -230,13 +236,13 @@ def handle_removepersona(arg: str, host: CommandHost) -> bool:
 
     host._db.tombstone_persona(host._current_conv.id, target.id)
 
-    # Pinned note recording the removal
+    # Pinned note recording the removal — targets only this persona's provider.
     note_msg = Message(
         role=Role.USER,
         content=f'Removed persona "{target.name}"',
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target="all",
+        pin_target=target.provider.value,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)
@@ -244,6 +250,22 @@ def handle_removepersona(arg: str, host: CommandHost) -> bool:
 
     host._chat.add_note(f'persona "{target.name}" removed')
     return True
+
+
+def _add_persona_to_selection(host: CommandHost, persona: Persona) -> None:
+    """Add the newly created persona to the current selection,
+    preserving any existing targets. If the host has no selection
+    state (e.g. in unit tests without full MainWindow), this is
+    a no-op."""
+    from mchat.ui.persona_target import PersonaTarget
+    state = getattr(host, "_selection_state", None)
+    if state is None:
+        return
+    current = list(state.selection)
+    new_target = PersonaTarget(persona_id=persona.id, provider=persona.provider)
+    if new_target not in current:
+        current.append(new_target)
+    state.set(current)
 
 
 def handle_personas(host: CommandHost) -> bool:

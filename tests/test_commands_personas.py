@@ -179,7 +179,7 @@ class TestAddPersona:
         state = SelectionState([synthetic_default(Provider.CLAUDE)])
         host._selection_state = state
         handle_addpersona(
-            'openai as "Evaluator" new review my replies', host,
+            'gpt as "Evaluator" new review my replies', host,
         )
         # The selection should now include the new persona
         providers = state.providers_only()
@@ -198,7 +198,7 @@ class TestAddPersona:
         ])
         host._selection_state = state
         handle_addpersona(
-            'openai as "Checker" new check it', host,
+            'gpt as "Checker" new check it', host,
         )
         providers = state.providers_only()
         assert Provider.CLAUDE in providers
