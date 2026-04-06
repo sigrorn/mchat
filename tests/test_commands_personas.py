@@ -159,6 +159,52 @@ class TestAddPersona:
         assert "Partner" in pinned[0].content
         assert pinned[0].role == Role.USER
 
+    def test_pin_target_is_persona_provider_not_all(self, host, db):
+        """Pin must target only the persona's provider so other
+        providers don't see this persona's setup instructions."""
+        from mchat.ui.commands.personas import handle_addpersona
+        handle_addpersona('claude as "Partner" new be kind', host)
+        messages = db.get_messages(host._current_conv.id)
+        pinned = [m for m in messages if m.pinned]
+        assert len(pinned) == 1
+        assert pinned[0].pin_target == "claude"
+
+    def test_addpersona_adds_to_selection(self, host, db):
+        """After //addpersona, the new persona should be added to
+        the current selection (so the next send includes it)."""
+        from mchat.ui.commands.personas import handle_addpersona
+        from mchat.ui.persona_target import PersonaTarget, synthetic_default
+        from mchat.ui.state import SelectionState
+        # Set up a real selection state with Claude selected
+        state = SelectionState([synthetic_default(Provider.CLAUDE)])
+        host._selection_state = state
+        handle_addpersona(
+            'openai as "Evaluator" new review my replies', host,
+        )
+        # The selection should now include the new persona
+        providers = state.providers_only()
+        assert Provider.CLAUDE in providers
+        assert Provider.OPENAI in providers
+
+    def test_addpersona_restores_previous_selection(self, host, db):
+        """The pre-existing selection should be preserved (not replaced)
+        when the new persona is added."""
+        from mchat.ui.commands.personas import handle_addpersona
+        from mchat.ui.persona_target import synthetic_default
+        from mchat.ui.state import SelectionState
+        state = SelectionState([
+            synthetic_default(Provider.CLAUDE),
+            synthetic_default(Provider.GEMINI),
+        ])
+        host._selection_state = state
+        handle_addpersona(
+            'openai as "Checker" new check it', host,
+        )
+        providers = state.providers_only()
+        assert Provider.CLAUDE in providers
+        assert Provider.GEMINI in providers
+        assert Provider.OPENAI in providers
+
 
 class TestEditPersona:
     def test_update_system_prompt_only(self, host, db):
@@ -190,6 +236,23 @@ class TestEditPersona:
         handle_editpersona('"Nobody" new text', host)
         # No personas exist, command should fail gracefully
         assert len(db.list_personas(host._current_conv.id)) == 0
+
+    def test_edit_pin_target_is_persona_provider(self, host, db):
+        """Edit pin must target only the persona's provider."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.commands.personas import handle_editpersona
+        p = Persona(
+            conversation_id=host._current_conv.id,
+            id=generate_persona_id(),
+            provider=Provider.OPENAI,
+            name="Checker", name_slug="checker",
+        )
+        db.create_persona(p)
+        handle_editpersona('"Checker" revised prompt', host)
+        messages = db.get_messages(host._current_conv.id)
+        pinned = [m for m in messages if m.pinned]
+        assert len(pinned) == 1
+        assert pinned[0].pin_target == "openai"
 
     def test_edit_case_insensitive_name_match(self, host, db):
         from mchat.models.persona import Persona, generate_persona_id
@@ -232,6 +295,23 @@ class TestRemovePersona:
         all_personas = db.list_personas_including_deleted(host._current_conv.id)
         assert len(all_personas) == 1
         assert all_personas[0].deleted_at is not None
+
+    def test_remove_pin_target_is_persona_provider(self, host, db):
+        """Remove pin must target only the persona's provider."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.commands.personas import handle_removepersona
+        p = Persona(
+            conversation_id=host._current_conv.id,
+            id=generate_persona_id(),
+            provider=Provider.GEMINI,
+            name="Gone", name_slug="gone",
+        )
+        db.create_persona(p)
+        handle_removepersona('"Gone"', host)
+        messages = db.get_messages(host._current_conv.id)
+        pinned = [m for m in messages if m.pinned]
+        assert len(pinned) == 1
+        assert pinned[0].pin_target == "gemini"
 
     def test_remove_unknown_persona_errors(self, host, db):
         from mchat.ui.commands.personas import handle_removepersona
