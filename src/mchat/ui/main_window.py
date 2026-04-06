@@ -413,12 +413,9 @@ class MainWindow(QMainWindow):
         if not self._router:
             return
         selected = self._provider_panel.checked_providers()
-        if not selected:
-            self._sync_checkboxes_from_selection()
-            self._chat.add_note("Error: at least one provider must be selected")
-            return
-        # set_selection writes through ProviderSelectionState which
-        # emits selection_changed → _on_selection_state_changed fan-out
+        # Stage 3A.4: empty selection is valid (persona-first UX).
+        # set_selection writes through SelectionState which emits
+        # selection_changed → _on_selection_state_changed fan-out
         # handles sync/placeholder/color. We still need to persist.
         self._router.set_selection(selected)
         self._save_selection()
@@ -460,6 +457,7 @@ class MainWindow(QMainWindow):
         if len(sel) == 1:
             color = self._provider_color(sel[0])
         else:
+            # Multi-provider or empty selection → user colour
             color = self._config.get("color_user")
         self._input.set_background(color)
 
@@ -582,14 +580,16 @@ class MainWindow(QMainWindow):
             self._input.set_placeholder("Configure an API key in Settings to start chatting")
             return
         sel = self._router.selection
-        if len(sel) == 1:
+        if not sel:
+            self._input.set_placeholder(
+                "No personas selected \u2014 use //addpersona or prefix a provider name"
+            )
+        elif len(sel) == 1:
             name = _PROVIDER_DISPLAY[sel[0]]
-            others = [_PROVIDER_DISPLAY[p] for p in Provider if p != sel[0]]
-            alt = ", ".join(others[:2])
-            self._input.set_placeholder(f"Message {name} — prefix another provider or use //select")
+            self._input.set_placeholder(f"Message {name} \u2014 prefix another provider or use //select")
         else:
             names = ", ".join(_PROVIDER_DISPLAY[p] for p in sel)
-            self._input.set_placeholder(f"Message {names} — use //select to change")
+            self._input.set_placeholder(f"Message {names} \u2014 use //select to change")
 
     def _selected_model(self, p: Provider) -> str:
         return self._combos[p].currentText()

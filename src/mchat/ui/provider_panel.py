@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QWidget,
 )
 
@@ -42,6 +43,9 @@ class ProviderPanel(QFrame):
     # pid
     combo_changed = Signal(Provider)
 
+    # Emitted when the Personas... button in the empty state is clicked.
+    personas_requested = Signal()
+
     def __init__(self, config: Config, font_size: int, parent=None) -> None:
         super().__init__(parent)
         self._config = config
@@ -50,6 +54,8 @@ class ProviderPanel(QFrame):
         self._checkboxes: dict[Provider, QCheckBox] = {}
         self._spend_labels: dict[Provider, QLabel] = {}
         self._model_fetcher: QThread | None = None
+        self._empty_hint: QLabel | None = None
+        self._personas_btn: QPushButton | None = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -87,6 +93,57 @@ class ProviderPanel(QFrame):
             self._spend_labels[p] = label
 
         self._layout.addStretch()
+
+        # Empty-state widgets (hidden by default — shown via show_empty_state)
+        self._empty_hint = QLabel(
+            'No personas yet \u2014 use <code>//addpersona &lt;provider&gt; as "&lt;name&gt;" ...'
+            "</code> or click below"
+        )
+        self._empty_hint.setStyleSheet(
+            f"color: #888; font-size: {self._font_size - 1}px; padding: 4px 8px;"
+        )
+        self._empty_hint.setVisible(False)
+        self._layout.insertWidget(0, self._empty_hint)
+
+        self._personas_btn = QPushButton("Personas\u2026")
+        self._personas_btn.setStyleSheet(
+            "QPushButton { background: none; border: 1px solid #999; border-radius: 4px; "
+            "padding: 4px 12px; color: #666; }"
+            "QPushButton:hover { background-color: #eee; }"
+        )
+        self._personas_btn.setVisible(False)
+        self._personas_btn.clicked.connect(self.personas_requested.emit)
+        self._layout.insertWidget(1, self._personas_btn)
+
+    # ------------------------------------------------------------------
+    # Empty state / provider rows toggle (Stage 3A.4)
+    # ------------------------------------------------------------------
+
+    def show_empty_state(self) -> None:
+        """Hide provider rows and show the empty-state hint + Personas button."""
+        for combo in self._combos.values():
+            combo.setVisible(False)
+        for cb in self._checkboxes.values():
+            cb.setVisible(False)
+        for label in self._spend_labels.values():
+            label.setVisible(False)
+        if self._empty_hint:
+            self._empty_hint.setVisible(True)
+        if self._personas_btn:
+            self._personas_btn.setVisible(True)
+
+    def show_provider_rows(self) -> None:
+        """Show provider rows and hide the empty-state hint."""
+        for combo in self._combos.values():
+            combo.setVisible(True)
+        for cb in self._checkboxes.values():
+            cb.setVisible(True)
+        for label in self._spend_labels.values():
+            label.setVisible(True)
+        if self._empty_hint:
+            self._empty_hint.setVisible(False)
+        if self._personas_btn:
+            self._personas_btn.setVisible(False)
 
     # ------------------------------------------------------------------
     # Public accessors (used by MainWindow)

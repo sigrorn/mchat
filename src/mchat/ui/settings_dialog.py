@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
 )
 
 from mchat.config import Config, DEFAULTS, MAX_FONT_SIZE, MIN_FONT_SIZE
-from mchat.models.message import Provider
 
 
 class SettingsDialog(QDialog):
@@ -84,14 +83,9 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Shading amount:", self._exclude_shade_amount)
 
-        # Default provider
-        self._default_provider = QComboBox()
-        self._default_provider.addItems([p.value for p in Provider])
-        current = self._config.get("default_provider")
-        idx = self._default_provider.findText(current)
-        if idx >= 0:
-            self._default_provider.setCurrentIndex(idx)
-        form.addRow("Default provider:", self._default_provider)
+        # Stage 3A.4: default_provider UI control removed. The config
+        # key still exists as a fallback for all,/flipped, prefix
+        # parsing but is no longer user-facing.
 
         # Global system prompt
         self._system_prompt = QPlainTextEdit(self._config.get("system_prompt"))
@@ -155,7 +149,6 @@ class SettingsDialog(QDialog):
         """Persist only the general fields — provider-specific config
         keys are untouched so ProvidersDialog can own them safely."""
         self._config.set("color_user", self._color_user_btn.property("hex_color"))
-        self._config.set("default_provider", self._default_provider.currentText())
         self._config.set("system_prompt", self._system_prompt.toPlainText().strip())
         self._config.set("font_size", self._font_size.value())
         self._config.set("exclude_shade_mode", self._exclude_shade_mode.currentText())

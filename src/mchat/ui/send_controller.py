@@ -197,6 +197,14 @@ class SendController:
             host._chat.add_note(f"Error: {e}")
             return
 
+        # Stage 3A.4: empty selection with no prefix → no targets.
+        # Show a user-facing hint instead of silently doing nothing.
+        if not targets and cleaned_text.strip() == text.strip():
+            host._chat.add_note(
+                "No personas selected \u2014 use //addpersona or select a provider first"
+            )
+            return
+
         # Prefix-only input: no content left after consuming prefixes.
         # Treat as a selection change, not a send. Guard against the
         # post-mutation router state per #60 by comparing to the

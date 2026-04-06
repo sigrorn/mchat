@@ -50,12 +50,9 @@ class Router:
         self._selection_state = selection_state
         if selection_state is None:
             self._local_selection: list[Provider] = [default]
-        else:
-            if not selection_state.selection:
-                # Wrap the default as a synthetic-default PersonaTarget
-                # — state now holds list[PersonaTarget].
-                from mchat.ui.persona_target import synthetic_default
-                selection_state.set([synthetic_default(default)])
+        # Stage 3A.4: an empty SelectionState is valid — new chats start
+        # with zero providers selected (persona-first UX). We no longer
+        # force-seed a synthetic default here.
 
     # ------------------------------------------------------------------
     # Selection access — delegates to the injected state object when
@@ -73,8 +70,6 @@ class Router:
         return list(self._local_selection)
 
     def _store_selection(self, providers: list[Provider]) -> None:
-        if not providers:
-            return
         if self._selection_state is not None:
             # Wrap each provider as its synthetic-default PersonaTarget
             # before writing to the shared state. The state object is

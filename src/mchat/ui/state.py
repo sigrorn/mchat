@@ -165,11 +165,11 @@ class SelectionState(QObject):
 
     def set(self, targets: list) -> None:
         """Replace the full selection with ``targets`` (list[PersonaTarget]).
-        No-op if the list is empty — callers that want to 'clear' should
-        handle the empty-selection case at the UI layer (we never want
-        to send with nothing selected)."""
-        if not targets:
-            return
+
+        An empty list is valid as of Stage 3A.4 — new chats start with
+        zero providers selected (persona-first UX). The send path
+        guards against sending with nothing selected.
+        """
         new = list(targets)
         if new == self._selection:
             return
