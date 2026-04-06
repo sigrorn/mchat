@@ -63,6 +63,49 @@ class TestFormatMessagesOpenai:
         assert "[OPENAI responded]" in result[0]["content"]
 
 
+class TestOpenAICompatibleBase:
+    """#87 — OpenAI-compatible providers share a base class."""
+
+    def test_base_class_exists(self):
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert issubclass(OpenAICompatibleProvider, BaseProvider)
+
+    def test_openai_provider_uses_base(self):
+        from mchat.providers.openai_provider import OpenAIProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert issubclass(OpenAIProvider, OpenAICompatibleProvider)
+
+    def test_gemini_provider_uses_base(self):
+        from mchat.providers.gemini_provider import GeminiProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert issubclass(GeminiProvider, OpenAICompatibleProvider)
+
+    def test_perplexity_provider_uses_base(self):
+        from mchat.providers.perplexity_provider import PerplexityProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert issubclass(PerplexityProvider, OpenAICompatibleProvider)
+
+    def test_subclasses_do_not_define_stream(self):
+        """stream() should live on the base class, not be overridden
+        (except Gemini which adds usage estimation)."""
+        from mchat.providers.openai_provider import OpenAIProvider
+        from mchat.providers.perplexity_provider import PerplexityProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        # OpenAI and Perplexity should NOT override stream
+        assert OpenAIProvider.stream is OpenAICompatibleProvider.stream
+        assert PerplexityProvider.stream is OpenAICompatibleProvider.stream
+
+    def test_subclasses_do_not_define_get_client(self):
+        """_get_client() should live on the base class."""
+        from mchat.providers.openai_provider import OpenAIProvider
+        from mchat.providers.gemini_provider import GeminiProvider
+        from mchat.providers.perplexity_provider import PerplexityProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert OpenAIProvider._get_client is OpenAICompatibleProvider._get_client
+        assert GeminiProvider._get_client is OpenAICompatibleProvider._get_client
+        assert PerplexityProvider._get_client is OpenAICompatibleProvider._get_client
+
+
 class TestMistralProvider:
     """#80 — MistralProvider must exist and implement BaseProvider."""
 
