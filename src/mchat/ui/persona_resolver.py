@@ -187,22 +187,16 @@ class PersonaResolver:
         if special == ALL:
             return universe
 
-        # flipped: complement of current selection
-        current = set(self._router.selection)
-        # Treat current selection as a set of Providers; exclude anything
-        # whose provider is in `current`.
-        return [t for t in universe if t.provider not in current]
+        # flipped: complement of current selection at persona level
+        current_targets = set(self._router._selection_state.selection)
+        return [t for t in universe if t not in current_targets]
 
     def _write_selection(self, targets: list[PersonaTarget]) -> None:
-        """Write the new selection through to the router's selection
-        state, preserving the side-effect that Router.parse used to
-        have. Until Stage 2.4 migrates SelectionState to list[PersonaTarget],
-        we collapse PersonaTargets to providers for storage.
+        """Write the full PersonaTarget list to the selection state.
+
+        Stage 4.2: we no longer collapse to providers — the selection
+        preserves persona-level granularity so flipped, +/-, and the
+        visibility matrix all work at persona level.
         """
-        # Deduplicate providers while preserving order
-        providers: list[Provider] = []
-        for t in targets:
-            if t.provider not in providers:
-                providers.append(t.provider)
-        if providers:
-            self._router.set_selection(providers)
+        if targets:
+            self._router._selection_state.set(targets)
