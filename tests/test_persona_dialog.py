@@ -258,6 +258,42 @@ class TestEffectiveValueDisplay:
         assert dialog.effective_color(p) == "#b0b0b0"
 
 
+class TestMoveUpDown:
+    """#105 — Move Up/Down reorders personas by sort_order."""
+
+    def test_move_down_swaps_order(self, dialog, db, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Alpha")
+        dialog.create_persona(provider=Provider.CLAUDE, name="Beta")
+        personas = dialog.list_items()
+        assert personas[0].name == "Alpha"
+        assert personas[1].name == "Beta"
+        dialog.move_persona_down(personas[0].id)
+        reordered = dialog.list_items()
+        assert reordered[0].name == "Beta"
+        assert reordered[1].name == "Alpha"
+
+    def test_move_up_swaps_order(self, dialog, db, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Alpha")
+        dialog.create_persona(provider=Provider.CLAUDE, name="Beta")
+        personas = dialog.list_items()
+        dialog.move_persona_up(personas[1].id)
+        reordered = dialog.list_items()
+        assert reordered[0].name == "Beta"
+        assert reordered[1].name == "Alpha"
+
+    def test_move_up_first_is_noop(self, dialog, db, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Only")
+        personas = dialog.list_items()
+        dialog.move_persona_up(personas[0].id)
+        assert dialog.list_items()[0].name == "Only"
+
+    def test_move_down_last_is_noop(self, dialog, db, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Only")
+        personas = dialog.list_items()
+        dialog.move_persona_down(personas[0].id)
+        assert dialog.list_items()[0].name == "Only"
+
+
 class TestExportImport:
     """#100 — export personas to .md, import from .md."""
 
