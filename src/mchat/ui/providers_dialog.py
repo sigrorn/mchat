@@ -69,9 +69,13 @@ class ProvidersDialog(QDialog):
         self._tabs = QTabWidget()
         outer.addWidget(self._tabs, stretch=1)
 
+        self._tab_indices: dict[str, int] = {}
         for pv, meta in PROVIDER_META.items():
             tab = self._build_provider_tab(pv, meta)
-            self._tabs.addTab(tab, meta["display"])
+            idx = self._tabs.addTab(tab, meta["display"])
+            self._tab_indices[pv] = idx
+
+        self._update_all_tab_colors()
 
         # Footer: reset-colours and save/cancel
         footer = QHBoxLayout()
@@ -123,6 +127,7 @@ class ProvidersDialog(QDialog):
         key_edit = QLineEdit(self._config.get(meta["api_key"]))
         key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         key_edit.setPlaceholderText(f"{display} API key")
+        key_edit.textChanged.connect(lambda _, p=pv: self._update_tab_color(p))
         form.addRow("API key:", key_edit)
         self._api_key_edits[pv] = key_edit
 
@@ -217,6 +222,26 @@ class ProvidersDialog(QDialog):
             hex_color = color.name()
             btn.setProperty("hex_color", hex_color)
             self._apply_color_btn_style(btn, hex_color)
+
+    # ------------------------------------------------------------------
+    # Tab colour indicators
+    # ------------------------------------------------------------------
+
+    def _update_tab_color(self, pv: str) -> None:
+        """Set tab title to red if the API key is empty, default otherwise."""
+        idx = self._tab_indices.get(pv)
+        if idx is None:
+            return
+        key = self._api_key_edits[pv].text().strip()
+        bar = self._tabs.tabBar()
+        if not key:
+            bar.setTabTextColor(idx, QColor("#cc0000"))
+        else:
+            bar.setTabTextColor(idx, QColor())  # reset to default
+
+    def _update_all_tab_colors(self) -> None:
+        for pv in self._tab_indices:
+            self._update_tab_color(pv)
 
     # ------------------------------------------------------------------
     # Export / Import
