@@ -30,6 +30,7 @@ class ExportColors:
     openai: str
     gemini: str
     perplexity: str
+    mistral: str
 
     def color_for(self, message: Message) -> str:
         if message.role == Role.USER:
@@ -149,6 +150,7 @@ def exporter_from_config(config) -> HtmlExporter:
         openai=config.get("color_openai"),
         gemini=config.get("color_gemini"),
         perplexity=config.get("color_perplexity"),
+        mistral=config.get("color_mistral"),
     )
     font_size = int(config.get("font_size") or 14)
     return HtmlExporter(colors, font_size)
