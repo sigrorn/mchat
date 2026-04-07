@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -141,6 +142,96 @@ class PersonaDialog(QDialog):
         """Tombstone the persona (D3 — never hard-delete)."""
         self._db.tombstone_persona(self._conv_id, persona_id)
 
+    # ------------------------------------------------------------------
+    # Export / Import
+    # ------------------------------------------------------------------
+
+    def export_personas_md(self) -> str:
+        """Serialize all active personas to a human-readable .md string."""
+        personas = self.list_items()
+        lines: list[str] = ["# Personas", ""]
+        for i, p in enumerate(personas):
+            if i > 0:
+                lines.append("---")
+                lines.append("")
+            lines.append(f"## {p.name}")
+            lines.append(f"- Provider: {p.provider.value}")
+            mode = "inherit" if p.created_at_message_index is None else "new"
+            lines.append(f"- Mode: {mode}")
+            lines.append(f"- Model override: {p.model_override or '(none)'}")
+            lines.append(f"- Color override: {p.color_override or '(none)'}")
+            lines.append("- Prompt:")
+            lines.append("")
+            lines.append(p.system_prompt_override or "(none)")
+            lines.append("")
+        return "\n".join(lines)
+
+    def import_personas_md(self, md: str) -> None:
+        """Parse a .md string and replace all active personas with the
+        imported ones. Existing personas are tombstoned (not deleted)."""
+        import re
+        # Tombstone all existing personas
+        for p in self.list_items():
+            self.remove_persona(p.id)
+
+        # Parse sections separated by --- or ## headers
+        sections = re.split(r"\n---\n|\n(?=## )", md)
+        for section in sections:
+            section = section.strip()
+            if not section or section.startswith("# Personas"):
+                # Skip the top-level header
+                if "## " not in section:
+                    continue
+                # Header might be on same block as first persona
+                idx = section.index("## ")
+                section = section[idx:]
+
+            name_match = re.match(r"^## (.+)$", section, re.MULTILINE)
+            if not name_match:
+                continue
+            name = name_match.group(1).strip()
+
+            def _field(label: str) -> str | None:
+                m = re.search(
+                    rf"^- {label}:\s*(.*)$", section, re.MULTILINE,
+                )
+                if m:
+                    val = m.group(1).strip()
+                    return None if val == "(none)" else val
+                return None
+
+            provider_str = _field("Provider") or "claude"
+            try:
+                provider = Provider(provider_str)
+            except ValueError:
+                continue  # skip unknown providers
+
+            mode = _field("Mode") or "inherit"
+            model_override = _field("Model override")
+            color_override = _field("Color override")
+
+            # Extract prompt: everything after "- Prompt:\n\n"
+            prompt_match = re.search(
+                r"^- Prompt:\s*\n\n(.*)", section, re.MULTILINE | re.DOTALL,
+            )
+            prompt = None
+            if prompt_match:
+                prompt = prompt_match.group(1).strip()
+                if prompt == "(none)":
+                    prompt = None
+
+            cutoff = None if mode == "inherit" else 0
+
+            self.create_persona(
+                provider=provider,
+                name=name,
+                system_prompt_override=prompt,
+                model_override=model_override,
+                color_override=color_override,
+                created_at_message_index=cutoff,
+            )
+        self._refresh_list()
+
     def effective_prompt(self, persona: Persona) -> str:
         return resolve_persona_prompt(persona, self._config)
 
@@ -242,10 +333,19 @@ class PersonaDialog(QDialog):
 
         right.addWidget(self._form_widget)
 
-        # Close button at the bottom
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.accept)
-        right.addWidget(buttons)
+        # Export / Import / Close buttons at the bottom
+        bottom_row = QHBoxLayout()
+        export_btn = QPushButton("Export…")
+        export_btn.clicked.connect(self._on_export_clicked)
+        bottom_row.addWidget(export_btn)
+        import_btn = QPushButton("Import…")
+        import_btn.clicked.connect(self._on_import_clicked)
+        bottom_row.addWidget(import_btn)
+        bottom_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        bottom_row.addWidget(close_btn)
+        right.addLayout(bottom_row)
 
         outer.addLayout(right, stretch=2)
 
@@ -473,6 +573,34 @@ class PersonaDialog(QDialog):
 
         self._refresh_list()
         self._refresh_effective_labels(persona)
+
+    def _on_export_clicked(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Personas", "personas.md",
+            "Markdown Files (*.md);;All Files (*)",
+        )
+        if not path:
+            return
+        md = self.export_personas_md()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+
+    def _on_import_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Personas", "",
+            "Markdown Files (*.md);;All Files (*)",
+        )
+        if not path:
+            return
+        reply = QMessageBox.question(
+            self, "Import Personas",
+            "This will replace all existing personas in this chat. Continue?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            md = f.read()
+        self.import_personas_md(md)
 
     def _on_pick_color(self) -> None:
         current = self._color_edit.text().strip() or "#ffffff"
