@@ -21,6 +21,7 @@ _COPY_PREFIX = {
     Provider.OPENAI: "gpt",
     Provider.GEMINI: "gemini",
     Provider.PERPLEXITY: "perplexity",
+    Provider.MISTRAL: "mistral",
 }
 
 
@@ -78,8 +79,35 @@ class ChatExportMixin:
 
         result_lines: list[str] = []
         prev_role_info: _RoleInfo | None = None
+        tables_done: set[int] = set()  # track processed tables by position
 
         while block.isValid() and block.position() < end:
+            # Check if this block is inside a QTextTable
+            from PySide6.QtGui import QTextCursor as _QTC
+            bc = _QTC(block)
+            table = bc.currentTable()
+            if table:
+                table_pos = table.firstCursorPosition().position()
+                if table_pos not in tables_done:
+                    tables_done.add(table_pos)
+                    # Extract table content column-major (header + body per column)
+                    for col in range(table.columns()):
+                        for row in range(table.rows()):
+                            cell = table.cellAt(row, col)
+                            cell_cursor = cell.firstCursorPosition()
+                            cell_end = cell.lastCursorPosition().position()
+                            cell_block = cell_cursor.block()
+                            while cell_block.isValid() and cell_block.position() <= cell_end:
+                                text = cell_block.text().strip()
+                                if text:
+                                    result_lines.append(text)
+                                cell_block = cell_block.next()
+                # Skip all blocks inside this table
+                table_last_pos = table.lastCursorPosition().position()
+                while block.isValid() and block.position() <= table_last_pos:
+                    block = block.next()
+                continue
+
             role_info = self._block_roles.get(block.blockNumber())
 
             if role_info and role_info != prev_role_info:
