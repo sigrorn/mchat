@@ -142,6 +142,33 @@ class PersonaDialog(QDialog):
         """Tombstone the persona (D3 — never hard-delete)."""
         self._db.tombstone_persona(self._conv_id, persona_id)
 
+    def move_persona_up(self, persona_id: str) -> None:
+        """Swap sort_order with the persona above (lower sort_order)."""
+        self._swap_sort_order(persona_id, direction=-1)
+
+    def move_persona_down(self, persona_id: str) -> None:
+        """Swap sort_order with the persona below (higher sort_order)."""
+        self._swap_sort_order(persona_id, direction=1)
+
+    def _swap_sort_order(self, persona_id: str, direction: int) -> None:
+        """Swap sort_order between the target persona and its neighbor.
+        direction: -1 = up, +1 = down."""
+        personas = self.list_items()
+        idx = next((i for i, p in enumerate(personas) if p.id == persona_id), None)
+        if idx is None:
+            return
+        neighbor_idx = idx + direction
+        if neighbor_idx < 0 or neighbor_idx >= len(personas):
+            return  # already at boundary
+        a, b = personas[idx], personas[neighbor_idx]
+        a.sort_order, b.sort_order = b.sort_order, a.sort_order
+        # If both had the same sort_order (e.g. both 0), assign distinct values
+        if a.sort_order == b.sort_order:
+            a.sort_order = neighbor_idx
+            b.sort_order = idx
+        self._db.update_persona(a)
+        self._db.update_persona(b)
+
     # ------------------------------------------------------------------
     # Export / Import
     # ------------------------------------------------------------------
@@ -262,6 +289,18 @@ class PersonaDialog(QDialog):
         self._remove_btn.clicked.connect(self._on_remove_clicked)
         self._remove_btn.setEnabled(False)
         list_btns.addWidget(self._remove_btn)
+        self._up_btn = QPushButton("▲")
+        self._up_btn.setFixedWidth(30)
+        self._up_btn.setToolTip("Move up")
+        self._up_btn.clicked.connect(self._on_move_up_clicked)
+        self._up_btn.setEnabled(False)
+        list_btns.addWidget(self._up_btn)
+        self._down_btn = QPushButton("▼")
+        self._down_btn.setFixedWidth(30)
+        self._down_btn.setToolTip("Move down")
+        self._down_btn.clicked.connect(self._on_move_down_clicked)
+        self._down_btn.setEnabled(False)
+        list_btns.addWidget(self._down_btn)
         left.addLayout(list_btns)
 
         outer.addLayout(left, stretch=1)
@@ -389,6 +428,8 @@ class PersonaDialog(QDialog):
         self._form_widget.setEnabled(enabled)
         self._remove_btn.setEnabled(enabled)
         self._save_btn.setEnabled(enabled)
+        self._up_btn.setEnabled(enabled)
+        self._down_btn.setEnabled(enabled)
         if not enabled:
             self._name_edit.clear()
             self._prompt_edit.clear()
@@ -517,6 +558,18 @@ class PersonaDialog(QDialog):
             return
         self.remove_persona(persona.id)
         self._refresh_list()
+
+    def _on_move_up_clicked(self) -> None:
+        pid = self._selected_persona_id()
+        if pid:
+            self.move_persona_up(pid)
+            self._refresh_list()
+
+    def _on_move_down_clicked(self) -> None:
+        pid = self._selected_persona_id()
+        if pid:
+            self.move_persona_down(pid)
+            self._refresh_list()
 
     def _on_save_clicked(self) -> None:
         persona = self._selected_persona()
