@@ -42,6 +42,14 @@ def _find_icon() -> Path:
 
 
 def main() -> None:
+    # Parse -debug / --debug flag before Qt consumes sys.argv
+    import mchat.debug_logger as debug_logger
+    if "-debug" in sys.argv or "--debug" in sys.argv:
+        debug_logger.enabled = True
+        debug_logger.configure()
+        # Remove the flag so Qt doesn't try to interpret it
+        sys.argv = [a for a in sys.argv if a not in ("-debug", "--debug")]
+
     # Set AppUserModelID so Windows taskbar shows our icon, not Python's
     if sys.platform == "win32":
         import ctypes
@@ -69,6 +77,7 @@ def main() -> None:
 
     exit_code = app.exec()
     db.close()
+    debug_logger.close_all()
     sys.exit(exit_code)
 
 

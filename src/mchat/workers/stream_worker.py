@@ -46,16 +46,26 @@ class StreamWorker(QThread):
         provider: BaseProvider,
         messages: list[Message],
         model: str | None = None,
+        persona_name: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._provider = provider
         self._messages = messages
         self._model = model
+        self._persona_name = persona_name
         self.last_error_transient: bool = False
 
     def run(self) -> None:
+        import mchat.debug_logger as debug_logger
         last_exc: Exception | None = None
+        persona = self._persona_name or self._provider.display_name
+
+        # Log outgoing context
+        if debug_logger.enabled:
+            for m in self._messages:
+                role = m.role.value if hasattr(m.role, "value") else str(m.role)
+                debug_logger.log_outgoing(persona, f"[{role}] {m.content}")
 
         for attempt in range(1, MAX_RETRIES + 1):
             full_text = ""
@@ -63,6 +73,9 @@ class StreamWorker(QThread):
                 for token in self._provider.stream(self._messages, self._model):
                     full_text += token
                     self.token_received.emit(token)
+                # Log incoming response
+                if debug_logger.enabled:
+                    debug_logger.log_incoming(persona, full_text)
                 usage = self._provider.last_usage or (0, 0)
                 estimated = self._provider.last_usage_estimated
                 self.stream_complete.emit(full_text, usage[0], usage[1], estimated)

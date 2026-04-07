@@ -475,7 +475,10 @@ class SendController:
             else:
                 self._retry_labels[pid] = persona.name
 
-            worker = StreamWorker(provider, context_messages, model)
+            worker = StreamWorker(
+                provider, context_messages, model,
+                persona_name=persona.name,
+            )
             worker.stream_complete.connect(
                 lambda full_text, inp, out, est, t=target, mdl=model: (
                     self._on_complete(t, mdl, full_text, inp, out, est)
