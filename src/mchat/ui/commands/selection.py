@@ -98,3 +98,37 @@ def handle_lines(host: CommandHost) -> bool:
         host._toggle_column_mode()
     host._chat.add_note("list layout enabled")
     return True
+
+
+def handle_visibility(arg: str, host: CommandHost) -> bool:
+    """//visibility separated|joined — quick visibility matrix presets.
+
+    separated: each persona only sees its own responses
+    joined: full visibility, everyone sees everyone
+    """
+    if not host._current_conv:
+        host._chat.add_note("Error: no active conversation")
+        return True
+
+    mode = arg.strip().lower()
+    if mode not in ("separated", "joined"):
+        host._chat.add_note(
+            "Error: //visibility separated|joined"
+        )
+        return True
+
+    conv = host._current_conv
+    personas = host._db.list_personas(conv.id)
+
+    if mode == "separated":
+        matrix: dict[str, list[str]] = {}
+        for p in personas:
+            matrix[p.id] = []  # empty allowlist = sees only self
+        conv.visibility_matrix = matrix
+    else:  # joined
+        conv.visibility_matrix = {}
+
+    host._db.set_visibility_matrix(conv.id, conv.visibility_matrix)
+    host._sync_matrix_panel()
+    host._chat.add_note(f"visibility: {mode}")
+    return True

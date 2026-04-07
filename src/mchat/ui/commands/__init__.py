@@ -48,6 +48,8 @@ def dispatch(cmd: str, arg: str, host: CommandHost) -> bool:
         return selection.handle_columns(host)
     if cmd == "//lines":
         return selection.handle_lines(host)
+    if cmd == "//visibility":
+        return selection.handle_visibility(arg, host)
 
     # Pins
     if cmd == "//pin":

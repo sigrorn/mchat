@@ -115,6 +115,8 @@ Use the checkboxes in the toolbar, or `//select`.
 | `//removepersona "<name>"` | Remove a persona |
 | `//personas` | List personas in this chat |
 | `//rename <text>` | Rename the current chat |
+| `//visibility separated` | Each persona sees only its own responses |
+| `//visibility joined` | Full visibility — everyone sees everyone |
 | `//columns` (`//cols`) / `//lines` | Column vs list layout |
 | `//help` | Show all commands |
 | `//vacuum` | Compact the database (rarely needed) |
