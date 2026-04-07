@@ -108,6 +108,29 @@ class TestHtmlExporter:
         assert "font-size: 18px" in html
 
 
+class TestMistralExportColor:
+    """#108 — Mistral messages should use color_mistral, not user colour."""
+
+    def test_mistral_color_in_export(self):
+        colors = ExportColors(
+            user="#d4d4d4",
+            claude="#b0b0b0",
+            openai="#e8e8e8",
+            gemini="#c8d8e8",
+            perplexity="#d8c8e8",
+            mistral="#ffe0c8",
+        )
+        msg = Message(role=Role.ASSISTANT, content="hi", provider=Provider.MISTRAL)
+        assert colors.color_for(msg) == "#ffe0c8"
+
+    def test_exporter_from_config_includes_mistral(self, tmp_path):
+        cfg = Config(config_path=tmp_path / "cfg.json")
+        cfg.set("color_mistral", "#ffe0c8")
+        cfg.save()
+        exp = exporter_from_config(cfg)
+        assert exp._colors.mistral == "#ffe0c8"
+
+
 class TestHtmlExporterPersonas:
     """Stage 1.3 — export labels reflect persona name when persona_id
     is set, falling back to the provider display name for legacy
