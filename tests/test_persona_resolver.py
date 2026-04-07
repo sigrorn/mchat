@@ -141,11 +141,17 @@ class TestProviderShorthandSyntheticDefault:
 
 
 class TestAllAndFlipped:
-    def test_all_with_no_personas_returns_empty(self, resolver, db):
-        """Stage 4.4: `all,` with no explicit personas returns empty."""
+    def test_all_with_no_personas_falls_back_to_synthetic_defaults(
+        self, resolver, db,
+    ):
+        """#107: `all,` with no explicit personas should fall back to
+        synthetic defaults for all configured providers (legacy compat)."""
         conv = db.create_conversation()
         targets, cleaned = resolver.resolve("all, hi everyone", conv.id, db)
-        assert targets == []
+        # Should get one synthetic default per configured provider
+        assert len(targets) == len(list(Provider))
+        provider_set = {t.provider for t in targets}
+        assert provider_set == set(Provider)
         assert cleaned == "hi everyone"
 
     def test_all_returns_only_explicit_personas(self, resolver, db):
@@ -223,11 +229,12 @@ class TestAllFlippedNoSyntheticDefaults:
         flipped_ids = {t.persona_id for t in flipped}
         assert flipped_ids == {p2.id, p3.id}
 
-    def test_all_with_zero_personas_returns_empty(self, resolver, db):
-        """all, with no personas in the conversation returns empty."""
+    def test_all_with_zero_personas_falls_back_to_synthetic(self, resolver, db):
+        """#107: all, with no personas falls back to synthetic defaults."""
         conv = db.create_conversation()
         targets, _ = resolver.resolve("all, hello", conv.id, db)
-        assert targets == []
+        # Falls back to synthetic defaults for all configured providers
+        assert len(targets) == len(list(Provider))
 
 
 class TestFlippedPersonaLevel:
