@@ -155,6 +155,52 @@ class TestProvidersDialog:
         d._reset_colors()
         assert d._color_btns["claude"].property("hex_color") == DEFAULTS["color_claude"]
 
+    def test_export_produces_parseable_md(self, qtbot, config):
+        """#101 — export produces .md with all provider fields."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        md = d.export_providers_md()
+        assert "## Claude" in md
+        assert "API key: ant-key-xyz" in md
+        assert "Model: claude-sonnet-4-20250514" in md
+        assert "Color: #b0b0b0" in md
+        assert "claude baseline" in md
+
+    def test_import_writes_config(self, qtbot, config):
+        """#101 — import parses .md and writes to config."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        md = """# Provider Settings
+
+## Claude
+- API key: new-claude-key
+- Model: claude-opus-4
+- Color: #ffffff
+- System prompt:
+
+Be very concise
+"""
+        d.import_providers_md(md)
+        assert config.get("anthropic_api_key") == "new-claude-key"
+        assert config.get("claude_model") == "claude-opus-4"
+        assert config.get("color_claude") == "#ffffff"
+        assert config.get("system_prompt_claude") == "Be very concise"
+
+    def test_roundtrip_preserves_fields(self, qtbot, config):
+        """#101 — export then import preserves all fields."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        md = d.export_providers_md()
+        # Change a value, then import the original export
+        config.set("anthropic_api_key", "changed")
+        d2 = ProvidersDialog(config)
+        qtbot.addWidget(d2)
+        d2.import_providers_md(md)
+        assert config.get("anthropic_api_key") == "ant-key-xyz"
+
     def test_mistral_tab_exists(self, qtbot, config):
         """#80 — ProvidersDialog must have a Mistral tab."""
         from mchat.ui.providers_dialog import ProvidersDialog
