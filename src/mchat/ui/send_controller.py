@@ -210,6 +210,8 @@ class SendController:
             targets, cleaned_text = self._resolver.resolve(text, conv.id, svc.db)
         except ResolveError as e:
             host._chat.add_note(f"Error: {e}")
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(text))
             return
 
         # Stage 3A.4: empty selection with no prefix → no targets.
@@ -218,6 +220,8 @@ class SendController:
             host._chat.add_note(
                 "No personas selected \u2014 use //addpersona or select a provider first"
             )
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(text))
             return
 
         # Prefix-only input: no content left after consuming prefixes.
@@ -251,6 +255,8 @@ class SendController:
                 host, "No Provider Available",
                 "None of the target providers have API keys configured.",
             )
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(text))
             return
 
         # addressed_to is a comma-separated list of persona_ids so
