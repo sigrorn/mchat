@@ -68,6 +68,16 @@ def filter_for_provider(
     out: list[Message] = []
     for msg in messages:
         if msg.role == Role.USER:
+            # Pinned messages with a pin_target must only be visible
+            # to the targeted provider(s), not to everyone.
+            if msg.pinned and msg.pin_target and msg.pin_target != "all":
+                pin_targets = {
+                    t.strip().lower()
+                    for t in msg.pin_target.split(",") if t.strip()
+                }
+                if target_provider_value not in pin_targets:
+                    continue  # skip: this pin isn't for us
+
             addressed = msg.addressed_to
             if addressed is None or addressed == "all":
                 out.append(msg)
