@@ -201,6 +201,39 @@ Be very concise
         d2.import_providers_md(md)
         assert config.get("anthropic_api_key") == "ant-key-xyz"
 
+    def test_unconfigured_tab_has_red_title(self, qtbot, config):
+        """#110 — tabs with empty API keys should have red title text."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        # config has anthropic_api_key set, but gemini is empty
+        config.set("gemini_api_key", "")
+        config.save()
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        # Find the Gemini tab index
+        gemini_idx = None
+        for i in range(d._tabs.count()):
+            if d._tabs.tabText(i) == "Gemini":
+                gemini_idx = i
+                break
+        assert gemini_idx is not None
+        color = d._tabs.tabBar().tabTextColor(gemini_idx)
+        assert color.red() > 200  # should be reddish
+
+    def test_configured_tab_not_red(self, qtbot, config):
+        """Tabs with API keys should NOT have red title text."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        claude_idx = None
+        for i in range(d._tabs.count()):
+            if d._tabs.tabText(i) == "Claude":
+                claude_idx = i
+                break
+        assert claude_idx is not None
+        color = d._tabs.tabBar().tabTextColor(claude_idx)
+        # Default colour or non-red
+        assert color.red() < 200 or color.green() > 100
+
     def test_mistral_tab_exists(self, qtbot, config):
         """#80 — ProvidersDialog must have a Mistral tab."""
         from mchat.ui.providers_dialog import ProvidersDialog
