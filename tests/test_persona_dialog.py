@@ -258,6 +258,114 @@ class TestEffectiveValueDisplay:
         assert dialog.effective_color(p) == "#b0b0b0"
 
 
+class TestExportImport:
+    """#100 — export personas to .md, import from .md."""
+
+    def test_export_produces_parseable_md(self, dialog, db, conv):
+        dialog.create_persona(
+            provider=Provider.CLAUDE, name="Partner",
+            system_prompt_override="Be kind and helpful",
+        )
+        dialog.create_persona(
+            provider=Provider.OPENAI, name="Critic",
+            system_prompt_override="Review my replies",
+            model_override="gpt-4.1",
+            color_override="#ff0000",
+        )
+        md = dialog.export_personas_md()
+        assert "## Partner" in md
+        assert "## Critic" in md
+        assert "Provider: claude" in md
+        assert "Provider: openai" in md
+        assert "Be kind and helpful" in md
+        assert "Review my replies" in md
+        assert "gpt-4.1" in md
+        assert "#ff0000" in md
+
+    def test_import_creates_personas_from_md(self, dialog, db, conv):
+        md = """# Personas
+
+## Friend
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+Talk in Italian
+
+---
+
+## Translator
+- Provider: mistral
+- Mode: new
+- Model override: mistral-large-latest
+- Color override: #aabbcc
+- Prompt:
+
+Translate words
+"""
+        dialog.import_personas_md(md)
+        personas = db.list_personas(conv.id)
+        assert len(personas) == 2
+        names = {p.name for p in personas}
+        assert names == {"Friend", "Translator"}
+        friend = next(p for p in personas if p.name == "Friend")
+        assert friend.provider == Provider.CLAUDE
+        assert friend.system_prompt_override == "Talk in Italian"
+        assert friend.created_at_message_index is None
+        translator = next(p for p in personas if p.name == "Translator")
+        assert translator.provider == Provider.MISTRAL
+        assert translator.model_override == "mistral-large-latest"
+        assert translator.color_override == "#aabbcc"
+
+    def test_import_clears_existing_personas(self, dialog, db, conv):
+        dialog.create_persona(
+            provider=Provider.CLAUDE, name="OldPersona",
+        )
+        assert len(db.list_personas(conv.id)) == 1
+        md = """# Personas
+
+## NewPersona
+- Provider: openai
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+New instructions
+"""
+        dialog.import_personas_md(md)
+        active = db.list_personas(conv.id)
+        assert len(active) == 1
+        assert active[0].name == "NewPersona"
+        # Old persona should be tombstoned, not hard-deleted
+        all_personas = db.list_personas_including_deleted(conv.id)
+        assert len(all_personas) == 2
+
+    def test_roundtrip_export_import(self, dialog, db, conv):
+        dialog.create_persona(
+            provider=Provider.CLAUDE, name="Alpha",
+            system_prompt_override="First persona",
+            model_override="claude-opus-4",
+            color_override="#112233",
+        )
+        dialog.create_persona(
+            provider=Provider.OPENAI, name="Beta",
+            system_prompt_override="Second persona",
+        )
+        md = dialog.export_personas_md()
+        # Clear and reimport
+        dialog.import_personas_md(md)
+        personas = db.list_personas(conv.id)
+        assert len(personas) == 2
+        alpha = next(p for p in personas if p.name == "Alpha")
+        assert alpha.provider == Provider.CLAUDE
+        assert alpha.system_prompt_override == "First persona"
+        assert alpha.model_override == "claude-opus-4"
+        assert alpha.color_override == "#112233"
+
+
 class TestModelOverrideCombo:
     """#81 — per-persona model override via a combo in PersonaDialog.
 
