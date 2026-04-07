@@ -32,28 +32,49 @@ def handle_pin(arg: str, host: CommandHost) -> bool:
         )
         return True
 
+    from mchat.models.persona import slugify_persona_name
     from mchat.router import PREFIX_TO_PROVIDER
     if target_part == "all":
         pin_target = "all"
         label = "all"
     else:
-        # Target may be multiple providers separated by spaces or commas.
+        # Target may be persona names or provider shorthands.
         names = [n for n in target_part.replace(",", " ").split() if n]
-        providers: list[Provider] = []
+        resolved_providers: list[Provider] = []
+        resolved_labels: list[str] = []
         unknown: list[str] = []
+        personas = (
+            host._db.list_personas(host._current_conv.id)
+            if host._current_conv else []
+        )
         for name in names:
-            p = PREFIX_TO_PROVIDER.get(name)
-            if p and p not in providers:
-                providers.append(p)
-            elif not p:
-                unknown.append(name)
-        if unknown or not providers:
+            # Try persona name first
+            try:
+                slug = slugify_persona_name(name)
+            except ValueError:
+                slug = ""
+            matched_persona = next(
+                (p for p in personas if p.name_slug == slug), None
+            ) if slug else None
+            if matched_persona:
+                if matched_persona.provider not in resolved_providers:
+                    resolved_providers.append(matched_persona.provider)
+                    resolved_labels.append(matched_persona.name)
+            else:
+                p = PREFIX_TO_PROVIDER.get(name)
+                if p and p not in resolved_providers:
+                    resolved_providers.append(p)
+                    resolved_labels.append(_PROVIDER_DISPLAY[p])
+                elif not p:
+                    unknown.append(name)
+        if unknown or not resolved_providers:
             host._chat.add_note(
-                f"Error: unknown provider(s) in //pin target: {', '.join(unknown) or target_part}"
+                f"Error: unknown persona/provider in //pin target: "
+                f"{', '.join(unknown) or target_part}"
             )
             return True
-        pin_target = ",".join(p.value for p in providers)
-        label = ",".join(_PROVIDER_DISPLAY[p] for p in providers)
+        pin_target = ",".join(p.value for p in resolved_providers)
+        label = ",".join(resolved_labels)
 
     msg = Message(
         role=Role.USER,
@@ -114,16 +135,34 @@ def handle_pins(arg: str, host: CommandHost) -> bool:
         host._chat.add_note("Error: no active conversation")
         return True
 
-    # Optional provider filter: //pins claude → only pins that would be
-    # delivered to Claude (i.e. pin_target is "all" or contains claude).
+    # Optional filter: //pins critic → resolve as persona name first,
+    # then fall back to provider shorthand.
     filter_provider: Provider | None = None
+    filter_label: str | None = None
     if arg.strip():
+        from mchat.models.persona import slugify_persona_name
         from mchat.router import PREFIX_TO_PROVIDER
         name = arg.strip().lower()
-        filter_provider = PREFIX_TO_PROVIDER.get(name)
-        if filter_provider is None:
-            host._chat.add_note(f"Error: unknown provider '{arg.strip()}'")
-            return True
+        # Try persona name first
+        resolved = False
+        if host._current_conv:
+            try:
+                slug = slugify_persona_name(name)
+            except ValueError:
+                slug = ""
+            if slug:
+                personas = host._db.list_personas(host._current_conv.id)
+                match = next((p for p in personas if p.name_slug == slug), None)
+                if match:
+                    filter_provider = match.provider
+                    filter_label = match.name
+                    resolved = True
+        if not resolved:
+            filter_provider = PREFIX_TO_PROVIDER.get(name)
+            if filter_provider is None:
+                host._chat.add_note(f"Error: unknown persona or provider '{arg.strip()}'")
+                return True
+            filter_label = _PROVIDER_DISPLAY[filter_provider]
 
     messages = host._current_conv.messages
     pinned = [(i + 1, m) for i, m in enumerate(messages) if m.pinned]
@@ -138,10 +177,8 @@ def handle_pins(arg: str, host: CommandHost) -> bool:
         pinned = [(n, m) for n, m in pinned if _matches(m)]
 
     if not pinned:
-        if filter_provider is not None:
-            host._chat.add_note(
-                f"no pinned messages for {_PROVIDER_DISPLAY[filter_provider]}"
-            )
+        if filter_label is not None:
+            host._chat.add_note(f"no pinned messages for {filter_label}")
         else:
             host._chat.add_note("no pinned messages")
         return True
@@ -158,10 +195,8 @@ def handle_pins(arg: str, host: CommandHost) -> bool:
                 labels.append(v)
         return ",".join(labels)
 
-    if filter_provider is not None:
-        host._chat.add_note(
-            f"Pinned instructions for {_PROVIDER_DISPLAY[filter_provider]}"
-        )
+    if filter_label is not None:
+        host._chat.add_note(f"Pinned instructions for {filter_label}")
     else:
         host._chat.add_note("Pinned instructions")
     cursor = host._chat.textCursor()
