@@ -114,15 +114,12 @@ class TestMistralProvider:
         assert issubclass(MistralProvider, BaseProvider)
 
     def test_provider_id(self):
+        """MistralProvider uses lazy init — construction doesn't need
+        the SDK, so no patching required."""
         from mchat.providers.mistral_provider import MistralProvider
-        # Can't instantiate without a real key, but we can check the class
-        # provides provider_id == Provider.MISTRAL
-        from unittest.mock import patch, MagicMock
-        with patch("mistralai.client.Mistral") as mock_cls:
-            mock_cls.return_value = MagicMock()
-            p = MistralProvider(api_key="fake", default_model="mistral-large-latest")
-            assert p.provider_id == Provider.MISTRAL
-            assert p.display_name == "Mistral"
+        p = MistralProvider(api_key="fake", default_model="mistral-large-latest")
+        assert p.provider_id == Provider.MISTRAL
+        assert p.display_name == "Mistral"
 
     def test_cross_provider_formatting_with_mistral(self):
         """Messages from Mistral should be reformatted as user context
