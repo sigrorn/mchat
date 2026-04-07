@@ -79,7 +79,17 @@ def build_context(
     provider_prompt = resolve_persona_prompt(persona, config)
     if provider_prompt:
         parts.append(provider_prompt)
-    if conv.system_prompt:
+    # For explicit personas (persona_id != provider.value), skip the
+    # global system prompt's multi-provider framing — the persona's
+    # own prompt defines its role. Instead add a persona identity line.
+    # For synthetic defaults, include the global prompt (legacy compat).
+    is_explicit = persona_target.persona_id != persona_target.provider.value
+    if is_explicit:
+        parts.append(
+            f"You are {persona.name}. Only respond as yourself — "
+            f"do not include or generate responses for other personas."
+        )
+    elif conv.system_prompt:
         parts.append(conv.system_prompt)
     if parts:
         context.append(Message(role=Role.SYSTEM, content="\n\n".join(parts)))
@@ -134,7 +144,11 @@ def build_context(
         list(messages), persona_target, matrix,
     )
 
-    # --- 6. Strip routing prefixes from user messages ---
+    # --- 6. Strip routing prefixes + relabel cross-persona messages ---
+    # For explicit personas, assistant messages from other personas
+    # (even on the same provider) are relabeled as user-role context
+    # so the provider sees them as "someone else said this", not as
+    # its own prior turns.
     for msg in messages:
         if msg.role == Role.USER:
             _, cleaned = Router._strip_prefix(msg.content)
@@ -148,6 +162,28 @@ def build_context(
                     id=msg.id,
                 )
             )
+        elif msg.role == Role.ASSISTANT and is_explicit:
+            msg_persona = msg.persona_id
+            if msg_persona is None:
+                # Legacy message with no persona_id — treat as own if
+                # same provider (back-compat for pre-persona messages)
+                is_own = (msg.provider == persona_target.provider)
+            else:
+                is_own = (msg_persona == persona_target.persona_id)
+            if not is_own:
+                # Cross-persona: relabel as user context with persona name
+                label = msg_persona or "assistant"
+                context.append(
+                    Message(
+                        role=Role.USER,
+                        content=f"[{label} responded]: {msg.content}",
+                        provider=msg.provider,
+                        conversation_id=msg.conversation_id,
+                        id=msg.id,
+                    )
+                )
+            else:
+                context.append(msg)
         else:
             context.append(msg)
     return context

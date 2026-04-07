@@ -97,7 +97,6 @@ def filter_for_provider(
                 msg.provider.value if msg.provider else None
             )
             if msg_source is None:
-                # Assistant with no provider at all — pass through
                 out.append(msg)
                 continue
             # Observer always sees its own responses
