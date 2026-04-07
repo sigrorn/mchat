@@ -24,13 +24,19 @@ from mchat.ui.persona_target import PersonaTarget, synthetic_default
 from mchat.ui.visibility import filter_for_provider
 
 
-def pin_matches(pin_target: str | None, provider_id: Provider) -> bool:
-    """Return True if a pinned message targets the given provider."""
+def pin_matches(
+    pin_target: str | None,
+    provider_id: Provider,
+    persona_id: str | None = None,
+) -> bool:
+    """Return True if a pinned message targets the given persona/provider."""
     if not pin_target:
         return False
     if pin_target == "all":
         return True
-    targets = {t.strip().lower() for t in pin_target.split(",") if t.strip()}
+    targets = {t.strip() for t in pin_target.split(",") if t.strip()}
+    if persona_id and persona_id in targets:
+        return True
     return provider_id.value in targets
 
 
@@ -109,7 +115,7 @@ def build_context(
     if cut_idx > 0:
         pinned_prefix = [
             m for m in all_messages[:cut_idx]
-            if m.pinned and pin_matches(m.pin_target, provider)
+            if m.pinned and pin_matches(m.pin_target, provider, persona_target.persona_id)
         ]
 
     # --- 4. Persona history cutoff (D6) ---

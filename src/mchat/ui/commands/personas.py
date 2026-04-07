@@ -136,14 +136,13 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         ),
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target=provider.value,
+        pin_target=persona.id,
     )
     host._db.add_message(name_instruction)
     host._current_conv.messages.append(name_instruction)
 
-    # Pinned transcript note for visibility — survives //limit.
-    # Pin targets only this persona's provider so other providers
-    # don't see this persona's setup instructions.
+    # Pinned transcript note — targets this specific persona so
+    # same-provider personas don't see each other's setup.
     mode_label = "inherit" if cutoff is None else "new"
     note_text = (
         f'Added persona "{name}" ({provider.value}, {mode_label})'
@@ -154,7 +153,7 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         content=note_text,
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target=provider.value,
+        pin_target=persona.id,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)
@@ -213,7 +212,7 @@ def handle_editpersona(arg: str, host: CommandHost) -> bool:
         ),
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target=target.provider.value,
+        pin_target=target.id,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)
@@ -260,7 +259,7 @@ def handle_removepersona(arg: str, host: CommandHost) -> bool:
         content=f'Removed persona "{target.name}"',
         conversation_id=host._current_conv.id,
         pinned=True,
-        pin_target=target.provider.value,
+        pin_target=target.id,
     )
     host._db.add_message(note_msg)
     host._current_conv.messages.append(note_msg)

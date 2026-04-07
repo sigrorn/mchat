@@ -160,15 +160,17 @@ class TestAddPersona:
         assert "Added persona" in pinned[1].content
         assert "Partner" in pinned[1].content
 
-    def test_pin_target_is_persona_provider_not_all(self, host, db):
-        """All pins must target only the persona's provider so other
-        providers don't see this persona's setup instructions."""
+    def test_pin_target_is_persona_id_not_provider(self, host, db):
+        """All pins must target the persona's id (not provider.value)
+        so same-provider personas don't see each other's instructions."""
         from mchat.ui.commands.personas import handle_addpersona
         handle_addpersona('claude as "Partner" new be kind', host)
+        personas = db.list_personas(host._current_conv.id)
+        persona_id = personas[0].id
         messages = db.get_messages(host._current_conv.id)
         pinned = [m for m in messages if m.pinned]
         assert len(pinned) == 2
-        assert all(p.pin_target == "claude" for p in pinned)
+        assert all(p.pin_target == persona_id for p in pinned)
 
     def test_addpersona_adds_to_selection(self, host, db):
         """After //addpersona, the new persona should be added to
@@ -238,8 +240,8 @@ class TestEditPersona:
         # No personas exist, command should fail gracefully
         assert len(db.list_personas(host._current_conv.id)) == 0
 
-    def test_edit_pin_target_is_persona_provider(self, host, db):
-        """Edit pin must target only the persona's provider."""
+    def test_edit_pin_target_is_persona_id(self, host, db):
+        """Edit pin must target the persona's id."""
         from mchat.models.persona import Persona, generate_persona_id
         from mchat.ui.commands.personas import handle_editpersona
         p = Persona(
@@ -253,7 +255,7 @@ class TestEditPersona:
         messages = db.get_messages(host._current_conv.id)
         pinned = [m for m in messages if m.pinned]
         assert len(pinned) == 1
-        assert pinned[0].pin_target == "openai"
+        assert pinned[0].pin_target == p.id
 
     def test_edit_case_insensitive_name_match(self, host, db):
         from mchat.models.persona import Persona, generate_persona_id
@@ -297,8 +299,8 @@ class TestRemovePersona:
         assert len(all_personas) == 1
         assert all_personas[0].deleted_at is not None
 
-    def test_remove_pin_target_is_persona_provider(self, host, db):
-        """Remove pin must target only the persona's provider."""
+    def test_remove_pin_target_is_persona_id(self, host, db):
+        """Remove pin must target the persona's id."""
         from mchat.models.persona import Persona, generate_persona_id
         from mchat.ui.commands.personas import handle_removepersona
         p = Persona(
@@ -312,7 +314,7 @@ class TestRemovePersona:
         messages = db.get_messages(host._current_conv.id)
         pinned = [m for m in messages if m.pinned]
         assert len(pinned) == 1
-        assert pinned[0].pin_target == "gemini"
+        assert pinned[0].pin_target == p.id
 
     def test_remove_unknown_persona_errors(self, host, db):
         from mchat.ui.commands.personas import handle_removepersona

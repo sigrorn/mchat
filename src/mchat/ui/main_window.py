@@ -698,7 +698,7 @@ class MainWindow(QMainWindow):
                     ),
                     conversation_id=conv_id,
                     pinned=True,
-                    pin_target=persona.provider.value,
+                    pin_target=persona.id,
                 )
                 self._db.add_message(name_instruction)
                 conv.messages.append(name_instruction)
@@ -719,7 +719,7 @@ class MainWindow(QMainWindow):
                     content=note_text,
                     conversation_id=conv_id,
                     pinned=True,
-                    pin_target=persona.provider.value,
+                    pin_target=persona.id,
                 )
                 self._db.add_message(note_msg)
                 conv.messages.append(note_msg)

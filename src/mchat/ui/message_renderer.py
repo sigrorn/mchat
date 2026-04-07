@@ -198,16 +198,26 @@ class MessageRenderer:
     # Incremental rendering (used when a multi-provider request completes)
     # ------------------------------------------------------------------
 
-    def render_list_responses(self, responses: list[Message]) -> None:
-        """Append already-persisted multi-provider responses as list items.
+    def _live_personas_by_id(self, responses: list[Message]) -> dict[str, Persona]:
+        """Build a personas lookup from the DB for the conversation
+        of the given response messages."""
+        conv_id = next(
+            (m.conversation_id for m in responses if m.conversation_id),
+            None,
+        )
+        if conv_id is not None:
+            return {
+                p.id: p
+                for p in self._db.list_personas_including_deleted(conv_id)
+            }
+        return {}
 
-        Callers must have already stored the messages in the DB and
-        appended them to the conversation's in-memory list; this method
-        only handles the visual rendering into the chat widget.
-        """
+    def render_list_responses(self, responses: list[Message]) -> None:
+        """Append already-persisted multi-provider responses as list items."""
         ordered = self._stable_order(responses)
+        personas_by_id = self._live_personas_by_id(ordered)
         for m in ordered:
-            label = PROVIDER_DISPLAY.get(m.provider, "Assistant")
+            label = resolve_message_label(m, personas_by_id)
             clean = strip_echoed_heading(m.content)
             display_msg = Message(
                 role=m.role,
@@ -224,9 +234,12 @@ class MessageRenderer:
     def render_column_responses(self, responses: list[Message]) -> None:
         """Append already-persisted multi-provider responses as a column table."""
         ordered = self._stable_order(responses)
+        personas_by_id = self._live_personas_by_id(ordered)
         for m in ordered:
             self._chat._messages.append(m)
-        table_html, provider_colors = self._build_column_table(ordered, excluded=False)
+        table_html, provider_colors = self._build_column_table(
+            ordered, excluded=False, personas_by_id=personas_by_id,
+        )
         self._chat._insert_column_table(table_html, provider_colors)
 
     # ------------------------------------------------------------------
@@ -296,7 +309,14 @@ class MessageRenderer:
         provider_colors: list[str] = []
         for m in ordered:
             label = resolve_message_label(m, personas_by_id)
-            base_color = self._provider_color(m.provider) if m.provider else "#d4d4d4"
+            # Use persona colour override if available, else provider colour
+            persona = personas_by_id.get(m.persona_id) if m.persona_id else None
+            if persona and persona.color_override:
+                base_color = persona.color_override
+            elif m.provider:
+                base_color = self._provider_color(m.provider)
+            else:
+                base_color = "#d4d4d4"
             color = self._chat._shade(base_color) if excluded else base_color
             provider_colors.append(color)
             md.reset()

@@ -72,10 +72,12 @@ def filter_for_provider(
             # to the targeted provider(s), not to everyone.
             if msg.pinned and msg.pin_target and msg.pin_target != "all":
                 pin_targets = {
-                    t.strip().lower()
-                    for t in msg.pin_target.split(",") if t.strip()
+                    t.strip() for t in msg.pin_target.split(",") if t.strip()
                 }
-                if target_provider_value not in pin_targets:
+                # Match by persona_id first, then by provider.value
+                # (back-compat for pins created before persona_id targeting)
+                if (target_persona_id not in pin_targets
+                        and target_provider_value not in pin_targets):
                     continue  # skip: this pin isn't for us
 
             addressed = msg.addressed_to
