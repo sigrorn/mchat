@@ -96,6 +96,17 @@ class Sidebar(QFrame):
             self._conversations[conv.id] = conv
         self._list.blockSignals(False)
 
+    def remove_conversation(self, conv_id: int) -> None:
+        """Remove a single conversation from the list widget."""
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == conv_id:
+                self._list.blockSignals(True)
+                self._list.takeItem(i)
+                self._list.blockSignals(False)
+                break
+        self._conversations.pop(conv_id, None)
+
     def update_conversation_title(self, conv_id: int, title: str) -> None:
         """Update a single item's displayed title in place.
 

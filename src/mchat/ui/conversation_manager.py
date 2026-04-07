@@ -162,12 +162,19 @@ class ConversationManager:
         current = self._services.session.current
         was_current = current is not None and current.id == conv_id
         self._services.db.delete_conversation(conv_id)
+        # Remove from sidebar immediately
+        host._sidebar.remove_conversation(conv_id)
         if was_current:
             self._services.session.clear()
             host._chat.clear_messages()
-        self.load_conversations()
-        if was_current:
-            self.new_chat()
+            host._sync_toolbar_personas()
+            host._sync_matrix_panel()
+            # Select another conversation if any remain, else start fresh
+            remaining = self._services.db.list_conversations()
+            if remaining:
+                host._sidebar.select_conversation(remaining[0].id)
+            else:
+                self.new_chat()
 
     # ------------------------------------------------------------------
     # Per-conversation state persistence
