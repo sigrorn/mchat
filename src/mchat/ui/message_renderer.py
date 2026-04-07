@@ -160,11 +160,15 @@ class MessageRenderer:
                     j += 1
 
                 if len(group) > 1:
+                    # Sort by persona sort_order, not PROVIDER_ORDER
+                    sort_keys = {
+                        p.id: p.sort_order for p in personas_by_id.values()
+                    }
                     ordered_pairs = sorted(
                         group,
                         key=lambda pair: (
-                            PROVIDER_ORDER.index(pair[1].provider)
-                            if pair[1].provider in PROVIDER_ORDER else 99
+                            sort_keys.get(pair[1].persona_id, 99),
+                            pair[1].persona_id or "",
                         ),
                     )
                     ordered = [m for _idx, m in ordered_pairs]
@@ -214,7 +218,9 @@ class MessageRenderer:
 
     def render_list_responses(self, responses: list[Message]) -> None:
         """Append already-persisted multi-provider responses as list items."""
-        ordered = self._stable_order(responses)
+        conv_id = next((m.conversation_id for m in responses if m.conversation_id), None)
+        sort_keys = self._persona_sort_key(conv_id)
+        ordered = self._stable_order(responses, sort_keys)
         personas_by_id = self._live_personas_by_id(ordered)
         for m in ordered:
             label = resolve_message_label(m, personas_by_id)
@@ -233,7 +239,9 @@ class MessageRenderer:
 
     def render_column_responses(self, responses: list[Message]) -> None:
         """Append already-persisted multi-provider responses as a column table."""
-        ordered = self._stable_order(responses)
+        conv_id = next((m.conversation_id for m in responses if m.conversation_id), None)
+        sort_keys = self._persona_sort_key(conv_id)
+        ordered = self._stable_order(responses, sort_keys)
         personas_by_id = self._live_personas_by_id(ordered)
         for m in ordered:
             self._chat._messages.append(m)
@@ -246,12 +254,24 @@ class MessageRenderer:
     # Internals
     # ------------------------------------------------------------------
 
-    def _stable_order(self, messages: list[Message]) -> list[Message]:
+    def _persona_sort_key(self, conv_id: int | None = None) -> dict[str, int]:
+        """Build a persona_id → sort_order map for ordering."""
+        if conv_id is None:
+            return {}
+        return {
+            p.id: p.sort_order
+            for p in self._db.list_personas_including_deleted(conv_id)
+        }
+
+    def _stable_order(
+        self, messages: list[Message], sort_keys: dict[str, int] | None = None,
+    ) -> list[Message]:
+        sort_keys = sort_keys or {}
         return sorted(
             messages,
             key=lambda m: (
-                PROVIDER_ORDER.index(m.provider)
-                if m.provider in PROVIDER_ORDER else 99
+                sort_keys.get(m.persona_id, 99) if m.persona_id else 99,
+                m.persona_id or "",
             ),
         )
 
