@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
@@ -74,6 +75,14 @@ class ProvidersDialog(QDialog):
 
         # Footer: reset-colours and save/cancel
         footer = QHBoxLayout()
+
+        export_btn = QPushButton("Export…")
+        export_btn.clicked.connect(self._on_export_clicked)
+        footer.addWidget(export_btn)
+
+        import_btn = QPushButton("Import…")
+        import_btn.clicked.connect(self._on_import_clicked)
+        footer.addWidget(import_btn)
 
         reset_btn = QPushButton("Reset colours to defaults")
         reset_btn.setStyleSheet(
@@ -208,6 +217,121 @@ class ProvidersDialog(QDialog):
             hex_color = color.name()
             btn.setProperty("hex_color", hex_color)
             self._apply_color_btn_style(btn, hex_color)
+
+    # ------------------------------------------------------------------
+    # Export / Import
+    # ------------------------------------------------------------------
+
+    def export_providers_md(self) -> str:
+        """Serialize current provider settings to a readable .md string.
+        Reads from the dialog widgets (which reflect current edits)."""
+        lines: list[str] = ["# Provider Settings", ""]
+        first = True
+        for pv, meta in PROVIDER_META.items():
+            if not first:
+                lines.append("---")
+                lines.append("")
+            first = False
+            lines.append(f"## {meta['display']}")
+            lines.append(f"- API key: {self._api_key_edits[pv].text().strip()}")
+            lines.append(f"- Model: {self._model_combos[pv].currentText()}")
+            lines.append(f"- Color: {self._color_btns[pv].property('hex_color')}")
+            lines.append("- System prompt:")
+            lines.append("")
+            prompt = self._system_prompt_edits[pv].toPlainText().strip()
+            lines.append(prompt or "(none)")
+            lines.append("")
+        return "\n".join(lines)
+
+    def import_providers_md(self, md: str) -> None:
+        """Parse a .md string and write the provider settings to config."""
+        import re
+        # Build a reverse lookup: display name → provider value
+        display_to_pv = {
+            meta["display"]: pv for pv, meta in PROVIDER_META.items()
+        }
+
+        sections = re.split(r"\n---\n|\n(?=## )", md)
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+            # Skip top-level header
+            if section.startswith("# Provider Settings") and "## " not in section:
+                continue
+            if section.startswith("# Provider Settings"):
+                idx = section.index("## ")
+                section = section[idx:]
+
+            name_match = re.match(r"^## (.+)$", section, re.MULTILINE)
+            if not name_match:
+                continue
+            display = name_match.group(1).strip()
+            pv = display_to_pv.get(display)
+            if pv is None:
+                continue
+            meta = PROVIDER_META[pv]
+
+            def _field(label: str) -> str | None:
+                m = re.search(
+                    rf"^- {label}:\s*(.*)$", section, re.MULTILINE,
+                )
+                if m:
+                    val = m.group(1).strip()
+                    return None if val == "(none)" else val
+                return None
+
+            api_key = _field("API key") or ""
+            model = _field("Model") or ""
+            color = _field("Color") or DEFAULTS.get(meta["color_key"], "")
+
+            prompt_match = re.search(
+                r"^- System prompt:\s*\n\n(.*)",
+                section, re.MULTILINE | re.DOTALL,
+            )
+            prompt = ""
+            if prompt_match:
+                prompt = prompt_match.group(1).strip()
+                if prompt == "(none)":
+                    prompt = ""
+
+            self._config.set(meta["api_key"], api_key)
+            self._config.set(meta["model_key"], model)
+            self._config.set(meta["color_key"], color)
+            self._config.set(meta["system_prompt_key"], prompt)
+
+        self._config.save()
+
+    def _on_export_clicked(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Provider Settings", "providers.md",
+            "Markdown Files (*.md);;All Files (*)",
+        )
+        if not path:
+            return
+        md = self.export_providers_md()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+
+    def _on_import_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Provider Settings", "",
+            "Markdown Files (*.md);;All Files (*)",
+        )
+        if not path:
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            md = f.read()
+        self.import_providers_md(md)
+        # Refresh the dialog widgets from the updated config
+        for pv, meta in PROVIDER_META.items():
+            self._api_key_edits[pv].setText(self._config.get(meta["api_key"]))
+            color = self._config.get(meta["color_key"])
+            self._color_btns[pv].setProperty("hex_color", color)
+            self._apply_color_btn_style(self._color_btns[pv], color)
+            self._system_prompt_edits[pv].setPlainText(
+                self._config.get(meta["system_prompt_key"])
+            )
 
     # ------------------------------------------------------------------
     # Save
