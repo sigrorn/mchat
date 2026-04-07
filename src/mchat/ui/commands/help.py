@@ -16,45 +16,49 @@ _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
 
 HELP_COMMANDS = (
     "Available commands:\n"
+    "  //edit [N] | //edit -N        — edit and re-send message N (default: last)\n"
     "  //limit <N>                   — only send chat from message N onwards\n"
-    "  //limit last                  — limit to the last request sent to providers\n"
+    "  //limit last                  — limit to the last request sent\n"
     "  //limit ALL                   — remove the limit, send full chat history\n"
     "  //pop                         — remove the last request and its responses\n"
     "  //hide                        — hide the last request+responses\n"
     "  //unhide                      — unhide all hidden messages\n"
     "  //retry                       — re-attempt the last failed request\n"
-    "  +<provider>                   — add a provider to the current selection\n"
-    "  -<provider>                   — remove a provider from the selection\n"
-    "  //select <providers>          — set target providers\n"
-    "  //select all                  — target all configured providers\n"
+    "  +<name>                       — add a persona/provider to the selection\n"
+    "  -<name>                       — remove a persona/provider from the selection\n"
+    "  //select <names>              — set target personas/providers\n"
+    "  //select all                  — target all personas\n"
     "  //providers                   — list available providers and config status\n"
     "  //pin <target>, <instr>       — pin an instruction (bypasses //limit)\n"
     "  //unpin <N> | //unpin ALL     — remove a pin or all pins\n"
-    "  //pins [provider]             — list pinned instructions\n"
+    "  //pins [name]                 — list pinned instructions (persona or provider)\n"
+    "  //addpersona                  — open the persona editor dialog\n"
     '  //addpersona <p> as "<n>" [inherit|new] <prompt>\n'
-    "                                — create a named persona in this chat\n"
+    "                                — create a named persona via command\n"
     '  //editpersona "<n>" <prompt>  — update a persona\'s system prompt\n'
     '  //removepersona "<n>"         — tombstone a persona\n'
     "  //personas                    — list personas in this chat\n"
     "  //rename <text>               — rename the current chat\n"
-    "  //columns (//cols) / //lines  — column vs list rendering for multi-provider responses\n"
+    "  //columns (//cols) / //lines  — column vs list layout\n"
     "  //help                        — show this help\n"
     "  //vacuum                      — compact the database (rarely needed)\n"
     "\n"
-    "Persona example (Italian tutor on one API key):\n"
-    '  //addpersona claude as "Partner" new Start an Italian conversation\n'
-    '  //addpersona claude as "Evaluator" new Review my replies for mistakes\n'
-    '  //addpersona claude as "Translator" new Word-level translations only\n'
-    "  partner, ciao come stai?"
+    "Persona example (Italian tutor with 3 providers):\n"
+    '  //addpersona claude as "Friend" new Start an Italian conversation\n'
+    '  //addpersona openai as "Critic" new Review my replies for mistakes\n'
+    '  //addpersona mistral as "Translator" new Word-level translations only\n'
+    "  friend, ciao come stai?"
 )
 
 HELP_PROVIDERS = [
-    ("claude, <message>", "send to Claude", Provider.CLAUDE),
-    ("gpt, <message>", "send to GPT", Provider.OPENAI),
-    ("gemini, <message>", "send to Gemini", Provider.GEMINI),
+    ("claude, <message>", "send to Claude personas", Provider.CLAUDE),
+    ("gpt, <message>", "send to GPT personas", Provider.OPENAI),
+    ("gemini, <message>", "send to Gemini personas", Provider.GEMINI),
     ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
-    ("all, <message>", "send to all configured providers", None),
-    ("flipped, <message>", "send to non-selected providers", None),
+    ("mistral, <message>", "send to Mistral personas", Provider.MISTRAL),
+    ("all, <message>", "send to all personas in the chat", None),
+    ("flipped, <message>", "send to non-selected personas", None),
+    ("<name>, <message>", "send to a specific persona by name", None),
     ("(no prefix)", "send to current selection", None),
 ]
 

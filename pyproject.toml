@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mchat"
 version = "0.1.0"
-description = "Multi-provider LLM chat application"
+description = "Multi-provider LLM chat with named personas (Claude, GPT, Gemini, Perplexity, Mistral)"
 requires-python = ">=3.11"
 dependencies = [
     "PySide6>=6.6",

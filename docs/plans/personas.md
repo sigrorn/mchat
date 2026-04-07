@@ -2,10 +2,18 @@
 
 ## Status
 
-**Approved.** Next steps on exit from plan mode:
-1. Copy this file to `docs/plans/personas.md` (or similar) in the repo so it's versioned alongside the code.
-2. Create one GitHub issue per logical stage listed under "Implementation stages" (Stage 1.1 through 3B.3). Each issue references its stage section and carries its test discipline note.
-3. Work the issues in order, starting with Stage 1.1.
+**Phases 1–3A complete. Phase 4 (persona-first UX) complete.**
+
+Implemented and shipped:
+- Phase 1: data model, DB migration, persona CRUD, rendering
+- Phase 2: PersonaResolver, routing, commands, visibility filter, send flow
+- Phase 3A: PersonaDialog editor, colour resolution, sidebar action
+- Phase 4: persona-first UX (zero-provider new chat, per-persona toolbar,
+  persona-keyed matrix, all/flipped over personas, +/- persona names,
+  provider shorthand expands to personas, per-persona spend, export/import)
+- Additional: Mistral provider, //edit command, -debug I/O logging
+
+Phase 3B (optional panel-row redesign) is deferred — the toolbar already shows per-persona rows.
 
 ## Context
 
