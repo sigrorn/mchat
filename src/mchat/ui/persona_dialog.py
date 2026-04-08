@@ -202,6 +202,7 @@ class PersonaDialog(QDialog):
             self.remove_persona(p.id)
 
         # Parse sections separated by --- or ## headers
+        import_idx = 0
         sections = re.split(r"\n---\n|\n(?=## )", md)
         for section in sections:
             section = section.strip()
@@ -249,7 +250,7 @@ class PersonaDialog(QDialog):
 
             cutoff = None if mode == "inherit" else 0
 
-            self.create_persona(
+            persona = self.create_persona(
                 provider=provider,
                 name=name,
                 system_prompt_override=prompt,
@@ -257,6 +258,10 @@ class PersonaDialog(QDialog):
                 color_override=color_override,
                 created_at_message_index=cutoff,
             )
+            # Preserve file order via sort_order
+            persona.sort_order = import_idx
+            self._db.update_persona(persona)
+            import_idx += 1
         self._refresh_list()
 
     def effective_prompt(self, persona: Persona) -> str:
