@@ -84,7 +84,7 @@ Or use `//addpersona` (no args) to open the dialog. Personas can also be exporte
 - `partner, <message>` — send to the "partner" persona
 - `claude, <message>` — send to the Claude provider (synthetic default)
 - `all, <message>` — send to all personas in the conversation
-- `flipped, <message>` — send to non-selected personas
+- `flipped, <message>` — send to non-selected personas and switch selection to them
 - `+partner` / `-partner` — add/remove the "partner" persona from the selection
 - No prefix — send to current selection (sticky per conversation)
 
