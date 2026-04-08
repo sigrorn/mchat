@@ -100,6 +100,17 @@ def handle_lines(host: CommandHost) -> bool:
     return True
 
 
+def handle_mode(arg: str, host: CommandHost) -> bool:
+    """//mode parallel|sequential — set the send mode."""
+    mode = arg.strip().lower()
+    if mode not in ("parallel", "sequential"):
+        host._chat.add_note("Error: //mode parallel|sequential")
+        return True
+    host._send._sequential_mode = (mode == "sequential")
+    host._chat.add_note(f"mode: {mode}")
+    return True
+
+
 def handle_visibility(arg: str, host: CommandHost) -> bool:
     """//visibility separated|joined — quick visibility matrix presets.
 

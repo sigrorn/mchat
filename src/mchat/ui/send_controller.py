@@ -90,6 +90,12 @@ class SendController:
             PersonaResolver(services.router) if services.router is not None else None
         )
 
+        # Send mode: parallel (default) or sequential
+        self._sequential_mode: bool = False
+        # Sequential chain state
+        self._seq_queue: list[PersonaTarget] = []
+        self._seq_context_override: dict[str, list[Message]] | None = None
+
         # Transient per-send state, keyed by persona_id (str) so two
         # same-provider personas can coexist in one send group.
         self._multi_workers: dict[str, StreamWorker] = {}
@@ -444,11 +450,25 @@ class SendController:
         targets: list[PersonaTarget],
         context_override: dict[str, list[Message]] | None = None,
     ) -> None:
-        """Send to multiple personas simultaneously; render when all done.
+        """Send to multiple personas; parallel or sequential per mode.
 
         ``context_override`` is keyed by persona_id — used by the //retry
         command to re-send the same context for failed targets.
         """
+        if self._sequential_mode and len(targets) > 1:
+            self._seq_queue = list(targets[1:])
+            self._seq_context_override = context_override
+            self._send_parallel([targets[0]], context_override)
+        else:
+            self._seq_queue = []
+            self._send_parallel(targets, context_override)
+
+    def _send_parallel(
+        self,
+        targets: list[PersonaTarget],
+        context_override: dict[str, list[Message]] | None = None,
+    ) -> None:
+        """Send to the given targets simultaneously."""
         host = self._host
         svc = self._services
         self._multi_workers.clear()
@@ -543,6 +563,13 @@ class SendController:
                 persisted = self._persist_buffered("lines")
                 host._renderer.render_list_responses(persisted)
             self._column_buffer.clear()
+
+            # Sequential chain: send next target if queue is non-empty
+            if self._seq_queue:
+                next_target = self._seq_queue.pop(0)
+                self._send_parallel([next_target], self._seq_context_override)
+                return
+
             host._input.set_enabled(True)
             host._update_input_placeholder()
             host._update_input_color()
@@ -573,6 +600,8 @@ class SendController:
         self._retry_error_msg_ids[target.persona_id] = error_msg.id
 
         if not self._multi_workers:
+            # On error, clear the sequential queue (chain stops)
+            self._seq_queue.clear()
             host._input.set_enabled(True)
             host._update_input_placeholder()
             host._update_input_color()

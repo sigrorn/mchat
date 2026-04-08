@@ -707,6 +707,11 @@ class TestSequentialMode:
         main_window._on_message_submitted("hello")
         # Only one worker should be running at a time
         assert len(main_window._send._multi_workers) <= 1
+        # Wait for workers to finish to avoid teardown errors
+        qtbot.waitUntil(
+            lambda: len(main_window._send._multi_workers) == 0,
+            timeout=5000,
+        )
 
 
 class TestNewChatOpensPersonaDialog:

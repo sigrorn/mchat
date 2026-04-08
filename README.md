@@ -114,6 +114,8 @@ Use the checkboxes in the toolbar, or `//select`.
 | `//removepersona "<name>"` | Remove a persona |
 | `//personas` | List personas in this chat |
 | `//rename <text>` | Rename the current chat |
+| `//mode parallel` | Send to all personas simultaneously (default) |
+| `//mode sequential` | Send one at a time; each sees prior responses |
 | `//visibility separated` | Each persona sees only its own responses |
 | `//visibility joined` | Full visibility — everyone sees everyone |
 | `//columns` (`//cols`) / `//lines` | Column vs list layout |
