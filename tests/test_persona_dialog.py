@@ -30,6 +30,7 @@ def config(tmp_path):
     cfg = Config(config_path=tmp_path / "cfg.json")
     # Set some globals so the "effective value" display has something
     # to show when overrides are None.
+    cfg.set("anthropic_api_key", "test-key")
     cfg.set("system_prompt_claude", "Global Claude prompt")
     cfg.set("claude_model", "claude-sonnet-global")
     cfg.set("color_claude", "#b0b0b0")
@@ -256,6 +257,48 @@ class TestEffectiveValueDisplay:
             color_override=None,
         )
         assert dialog.effective_color(p) == "#b0b0b0"
+
+
+class TestUnconfiguredProviderHighlight:
+    """#114 — personas with unconfigured providers are highlighted
+    and the Close button is blocked."""
+
+    def test_unconfigured_persona_blocks_close(self, qtbot, db, config, conv):
+        """A persona whose provider has no API key should block Close."""
+        from mchat.ui.persona_dialog import PersonaDialog
+        # Config only has Claude key set — Perplexity has no key
+        config.set("perplexity_api_key", "")
+        config.save()
+        d = PersonaDialog(db, config, conv.id)
+        qtbot.addWidget(d)
+        d.create_persona(provider=Provider.PERPLEXITY, name="Searcher")
+        d._refresh_list()
+        assert not d._close_btn.isEnabled()
+        assert not d._warning_label.isHidden()
+
+    def test_all_configured_allows_close(self, dialog):
+        """When all personas use configured providers, Close is enabled."""
+        dialog.create_persona(provider=Provider.CLAUDE, name="Test")
+        dialog._refresh_list()
+        assert dialog._close_btn.isEnabled()
+        assert dialog._warning_label.isHidden()
+
+    def test_removing_unconfigured_persona_enables_close(
+        self, qtbot, db, config, conv,
+    ):
+        from mchat.ui.persona_dialog import PersonaDialog
+        config.set("perplexity_api_key", "")
+        config.save()
+        d = PersonaDialog(db, config, conv.id)
+        qtbot.addWidget(d)
+        d.create_persona(provider=Provider.PERPLEXITY, name="Searcher")
+        d._refresh_list()
+        assert not d._close_btn.isEnabled()
+        # Remove the unconfigured persona
+        personas = d.list_items()
+        d.remove_persona(personas[0].id)
+        d._refresh_list()
+        assert d._close_btn.isEnabled()
 
 
 class TestMoveUpDown:

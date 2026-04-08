@@ -381,24 +381,61 @@ class PersonaDialog(QDialog):
         import_btn.clicked.connect(self._on_import_clicked)
         bottom_row.addWidget(import_btn)
         bottom_row.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        bottom_row.addWidget(close_btn)
+        self._warning_label = QLabel()
+        self._warning_label.setStyleSheet("color: #cc0000; font-size: 11px;")
+        self._warning_label.setVisible(False)
+        bottom_row.addWidget(self._warning_label)
+        self._close_btn = QPushButton("Close")
+        self._close_btn.clicked.connect(self.accept)
+        bottom_row.addWidget(self._close_btn)
         right.addLayout(bottom_row)
 
         outer.addLayout(right, stretch=2)
 
         self._set_form_enabled(False)
 
+    def _configured_providers(self) -> set[Provider]:
+        """Return the set of providers that have a non-empty API key."""
+        configured: set[Provider] = set()
+        for pv, meta in PROVIDER_META.items():
+            key = self._config.get(meta["api_key"])
+            if key:
+                try:
+                    configured.add(Provider(pv))
+                except ValueError:
+                    pass
+        return configured
+
     def _refresh_list(self) -> None:
         """Reload the persona list from the DB, preserving the
-        currently selected persona id where possible."""
+        currently selected persona id where possible. Highlights
+        personas with unconfigured providers in red and blocks
+        the Close button until resolved."""
         current_id = self._selected_persona_id()
         self._list.clear()
+        configured = self._configured_providers()
+        unconfigured_names: list[str] = []
         for p in self.list_items():
             item = QListWidgetItem(f"{p.name}  ({p.provider.value})")
             item.setData(Qt.ItemDataRole.UserRole, p.id)
+            if p.provider not in configured:
+                item.setForeground(QColor("#cc0000"))
+                unconfigured_names.append(
+                    f"{p.name} ({p.provider.value})"
+                )
             self._list.addItem(item)
+
+        # Block close if any persona uses an unconfigured provider
+        if unconfigured_names:
+            self._warning_label.setText(
+                f"Unconfigured: {', '.join(unconfigured_names)} "
+                f"— configure API key in Providers or change/remove the persona"
+            )
+            self._warning_label.setVisible(True)
+            self._close_btn.setEnabled(False)
+        else:
+            self._warning_label.setVisible(False)
+            self._close_btn.setEnabled(True)
 
         # Restore selection
         if current_id:
