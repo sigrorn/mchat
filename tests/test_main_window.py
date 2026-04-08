@@ -675,6 +675,40 @@ class TestPersonaSelectionAdjust:
         assert selection[0] == synthetic_default(Provider.CLAUDE)
 
 
+class TestSequentialMode:
+    """#115 — //mode sequential sends personas one at a time."""
+
+    def test_mode_command_sets_flag(self, main_window):
+        main_window._on_message_submitted("//mode sequential")
+        assert main_window._send._sequential_mode is True
+        main_window._on_message_submitted("//mode parallel")
+        assert main_window._send._sequential_mode is False
+
+    def test_sequential_sends_one_at_a_time(self, main_window, qtbot):
+        """In sequential mode, only one worker runs at a time."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        p1 = Persona(
+            conversation_id=conv_id, id=generate_persona_id(),
+            provider=Provider.CLAUDE, name="A", name_slug="a",
+        )
+        p2 = Persona(
+            conversation_id=conv_id, id=generate_persona_id(),
+            provider=Provider.OPENAI, name="B", name_slug="b",
+        )
+        main_window._db.create_persona(p1)
+        main_window._db.create_persona(p2)
+        main_window._send._sequential_mode = True
+        t1 = PersonaTarget(persona_id=p1.id, provider=Provider.CLAUDE)
+        t2 = PersonaTarget(persona_id=p2.id, provider=Provider.OPENAI)
+        main_window._selection_state.set([t1, t2])
+        main_window._on_message_submitted("hello")
+        # Only one worker should be running at a time
+        assert len(main_window._send._multi_workers) <= 1
+
+
 class TestNewChatOpensPersonaDialog:
     """#93 — new chat should auto-open PersonaDialog."""
 
