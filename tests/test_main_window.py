@@ -658,24 +658,21 @@ class TestPersonaSelectionAdjust:
         assert not any(t.persona_id == partner.id for t in selection)
         assert any(t.persona_id == evaluator.id for t in selection)
 
-    def test_plus_provider_adds_all_active_personas(self, main_window):
-        """'+claude' with active Claude personas should add them all."""
+    def test_plus_provider_adds_synthetic_default_only(self, main_window):
+        """'+claude' should add the synthetic default, not expand to
+        explicit personas. Personas are addressed by name."""
         from mchat.ui.persona_target import synthetic_default
         main_window._on_new_chat()
         conv_id = main_window._current_conv.id
-        partner = self._make_persona(
+        self._make_persona(
             main_window._db, conv_id, "Partner", "partner",
-        )
-        evaluator = self._make_persona(
-            main_window._db, conv_id, "Evaluator", "evaluator",
         )
         main_window._selection_state.set([])
         handled = main_window._handle_selection_adjust("+claude")
         assert handled is True
         selection = main_window._selection_state.selection
-        persona_ids = {t.persona_id for t in selection}
-        assert partner.id in persona_ids
-        assert evaluator.id in persona_ids
+        assert len(selection) == 1
+        assert selection[0] == synthetic_default(Provider.CLAUDE)
 
 
 class TestNewChatOpensPersonaDialog:

@@ -24,8 +24,8 @@ HELP_COMMANDS = (
     "  //hide                        — hide the last request+responses\n"
     "  //unhide                      — unhide all hidden messages\n"
     "  //retry                       — re-attempt the last failed request\n"
-    "  +<name>                       — add a persona/provider to the selection\n"
-    "  -<name>                       — remove a persona/provider from the selection\n"
+    "  +<name>                       — add a persona to the selection\n"
+    "  -<name>                       — remove a persona from the selection\n"
     "  //select <names>              — set target personas/providers\n"
     "  //select all                  — target all personas\n"
     "  //providers                   — list available providers and config status\n"
@@ -52,14 +52,14 @@ HELP_COMMANDS = (
 )
 
 HELP_PROVIDERS = [
-    ("claude, <message>", "send to Claude personas", Provider.CLAUDE),
-    ("gpt, <message>", "send to GPT personas", Provider.OPENAI),
-    ("gemini, <message>", "send to Gemini personas", Provider.GEMINI),
+    ("<name>, <message>", "send to a specific persona by name", None),
+    ("claude, <message>", "send to Claude (synthetic default)", Provider.CLAUDE),
+    ("gpt, <message>", "send to GPT (synthetic default)", Provider.OPENAI),
+    ("gemini, <message>", "send to Gemini (synthetic default)", Provider.GEMINI),
     ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
-    ("mistral, <message>", "send to Mistral personas", Provider.MISTRAL),
+    ("mistral, <message>", "send to Mistral (synthetic default)", Provider.MISTRAL),
     ("all, <message>", "send to all personas in the chat", None),
     ("flipped, <message>", "send to non-selected personas", None),
-    ("<name>, <message>", "send to a specific persona by name", None),
     ("(no prefix)", "send to current selection", None),
 ]
 

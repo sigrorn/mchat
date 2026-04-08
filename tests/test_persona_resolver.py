@@ -107,20 +107,19 @@ class TestExplicitPersonaName:
 
 
 class TestProviderShorthandSyntheticDefault:
-    def test_claude_shorthand_resolves_to_explicit_personas(
+    def test_claude_shorthand_always_resolves_to_synthetic_default(
         self, resolver, db,
     ):
-        """Stage 4.3: claude, with explicit Claude personas resolves
-        to all of them (not the synthetic default)."""
+        """Provider shorthand always resolves to the synthetic default,
+        even when explicit Claude personas exist. Personas are addressed
+        by name, not provider shorthand."""
         conv = db.create_conversation()
-        partner = db.create_persona(_make_persona(conv.id, "Partner", "partner"))
-        evaluator = db.create_persona(_make_persona(conv.id, "Evaluator", "evaluator"))
+        db.create_persona(_make_persona(conv.id, "Partner", "partner"))
+        db.create_persona(_make_persona(conv.id, "Evaluator", "evaluator"))
 
         targets, cleaned = resolver.resolve("claude, hi", conv.id, db)
-        assert len(targets) == 2
-        persona_ids = {t.persona_id for t in targets}
-        assert partner.id in persona_ids
-        assert evaluator.id in persona_ids
+        assert len(targets) == 1
+        assert targets[0] == synthetic_default(Provider.CLAUDE)
         assert cleaned == "hi"
 
     def test_legacy_conversation_with_no_personas_uses_synthetic(
@@ -325,32 +324,22 @@ class TestMixedPrefixes:
         assert cleaned == ""
 
 
-class TestProviderShorthandExpandsToPersonas:
-    """#85 — when a conversation has explicit personas on a provider,
-    `claude, message` should resolve to all active Claude personas
-    (not just the synthetic default)."""
+class TestProviderShorthandAlwaysSynthetic:
+    """#113 — provider shorthands always resolve to synthetic default,
+    never expand to explicit personas."""
 
-    def test_provider_shorthand_with_explicit_personas(self, resolver, db):
-        """'claude, hello' with two active Claude personas should
-        resolve to both, not the synthetic default."""
+    def test_provider_shorthand_with_explicit_personas_still_synthetic(
+        self, resolver, db,
+    ):
+        """'claude, hello' with explicit Claude personas should still
+        resolve to the synthetic default (personas addressed by name)."""
         conv = db.create_conversation()
-        partner = db.create_persona(
-            _make_persona(conv.id, "Partner", "partner")
-        )
-        evaluator = db.create_persona(
-            _make_persona(conv.id, "Evaluator", "evaluator")
-        )
+        db.create_persona(_make_persona(conv.id, "Partner", "partner"))
         targets, cleaned = resolver.resolve("claude, hello", conv.id, db)
-        persona_ids = {t.persona_id for t in targets}
-        assert partner.id in persona_ids
-        assert evaluator.id in persona_ids
-        # Synthetic default should NOT be included when explicit personas exist
-        assert "claude" not in persona_ids
+        assert targets == [synthetic_default(Provider.CLAUDE)]
         assert cleaned == "hello"
 
     def test_provider_shorthand_without_explicit_personas(self, resolver, db):
-        """'gpt, hello' with no explicit GPT personas should still
-        resolve to the synthetic default (backwards compat)."""
         conv = db.create_conversation()
         targets, cleaned = resolver.resolve("gpt, hello", conv.id, db)
         assert targets == [synthetic_default(Provider.OPENAI)]

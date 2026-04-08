@@ -826,7 +826,8 @@ class MainWindow(QMainWindow):
                         )
                     display_name = matched[0].name
 
-        # Fall back to provider shorthand
+        # Fall back to provider shorthand — synthetic default only.
+        # Personas are addressed by name, not provider shorthand.
         if not targets_to_adjust:
             provider = PREFIX_TO_PROVIDER.get(name)
             if provider is None:
@@ -838,19 +839,7 @@ class MainWindow(QMainWindow):
                 return True
 
             display_name = _PROVIDER_DISPLAY[provider]
-            # Expand to all active personas on this provider, or synthetic default
-            if self._current_conv:
-                personas = self._db.list_personas(self._current_conv.id)
-                provider_personas = [p for p in personas if p.provider == provider]
-                if provider_personas:
-                    for p in provider_personas:
-                        targets_to_adjust.append(
-                            PersonaTarget(persona_id=p.id, provider=p.provider)
-                        )
-                else:
-                    targets_to_adjust.append(synthetic_default(provider))
-            else:
-                targets_to_adjust.append(synthetic_default(provider))
+            targets_to_adjust.append(synthetic_default(provider))
 
         # Apply the adjustment to the current selection
         current = list(self._selection_state.selection)

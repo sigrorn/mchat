@@ -81,12 +81,11 @@ Or use `//addpersona` (no args) to open the dialog. Personas can also be exporte
 
 ### Addressing personas
 
-- `partner, <message>` — send to the Partner persona
-- `claude, <message>` — send to all Claude personas (or synthetic default if none)
+- `partner, <message>` — send to the "partner" persona
+- `claude, <message>` — send to the Claude provider (synthetic default)
 - `all, <message>` — send to all personas in the conversation
 - `flipped, <message>` — send to non-selected personas
-- `+partner` / `-partner` — add/remove a persona from the selection
-- `+claude` / `-claude` — add/remove all personas on a provider
+- `+partner` / `-partner` — add/remove the "partner" persona from the selection
 - No prefix — send to current selection (sticky per conversation)
 
 Use the checkboxes in the toolbar, or `//select`.
