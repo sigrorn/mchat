@@ -122,8 +122,14 @@ def handle_visibility(arg: str, host: CommandHost) -> bool:
 
     if mode == "separated":
         matrix: dict[str, list[str]] = {}
-        for p in personas:
-            matrix[p.id] = []  # empty allowlist = sees only self
+        if personas:
+            for p in personas:
+                matrix[p.id] = []
+        else:
+            # Persona-free chat: use provider values as synthetic default ids
+            configured = set(host._router._providers.keys()) if host._router else set()
+            for provider in configured:
+                matrix[provider.value] = []
         conv.visibility_matrix = matrix
     else:  # joined
         conv.visibility_matrix = {}

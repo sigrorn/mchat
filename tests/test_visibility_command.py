@@ -74,6 +74,27 @@ class TestVisibilityJoined:
         assert conv.visibility_matrix == {}
 
 
+class TestVisibilitySeparatedPersonaFree:
+    """#112 — separated must work for persona-free chats too."""
+
+    def test_separated_uses_provider_values_when_no_personas(self, db):
+        from unittest.mock import MagicMock
+        host = _build_host(db)
+        # Set up a router with configured providers
+        host._router = MagicMock()
+        host._router._providers = {
+            Provider.CLAUDE: MagicMock(),
+            Provider.OPENAI: MagicMock(),
+        }
+        from mchat.ui.commands.selection import handle_visibility
+        handle_visibility("separated", host)
+        matrix = host._current_conv.visibility_matrix
+        assert "claude" in matrix
+        assert "openai" in matrix
+        assert matrix["claude"] == []
+        assert matrix["openai"] == []
+
+
 class TestVisibilityNoArg:
     def test_no_arg_shows_error(self, db):
         host = _build_host(db)
