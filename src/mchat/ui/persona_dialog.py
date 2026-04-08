@@ -374,12 +374,12 @@ class PersonaDialog(QDialog):
 
         # Export / Import / Close buttons at the bottom
         bottom_row = QHBoxLayout()
-        export_btn = QPushButton("Export…")
-        export_btn.clicked.connect(self._on_export_clicked)
-        bottom_row.addWidget(export_btn)
         import_btn = QPushButton("Import…")
         import_btn.clicked.connect(self._on_import_clicked)
         bottom_row.addWidget(import_btn)
+        export_btn = QPushButton("Export…")
+        export_btn.clicked.connect(self._on_export_clicked)
+        bottom_row.addWidget(export_btn)
         bottom_row.addStretch()
         self._warning_label = QLabel()
         self._warning_label.setStyleSheet("color: #cc0000; font-size: 11px;")

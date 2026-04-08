@@ -80,12 +80,12 @@ class ProvidersDialog(QDialog):
         # Footer: reset-colours and save/cancel
         footer = QHBoxLayout()
 
-        export_btn = QPushButton("Export…")
-        export_btn.clicked.connect(self._on_export_clicked)
-        footer.addWidget(export_btn)
-
         import_btn = QPushButton("Import…")
         import_btn.clicked.connect(self._on_import_clicked)
+        footer.addWidget(import_btn)
+
+        export_btn = QPushButton("Export…")
+        export_btn.clicked.connect(self._on_export_clicked)
         footer.addWidget(import_btn)
 
         reset_btn = QPushButton("Reset colours to defaults")
