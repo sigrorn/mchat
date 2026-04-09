@@ -344,6 +344,16 @@ class ProviderPanel(QFrame):
         else:
             self.apply_combo_style(persona_id)
 
+    def set_combo_queued(self, persona_id: str) -> None:
+        """Dark gray style for personas queued in sequential mode."""
+        if persona_id not in self._combos:
+            return
+        combo = self._combos[persona_id]
+        combo.setStyleSheet(
+            "QComboBox { border: 1px solid #888; background-color: #d0d0d0; "
+            "color: #666; font-style: italic; }"
+        )
+
     def set_combo_retrying(self, persona_id: str) -> None:
         if persona_id not in self._combos:
             return

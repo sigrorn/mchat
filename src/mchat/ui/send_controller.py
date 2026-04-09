@@ -55,6 +55,7 @@ class SendHost(Protocol):
     _input: Any
     _sidebar: Any
     _renderer: Any
+    _provider_panel: Any
     _column_mode: bool
 
     # Callbacks SendController invokes
@@ -458,6 +459,9 @@ class SendController:
         if self._sequential_mode and len(targets) > 1:
             self._seq_queue = list(targets[1:])
             self._seq_context_override = context_override
+            # Mark queued personas as gray
+            for t in self._seq_queue:
+                self._host._provider_panel.set_combo_queued(t.persona_id)
             self._send_parallel([targets[0]], context_override)
         else:
             self._seq_queue = []
@@ -567,6 +571,8 @@ class SendController:
             # Sequential chain: send next target if queue is non-empty
             if self._seq_queue:
                 next_target = self._seq_queue.pop(0)
+                # Clear queued style — _send_parallel will set waiting style
+                host._provider_panel.apply_combo_style(next_target.persona_id)
                 self._send_parallel([next_target], self._seq_context_override)
                 return
 
@@ -601,6 +607,8 @@ class SendController:
 
         if not self._multi_workers:
             # On error, clear the sequential queue (chain stops)
+            for t in self._seq_queue:
+                host._provider_panel.apply_combo_style(t.persona_id)
             self._seq_queue.clear()
             host._input.set_enabled(True)
             host._update_input_placeholder()
