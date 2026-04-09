@@ -147,6 +147,7 @@ class MessageRenderer:
                 # slots in the column table.
                 group: list[tuple[int, Message]] = [(i, msg)]
                 seen_keys = {message_grouping_key(msg)}
+                group_mode = msg.display_mode
                 j = i + 1
                 while j < len(messages):
                     nxt = messages[j]
@@ -154,6 +155,10 @@ class MessageRenderer:
                         break
                     nxt_key = message_grouping_key(nxt)
                     if nxt_key in seen_keys:
+                        break
+                    # Break on display_mode change (e.g. "seq" vs "lines"
+                    # vs "cols") to separate send groups on reload
+                    if nxt.display_mode != group_mode:
                         break
                     group.append((j, nxt))
                     seen_keys.add(nxt_key)

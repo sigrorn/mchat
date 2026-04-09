@@ -560,11 +560,15 @@ class SendController:
         )
 
         if not self._multi_workers:
-            if host._column_mode:
+            # Use "seq" display_mode for sequential chain responses so
+            # the reload grouping can detect send-group boundaries.
+            is_seq = self._sequential_mode and bool(self._seq_queue)
+            if host._column_mode and not is_seq:
                 persisted = self._persist_buffered("cols")
                 host._renderer.render_column_responses(persisted)
             else:
-                persisted = self._persist_buffered("lines")
+                mode = "seq" if self._sequential_mode else "lines"
+                persisted = self._persist_buffered(mode)
                 host._renderer.render_list_responses(persisted)
             self._column_buffer.clear()
 
