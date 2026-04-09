@@ -96,6 +96,7 @@ class SendController:
         # Sequential chain state
         self._seq_queue: list[PersonaTarget] = []
         self._seq_context_override: dict[str, list[Message]] | None = None
+        self._seq_conv_id: int | None = None
 
         # Transient per-send state, keyed by persona_id (str) so two
         # same-provider personas can coexist in one send group.
@@ -468,6 +469,11 @@ class SendController:
         ``context_override`` is keyed by persona_id — used by the //retry
         command to re-send the same context for failed targets.
         """
+        # Capture the conversation id so the sequential chain can detect
+        # if the user switched conversations mid-chain.
+        conv = self._services.session.current
+        self._seq_conv_id = conv.id if conv else None
+
         if self._sequential_mode and len(targets) > 1:
             self._seq_queue = list(targets[1:])
             self._seq_context_override = context_override
@@ -551,6 +557,21 @@ class SendController:
         host = self._host
         svc = self._services
         host._set_combo_waiting(target.persona_id, False)
+
+        # If the user switched conversations, drop the response to
+        # prevent persisting into the wrong conversation.
+        current_conv = svc.session.current
+        if current_conv is None or (
+            self._seq_conv_id is not None
+            and current_conv.id != self._seq_conv_id
+        ):
+            self._multi_workers.pop(target.persona_id, None)
+            self._column_buffer.clear()
+            for t in self._seq_queue:
+                host._provider_panel.apply_combo_style(t.persona_id)
+            self._seq_queue.clear()
+            host._input.set_enabled(True)
+            return
         self._multi_workers.pop(target.persona_id, None)
 
         # Per-persona spend tracking (Stage 4.5)
@@ -584,7 +605,20 @@ class SendController:
                 host._renderer.render_list_responses(persisted)
             self._column_buffer.clear()
 
-            # Sequential chain: send next target if queue is non-empty
+            # Sequential chain: send next target if queue is non-empty.
+            # Abort if the user switched conversations mid-chain.
+            current_conv = svc.session.current
+            if self._seq_queue and (
+                current_conv is None
+                or current_conv.id != self._seq_conv_id
+            ):
+                for t in self._seq_queue:
+                    host._provider_panel.apply_combo_style(t.persona_id)
+                self._seq_queue.clear()
+                host._chat.add_note(
+                    "Sequential chain stopped — conversation changed"
+                )
+
             if self._seq_queue:
                 next_target = self._seq_queue.pop(0)
                 # Clear queued style — _send_parallel will set waiting style
