@@ -77,27 +77,32 @@ class ConversationManager:
         # Restore selection from last_provider (comma-separated persona_ids).
         # Builds PersonaTargets from the DB for explicit personas, falls back
         # to synthetic defaults for provider-value strings (legacy compat).
+        # #121b: Always set the selection — an empty list is valid and
+        # prevents stale targets from the previous conversation leaking.
         selection_changed = False
-        if conv.last_provider and self._services.selection:
-            from mchat.ui.persona_target import PersonaTarget, synthetic_default
-            tokens = [v.strip() for v in conv.last_provider.split(",") if v.strip()]
-            personas = db.list_personas(conv_id)
-            persona_map = {p.id: p for p in personas}
-            targets: list[PersonaTarget] = []
-            for token in tokens:
-                if token in persona_map:
-                    p = persona_map[token]
-                    targets.append(PersonaTarget(persona_id=p.id, provider=p.provider))
-                else:
-                    # Legacy: token is a provider.value string
-                    try:
-                        prov = Provider(token)
-                        targets.append(synthetic_default(prov))
-                    except ValueError:
-                        pass
-            if targets:
+        if self._services.selection:
+            if conv.last_provider:
+                from mchat.ui.persona_target import PersonaTarget, synthetic_default
+                tokens = [v.strip() for v in conv.last_provider.split(",") if v.strip()]
+                personas = db.list_personas(conv_id)
+                persona_map = {p.id: p for p in personas}
+                targets: list[PersonaTarget] = []
+                for token in tokens:
+                    if token in persona_map:
+                        p = persona_map[token]
+                        targets.append(PersonaTarget(persona_id=p.id, provider=p.provider))
+                    else:
+                        # Legacy: token is a provider.value string
+                        try:
+                            prov = Provider(token)
+                            targets.append(synthetic_default(prov))
+                        except ValueError:
+                            pass
                 self._services.selection.set(targets)
-                selection_changed = True
+                selection_changed = bool(targets)
+            else:
+                # No saved selection — clear to prevent stale leak
+                self._services.selection.set([])
         if not selection_changed:
             # No selection change fired the fan-out; do it manually so
             # the new conversation still gets its placeholder/colour

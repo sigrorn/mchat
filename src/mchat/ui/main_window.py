@@ -673,17 +673,25 @@ class MainWindow(QMainWindow):
         if not personas:
             return
 
-        # #121: Evict synthetic defaults for providers that have explicit
-        # personas. A synthetic default has persona_id == provider.value;
-        # when the user creates a real persona for that provider, the
-        # synthetic must go — otherwise both route to the same provider
-        # and produce a double-run.
+        # #121/#121b: Prune the selection to remove:
+        # 1. Synthetic defaults (persona_id == provider.value) for
+        #    providers that now have explicit personas — prevents
+        #    double-run where both route to the same provider.
+        # 2. Stale explicit persona_ids that are no longer in this
+        #    conversation's persona set — prevents phantom targets
+        #    leaking from a previous import or conversation.
+        valid_ids = {p.id for p in personas}
         explicit_providers = {p.provider.value for p in personas}
         current_sel = list(self._selection_state.selection)
         pruned = [
             t for t in current_sel
-            if not (t.persona_id in explicit_providers
-                    and t.persona_id == t.provider.value)
+            if t.persona_id in valid_ids  # active persona — keep
+            or (
+                # synthetic default — keep only if no explicit persona
+                # for this provider exists
+                t.persona_id == t.provider.value
+                and t.persona_id not in explicit_providers
+            )
         ]
         if len(pruned) != len(current_sel):
             self._selection_state.set(pruned)
