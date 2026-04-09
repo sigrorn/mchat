@@ -673,6 +673,21 @@ class MainWindow(QMainWindow):
         if not personas:
             return
 
+        # #121: Evict synthetic defaults for providers that have explicit
+        # personas. A synthetic default has persona_id == provider.value;
+        # when the user creates a real persona for that provider, the
+        # synthetic must go — otherwise both route to the same provider
+        # and produce a double-run.
+        explicit_providers = {p.provider.value for p in personas}
+        current_sel = list(self._selection_state.selection)
+        pruned = [
+            t for t in current_sel
+            if not (t.persona_id in explicit_providers
+                    and t.persona_id == t.provider.value)
+        ]
+        if len(pruned) != len(current_sel):
+            self._selection_state.set(pruned)
+
         # Scan existing pinned messages to see which personas already
         # have their pins. We check for the name instruction pattern.
         existing_pins = {

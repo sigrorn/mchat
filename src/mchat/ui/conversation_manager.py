@@ -190,14 +190,28 @@ class ConversationManager:
     # ------------------------------------------------------------------
 
     def save_selection(self) -> None:
-        """Persist the current selection (persona_ids) onto the conversation."""
+        """Persist the current selection (persona_ids) onto the conversation.
+
+        #121: Filter out synthetic defaults (persona_id == provider.value)
+        when an explicit persona for the same provider exists in the
+        selection, so they don't get restored as phantom targets.
+        """
         current = self._services.session.current
         selection = self._services.selection
         if current and selection:
-            # Save persona_ids so explicit personas restore correctly
-            sel_str = ",".join(
-                t.persona_id for t in selection.selection
-            )
+            targets = list(selection.selection)
+            # Collect providers that have an explicit (non-synthetic) persona
+            explicit_providers = {
+                t.provider.value for t in targets
+                if t.persona_id != t.provider.value
+            }
+            # Drop synthetic defaults for providers that have explicits
+            filtered = [
+                t for t in targets
+                if not (t.persona_id == t.provider.value
+                        and t.persona_id in explicit_providers)
+            ]
+            sel_str = ",".join(t.persona_id for t in filtered)
             self._services.session.set_last_provider(sel_str)
             self._services.db.update_conversation_last_provider(
                 current.id, sel_str
