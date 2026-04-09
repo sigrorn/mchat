@@ -102,11 +102,21 @@ def handle_lines(host: CommandHost) -> bool:
 
 def handle_mode(arg: str, host: CommandHost) -> bool:
     """//mode parallel|sequential — set the send mode."""
+    from mchat.models.message import Message, Role
     mode = arg.strip().lower()
     if mode not in ("parallel", "sequential"):
         host._chat.add_note("Error: //mode parallel|sequential")
         return True
     host._send._sequential_mode = (mode == "sequential")
+    # Persist a note so the mode change is visible on reload
+    if host._current_conv:
+        note = Message(
+            role=Role.USER,
+            content=f"//mode {mode}",
+            conversation_id=host._current_conv.id,
+        )
+        host._db.add_message(note)
+        host._current_conv.messages.append(note)
     host._chat.add_note(f"mode: {mode}")
     return True
 
