@@ -164,6 +164,11 @@ class SendController:
         host = self._host
         svc = self._services
 
+        # Guard: reject if a send is already in progress
+        if self._multi_workers or self._seq_queue:
+            host._chat.add_note("Send in progress — please wait")
+            return
+
         # Edit mode: intercept before normal command/resolve paths
         edit_state = getattr(host, "_edit_state", None)
         if edit_state is not None:
@@ -301,6 +306,13 @@ class SendController:
         # sync/placeholder/color already fan out from the selection
         # state change triggered by the resolver.
         self.clear_retry_stash()
+
+        import mchat.debug_logger as _dl
+        if _dl.enabled:
+            _dl.log_outgoing(
+                "_SEND_",
+                f"targets={[(t.persona_id, t.provider.value) for t in targets]}"
+            )
 
         if len(targets) == 1:
             self.send_single(targets[0])
