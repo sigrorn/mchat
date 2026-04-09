@@ -1030,3 +1030,69 @@ class TestSyntheticDefaultEviction:
             "explicit personas for the same provider exist"
         )
         assert pid in tokens
+
+    def test_ensure_pins_evicts_stale_persona_ids(self, main_window):
+        """#121b — stale persona_ids from a previous import must be
+        evicted when _ensure_persona_pins runs with a fresh persona set."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Simulate stale persona_ids in selection (from a previous session)
+        stale_pid = generate_persona_id()  # not in DB
+        main_window._selection_state.set([
+            PersonaTarget(persona_id=stale_pid, provider=Provider.CLAUDE),
+        ])
+
+        # Create a fresh persona for this conversation
+        new_pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=new_pid,
+            provider=Provider.CLAUDE, name="ClaudeBot", name_slug="claudebot",
+        ))
+
+        main_window._ensure_persona_pins(conv_id)
+
+        sel = main_window._selection_state.selection
+        persona_ids = [t.persona_id for t in sel]
+        assert stale_pid not in persona_ids, (
+            "stale persona_id from a previous import should be evicted"
+        )
+        assert new_pid in persona_ids
+
+    def test_conversation_switch_clears_selection_when_no_last_provider(
+        self, main_window,
+    ):
+        """#121b — switching to a conversation with no last_provider must
+        clear the selection so stale targets from the previous conv don't
+        leak through."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        # Create conv A with a persona and set it in selection
+        main_window._on_new_chat()
+        conv_a = main_window._current_conv.id
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_a, id=pid,
+            provider=Provider.CLAUDE, name="BotA", name_slug="bota",
+        ))
+        main_window._selection_state.set([
+            PersonaTarget(persona_id=pid, provider=Provider.CLAUDE),
+        ])
+
+        # Create conv B — no personas, no last_provider
+        main_window._on_new_chat()
+        conv_b = main_window._current_conv.id
+
+        # Switch to conv B
+        main_window._conv_mgr.on_conversation_selected(conv_b)
+
+        sel = main_window._selection_state.selection
+        persona_ids = [t.persona_id for t in sel]
+        # Conv A's persona must NOT leak into conv B's selection
+        assert pid not in persona_ids, (
+            "persona from conv A should not leak into conv B's selection"
+        )
