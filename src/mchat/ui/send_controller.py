@@ -309,11 +309,32 @@ class SendController:
         # state change triggered by the resolver.
         self.clear_retry_stash()
 
+        # Deduplicate targets by persona_id — prevents the double-run
+        # bug where both synthetic defaults and explicit personas end up
+        # in the target list.
+        seen: set[str] = set()
+        deduped: list[PersonaTarget] = []
+        for t in targets:
+            if t.persona_id not in seen:
+                seen.add(t.persona_id)
+                deduped.append(t)
+        targets = deduped
+
+        # Sanity check: warn if target count exceeds expected maximum
+        expected_max = len(svc.db.list_personas(conv.id)) or len(
+            svc.router._providers if svc.router else {}
+        )
         import mchat.debug_logger as _dl
         if _dl.enabled:
             _dl.log_outgoing(
                 "_SEND_",
-                f"targets={[(t.persona_id, t.provider.value) for t in targets]}"
+                f"targets={[(t.persona_id, t.provider.value) for t in targets]} "
+                f"(expected_max={expected_max})"
+            )
+        if len(targets) > max(expected_max, 1):
+            host._chat.add_note(
+                f"Warning: {len(targets)} targets but only {expected_max} "
+                f"personas configured — possible duplicate send"
             )
 
         if len(targets) == 1:
