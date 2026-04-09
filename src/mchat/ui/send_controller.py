@@ -97,6 +97,7 @@ class SendController:
         self._seq_queue: list[PersonaTarget] = []
         self._seq_context_override: dict[str, list[Message]] | None = None
         self._seq_conv_id: int | None = None
+        self._conv_switched: bool = False
 
         # Transient per-send state, keyed by persona_id (str) so two
         # same-provider personas can coexist in one send group.
@@ -558,30 +559,24 @@ class SendController:
         svc = self._services
         host._set_combo_waiting(target.persona_id, False)
 
-        # If the user switched conversations, drop the response to
-        # prevent persisting into the wrong conversation.
+        # Check if the user switched conversations since this send started.
+        # If so, we still persist to the ORIGINAL conversation (via
+        # _seq_conv_id) but skip rendering into the chat widget.
         current_conv = svc.session.current
-        if current_conv is None or (
+        self._conv_switched = (
             self._seq_conv_id is not None
-            and current_conv.id != self._seq_conv_id
-        ):
-            self._multi_workers.pop(target.persona_id, None)
-            self._column_buffer.clear()
-            for t in self._seq_queue:
-                host._provider_panel.apply_combo_style(t.persona_id)
-            self._seq_queue.clear()
-            host._input.set_enabled(True)
-            return
+            and (current_conv is None or current_conv.id != self._seq_conv_id)
+        )
         self._multi_workers.pop(target.persona_id, None)
 
-        # Per-persona spend tracking (Stage 4.5)
+        # Per-persona spend tracking — always to the original conversation
         cost = estimate_cost(model, input_tokens, output_tokens)
-        current = svc.session.current
-        if cost is not None and current is not None:
+        if cost is not None and self._seq_conv_id is not None:
             svc.db.add_conversation_spend(
-                current.id, target.persona_id, cost, estimated
+                self._seq_conv_id, target.persona_id, cost, estimated
             )
-        host._update_spend_labels()
+        if not self._conv_switched:
+            host._update_spend_labels()
 
         # Buffer and render once every worker has finished.
         label = self._retry_labels.get(
@@ -599,32 +594,29 @@ class SendController:
                 "cols" if host._column_mode else "lines"
             )
             persisted = self._persist_buffered(mode)
-            if host._column_mode:
-                host._renderer.render_column_responses(persisted)
-            else:
-                host._renderer.render_list_responses(persisted)
+            # Only render if we're still on the same conversation;
+            # otherwise the response is persisted to the original conv
+            # and will appear when the user switches back.
+            if not self._conv_switched:
+                if host._column_mode:
+                    host._renderer.render_column_responses(persisted)
+                else:
+                    host._renderer.render_list_responses(persisted)
             self._column_buffer.clear()
 
-            # Sequential chain: send next target if queue is non-empty.
-            # Abort if the user switched conversations mid-chain.
-            current_conv = svc.session.current
-            if self._seq_queue and (
-                current_conv is None
-                or current_conv.id != self._seq_conv_id
-            ):
-                for t in self._seq_queue:
-                    host._provider_panel.apply_combo_style(t.persona_id)
-                self._seq_queue.clear()
-                host._chat.add_note(
-                    "Sequential chain stopped — conversation changed"
-                )
-
-            if self._seq_queue:
+            # Sequential chain: continue if still on same conversation.
+            # If switched, stop the chain — completed responses are
+            # already persisted to the original conversation.
+            if self._seq_queue and not self._conv_switched:
                 next_target = self._seq_queue.pop(0)
-                # Clear queued style — _send_parallel will set waiting style
                 host._provider_panel.apply_combo_style(next_target.persona_id)
                 self._send_parallel([next_target], self._seq_context_override)
                 return
+
+            if self._seq_queue and self._conv_switched:
+                for t in self._seq_queue:
+                    host._provider_panel.apply_combo_style(t.persona_id)
+                self._seq_queue.clear()
 
             host._input.set_enabled(True)
             host._update_input_placeholder()
@@ -677,8 +669,12 @@ class SendController:
         group by persona_id.
         """
         svc = self._services
+        # Use the original conversation id (captured at send time) to
+        # ensure responses go to the right conversation even if the
+        # user switched chats mid-send.
+        conv_id = self._seq_conv_id
         current = svc.session.current
-        # Sort by PROVIDER_ORDER then by persona_id for stability.
+        # Sort by persona sort_order for stability.
         def sort_key(pid: str) -> tuple[int, str]:
             _label, _text, _model, _inp, _out, _est, target = self._column_buffer[pid]
             order = (
@@ -699,9 +695,10 @@ class SendController:
                 model=model,
                 display_mode=display_mode,
                 persona_id=target.persona_id,
-                conversation_id=current.id if current else None,
+                conversation_id=conv_id,
             )
             svc.db.add_message(msg)
-            svc.session.append_message(msg)
+            if not self._conv_switched:
+                svc.session.append_message(msg)
             persisted.append(msg)
         return persisted
