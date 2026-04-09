@@ -904,3 +904,129 @@ class TestUnknownCommandHandling:
         assert any("//" in n for n in notes)
         assert main_window._send._multi_workers == {}
         main_window._chat.add_note = original
+
+
+class TestSyntheticDefaultEviction:
+    """#121 — _ensure_persona_pins must evict synthetic defaults when
+    explicit personas exist for the same provider, so the selection
+    never contains both ('claude', 'claude') and ('p_xxx', 'claude').
+    """
+
+    def test_ensure_pins_evicts_synthetic_default_for_same_provider(
+        self, main_window,
+    ):
+        """After _ensure_persona_pins, a synthetic default must be replaced
+        by the explicit persona for the same provider."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget, synthetic_default
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Pre-seed selection with a synthetic Claude default
+        main_window._selection_state.set([synthetic_default(Provider.CLAUDE)])
+
+        # Create an explicit Claude persona in the DB
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.CLAUDE, name="ClaudeBot", name_slug="claudebot",
+        ))
+
+        main_window._ensure_persona_pins(conv_id)
+
+        sel = main_window._selection_state.selection
+        persona_ids = [t.persona_id for t in sel]
+        # The synthetic default must be gone
+        assert "claude" not in persona_ids, (
+            "synthetic default ('claude', 'claude') should be evicted"
+        )
+        # The explicit persona must be present
+        assert pid in persona_ids
+
+    def test_ensure_pins_keeps_synthetic_default_when_no_explicit_persona(
+        self, main_window,
+    ):
+        """If there's no explicit persona for a provider, the synthetic
+        default should remain in the selection."""
+        from mchat.ui.persona_target import synthetic_default
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Pre-seed selection with a synthetic Claude default
+        main_window._selection_state.set([synthetic_default(Provider.CLAUDE)])
+
+        # No personas in DB — _ensure_persona_pins should be a no-op
+        main_window._ensure_persona_pins(conv_id)
+
+        sel = main_window._selection_state.selection
+        persona_ids = [t.persona_id for t in sel]
+        assert "claude" in persona_ids
+
+    def test_ensure_pins_evicts_only_matching_provider(self, main_window):
+        """Synthetic defaults for providers WITHOUT an explicit persona must
+        survive even when other providers get evicted."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget, synthetic_default
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Selection: synthetic Claude + synthetic OpenAI
+        main_window._selection_state.set([
+            synthetic_default(Provider.CLAUDE),
+            synthetic_default(Provider.OPENAI),
+        ])
+
+        # Only create an explicit Claude persona — not OpenAI
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.CLAUDE, name="ClaudeBot", name_slug="claudebot",
+        ))
+
+        main_window._ensure_persona_pins(conv_id)
+
+        sel = main_window._selection_state.selection
+        persona_ids = [t.persona_id for t in sel]
+        # Synthetic Claude gone, replaced by explicit
+        assert "claude" not in persona_ids
+        assert pid in persona_ids
+        # Synthetic OpenAI untouched
+        assert "openai" in persona_ids
+
+    def test_save_selection_excludes_synthetic_when_explicit_exists(
+        self, main_window,
+    ):
+        """save_selection must not persist synthetic defaults when an
+        explicit persona for the same provider is in the selection."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget, synthetic_default
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.CLAUDE, name="ClaudeBot", name_slug="claudebot",
+        ))
+
+        # Simulate the buggy state: both synthetic + explicit in selection
+        main_window._selection_state.set([
+            synthetic_default(Provider.CLAUDE),
+            PersonaTarget(persona_id=pid, provider=Provider.CLAUDE),
+        ])
+
+        main_window._conv_mgr.save_selection()
+
+        # Read back from DB
+        conv = main_window._db.get_conversation(conv_id)
+        tokens = conv.last_provider.split(",")
+        # Synthetic default 'claude' must NOT be in the persisted string
+        assert "claude" not in tokens, (
+            "save_selection should filter out synthetic defaults when "
+            "explicit personas for the same provider exist"
+        )
+        assert pid in tokens
