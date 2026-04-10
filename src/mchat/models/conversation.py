@@ -21,6 +21,7 @@ class Conversation:
     # Per-observer allowlist of source providers whose responses it may see.
     # Missing observer = full visibility. Observer's own value is always implicitly allowed.
     visibility_matrix: dict[str, list[str]] = field(default_factory=dict)
+    send_mode: str = "parallel"  # "parallel" | "sequential"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     messages: list[Message] = field(default_factory=list)

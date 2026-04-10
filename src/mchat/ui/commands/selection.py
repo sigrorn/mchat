@@ -108,8 +108,12 @@ def handle_mode(arg: str, host: CommandHost) -> bool:
         host._chat.add_note("Error: //mode parallel|sequential")
         return True
     host._send._sequential_mode = (mode == "sequential")
-    # Persist a note so the mode change is visible on reload
+    # Persist a note so the mode change is visible on reload, and
+    # write the mode to the conversations table so it survives
+    # restarts and conversation switches (#124).
     if host._current_conv:
+        host._current_conv.send_mode = mode
+        host._db.update_conversation_send_mode(host._current_conv.id, mode)
         note = Message(
             role=Role.USER,
             content=f"//mode {mode}",

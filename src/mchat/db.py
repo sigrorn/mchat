@@ -21,7 +21,7 @@ DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 # new _migration_N method whenever the schema changes. Each migration
 # runs exactly once per database, in ascending order, and must be
 # idempotent on partially-migrated legacy DBs where safe.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -86,6 +86,7 @@ class Database:
         migrations = [
             (1, self._migration_1_initial),
             (2, self._migration_2_personas),
+            (3, self._migration_3_send_mode),
         ]
         for version, fn in migrations:
             if current < version:
@@ -241,6 +242,23 @@ class Database:
                 "ALTER TABLE messages ADD COLUMN persona_id TEXT"
             )
 
+    def _migration_3_send_mode(self) -> None:
+        """Add the conversations.send_mode column.
+
+        Per-conversation send mode (parallel | sequential) so the
+        choice persists per chat instead of being a single global
+        flag on SendController. New chats default to 'parallel'.
+        """
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(conversations)")
+        }
+        if "send_mode" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN send_mode "
+                "TEXT NOT NULL DEFAULT 'parallel'"
+            )
+
     def close(self) -> None:
         self._conn.close()
 
@@ -281,7 +299,7 @@ class Database:
         """Fetch a single conversation by ID."""
         row = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "limit_mark, visibility_matrix, created_at, updated_at "
+            "limit_mark, visibility_matrix, send_mode, created_at, updated_at "
             "FROM conversations WHERE id = ?",
             (conv_id,),
         ).fetchone()
@@ -294,14 +312,15 @@ class Database:
             last_provider=row[3] or "",
             limit_mark=row[4],
             visibility_matrix=self._decode_visibility(row[5]),
-            created_at=datetime.fromisoformat(row[6]),
-            updated_at=datetime.fromisoformat(row[7]),
+            send_mode=row[6] or "parallel",
+            created_at=datetime.fromisoformat(row[7]),
+            updated_at=datetime.fromisoformat(row[8]),
         )
 
     def list_conversations(self) -> list[Conversation]:
         cursor = self._conn.execute(
             "SELECT id, title, system_prompt, last_provider, "
-            "limit_mark, visibility_matrix, created_at, updated_at "
+            "limit_mark, visibility_matrix, send_mode, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC"
         )
         return [
@@ -312,8 +331,9 @@ class Database:
                 last_provider=row[3] or "",
                 limit_mark=row[4],
                 visibility_matrix=self._decode_visibility(row[5]),
-                created_at=datetime.fromisoformat(row[6]),
-                updated_at=datetime.fromisoformat(row[7]),
+                send_mode=row[6] or "parallel",
+                created_at=datetime.fromisoformat(row[7]),
+                updated_at=datetime.fromisoformat(row[8]),
             )
             for row in cursor.fetchall()
         ]
@@ -333,6 +353,14 @@ class Database:
         self._conn.execute(
             "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
             (title, now, conv_id),
+        )
+        self._conn.commit()
+
+    def update_conversation_send_mode(self, conv_id: int, send_mode: str) -> None:
+        """Persist the per-conversation send mode ('parallel' or 'sequential')."""
+        self._conn.execute(
+            "UPDATE conversations SET send_mode = ? WHERE id = ?",
+            (send_mode, conv_id),
         )
         self._conn.commit()
 
