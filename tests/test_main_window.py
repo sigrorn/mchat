@@ -1189,3 +1189,79 @@ class TestSendModeResetOnNewChat:
         # Switch to B — should restore parallel
         main_window._conv_mgr.on_conversation_selected(conv_b)
         assert main_window._send._sequential_mode is False
+
+
+class TestLLMAutoTitle:
+    """#125 — after the first user→assistant exchange, fire a one-shot
+    background title-generation request to the first persona, and apply
+    the result if the title is still 'New Chat'.
+    """
+
+    def test_title_worker_truncates_to_25_chars(self):
+        """The TitleWorker post-processor must clean up the LLM response:
+        strip quotes, trim whitespace, take first line, hard-truncate."""
+        from mchat.workers.title_worker import clean_title
+        assert clean_title('"sorting algorithms"') == "sorting algorithms"
+        assert clean_title("Sorting Algorithms\nMore stuff") == "Sorting Algorithms"
+        assert clean_title("a" * 100) == "a" * 25
+        assert clean_title("   spaced   ") == "spaced"
+        assert clean_title("'single quotes'") == "single quotes"
+        assert clean_title("ends with period.") == "ends with period"
+        assert clean_title("") == ""
+
+    def test_title_applied_only_if_default(self, main_window):
+        """The post-LLM apply step must skip if the user already
+        renamed the conversation in the meantime."""
+        from mchat.ui.send_controller import SendController
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        main_window._db.update_conversation_title(conv_id, "user-renamed")
+
+        # Apply a new auto-title — should be a no-op
+        send: SendController = main_window._send
+        send._apply_auto_title(conv_id, "auto title")
+
+        title = main_window._db.get_conversation(conv_id).title
+        assert title == "user-renamed", (
+            "auto-title must not overwrite a user-set title"
+        )
+
+    def test_title_applied_when_still_default(self, main_window):
+        """If the title is still 'New Chat', _apply_auto_title sets it."""
+        from mchat.ui.send_controller import SendController
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+        send._apply_auto_title(conv_id, "quicksort talk")
+
+        title = main_window._db.get_conversation(conv_id).title
+        assert title == "quicksort talk"
+
+    def test_title_not_re_triggered_after_set(self, main_window):
+        """Once a conversation has had its title generated, the trigger
+        must not fire again on subsequent sends."""
+        from mchat.ui.send_controller import SendController
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+
+        # Mark as already-attempted
+        send._title_generation_attempted.add(conv_id)
+        assert not send._should_generate_title(conv_id)
+
+    def test_should_generate_title_default_only(self, main_window):
+        """_should_generate_title returns True only when title is default
+        and we haven't already tried."""
+        from mchat.ui.send_controller import SendController
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+
+        assert send._should_generate_title(conv_id)
+        # After rename, no
+        main_window._db.update_conversation_title(conv_id, "renamed")
+        assert not send._should_generate_title(conv_id)
