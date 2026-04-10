@@ -102,11 +102,17 @@ def handle_pop(host: CommandHost) -> bool:
         return True
     to_remove = messages[last_user_idx:]
     ids_to_delete = [m.id for m in to_remove if m.id is not None]
+    user_text = messages[last_user_idx].content
     count = len(to_remove)
     host._db.delete_messages(ids_to_delete)
     del host._current_conv.messages[last_user_idx:]
     host._display_messages(host._current_conv.messages)
     host._chat.add_note(f"popped {count} message(s)")
+    # #127: restore the popped user text into the input box so the
+    # user can edit and resend. Deferred via QTimer because _submit()
+    # clears the input after the command handler returns.
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(user_text))
     return True
 
 
