@@ -120,6 +120,25 @@ class Sidebar(QFrame):
                     self._conversations[conv_id].title = title
                 return
 
+    def set_conversation_title_pending(self, conv_id: int, pending: bool) -> None:
+        """Show a transient indicator while LLM auto-titling runs.
+
+        Prefixes the displayed title with '… ' while pending=True;
+        clears the prefix when pending=False (without touching the
+        underlying conversation title — the actual rename comes via
+        update_conversation_title afterwards).
+        """
+        prefix = "\u2026 "  # horizontal ellipsis + space
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == conv_id:
+                current_text = item.text()
+                if pending and not current_text.startswith(prefix):
+                    item.setText(prefix + current_text)
+                elif not pending and current_text.startswith(prefix):
+                    item.setText(current_text[len(prefix):])
+                return
+
     def select_conversation(self, conv_id: int) -> None:
         for i in range(self._list.count()):
             item = self._list.item(i)
