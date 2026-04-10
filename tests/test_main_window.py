@@ -1096,3 +1096,96 @@ class TestSyntheticDefaultEviction:
         assert pid not in persona_ids, (
             "persona from conv A should not leak into conv B's selection"
         )
+
+
+class TestAutoTitleFirstMessage:
+    """#123 — auto-title must trigger on the first user prompt even when
+    the conversation already has pinned persona setup messages."""
+
+    def test_first_user_message_sets_title_with_pinned_messages_present(
+        self, qtbot, main_window,
+    ):
+        """A chat with pre-existing pinned messages (persona name+setup)
+        must still get its title set from the first real user prompt."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Create a persona — _ensure_persona_pins will add 2 pinned msgs
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.CLAUDE, name="Bot", name_slug="bot",
+        ))
+        main_window._ensure_persona_pins(conv_id)
+        main_window._selection_state.set([
+            PersonaTarget(persona_id=pid, provider=Provider.CLAUDE),
+        ])
+
+        # Title is still default
+        assert main_window._db.get_conversation(conv_id).title == "New Chat"
+        # And conv.messages is NOT length 1 — pins are already there
+        assert len(main_window._current_conv.messages) > 1
+
+        main_window._on_message_submitted("explain quicksort to me")
+
+        # Wait for the send to complete
+        qtbot.waitUntil(
+            lambda: len(main_window._send._multi_workers) == 0,
+            timeout=5000,
+        )
+
+        title = main_window._db.get_conversation(conv_id).title
+        assert title != "New Chat", "title should be auto-set from first prompt"
+        assert "quicksort" in title
+
+
+class TestSendModeResetOnNewChat:
+    """#124 — //mode parallel/sequential should not leak across chats.
+    New chats must always start in parallel mode."""
+
+    def test_new_chat_resets_mode_to_parallel(self, main_window):
+        """After flipping to sequential, creating a new chat must reset
+        to parallel."""
+        main_window._on_new_chat()
+        # Flip to sequential
+        main_window._send._sequential_mode = True
+
+        # Create a new chat
+        main_window._on_new_chat()
+
+        assert main_window._send._sequential_mode is False, (
+            "new chat must start in parallel mode"
+        )
+
+    def test_switching_chats_restores_each_chats_mode(self, main_window):
+        """If chat A is sequential and chat B is parallel, switching
+        between them must restore each chat's own mode."""
+        from mchat.ui.commands.selection import handle_mode
+
+        main_window._on_new_chat()
+        conv_a = main_window._current_conv.id
+        # Set chat A to sequential via the //mode command (so persistence
+        # path is exercised)
+        host = main_window
+        host._send._sequential_mode = False
+        host._db = main_window._db  # ensure db attr matches
+        handle_mode("sequential", host)
+        assert main_window._send._sequential_mode is True
+
+        # Create chat B (which should default to parallel)
+        main_window._on_new_chat()
+        conv_b = main_window._current_conv.id
+        assert main_window._send._sequential_mode is False
+
+        # Switch back to A — should restore sequential
+        main_window._conv_mgr.on_conversation_selected(conv_a)
+        assert main_window._send._sequential_mode is True, (
+            "switching back to chat A should restore sequential mode"
+        )
+
+        # Switch to B — should restore parallel
+        main_window._conv_mgr.on_conversation_selected(conv_b)
+        assert main_window._send._sequential_mode is False
