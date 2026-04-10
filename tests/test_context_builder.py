@@ -310,3 +310,55 @@ class TestBuildContextWithPersonaTarget:
             conv_with_history, Provider.CLAUDE, db, config,
         )
         assert [m.content for m in ctx_synthetic] == [m.content for m in ctx_provider]
+
+
+class TestCrossPersonaLabelUsesName:
+    """#126 — cross-persona relabeling must use the human persona name,
+    not the opaque persona_id, so providers don't echo internal ids back."""
+
+    def test_cross_persona_label_uses_persona_name(self, db, config):
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        # Two explicit personas, one Claude one OpenAI
+        p_claude = Persona(
+            conversation_id=conv.id, id=generate_persona_id(),
+            provider=Provider.CLAUDE, name="claudebot", name_slug="claudebot",
+        )
+        p_gpt = Persona(
+            conversation_id=conv.id, id=generate_persona_id(),
+            provider=Provider.OPENAI, name="gptbot", name_slug="gptbot",
+        )
+        db.create_persona(p_claude)
+        db.create_persona(p_gpt)
+
+        # User message + claudebot response — both already in DB
+        db.add_message(Message(
+            role=Role.USER, content="hi", conversation_id=conv.id,
+        ))
+        db.add_message(Message(
+            role=Role.ASSISTANT, content="hello from claude",
+            provider=Provider.CLAUDE, persona_id=p_claude.id,
+            conversation_id=conv.id,
+        ))
+        # Reload conv with messages
+        conv = db.get_conversation(conv.id)
+        conv.messages = db.get_messages(conv.id)
+
+        # Build context for gptbot — should see claudebot's response
+        # relabeled as user-context, with the persona NAME, not the id.
+        ctx = build_context(
+            conv,
+            PersonaTarget(persona_id=p_gpt.id, provider=Provider.OPENAI),
+            db, config,
+        )
+        labels = [m.content for m in ctx]
+        # The persona name must appear in the relabel
+        assert any("claudebot" in c for c in labels), (
+            f"expected 'claudebot' in cross-persona context, got: {labels}"
+        )
+        # The opaque id must NOT appear
+        assert not any(p_claude.id in c for c in labels), (
+            f"opaque persona_id leaked into context: {labels}"
+        )
