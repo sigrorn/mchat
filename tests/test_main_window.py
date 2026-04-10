@@ -1265,3 +1265,53 @@ class TestLLMAutoTitle:
         # After rename, no
         main_window._db.update_conversation_title(conv_id, "renamed")
         assert not send._should_generate_title(conv_id)
+
+
+class TestPopRestoresInputText:
+    """#127 — //pop should put the removed user message's text back into
+    the input box so the user can edit and resend it."""
+
+    def test_pop_restores_last_user_text_into_input(self, qtbot, main_window):
+        from PySide6.QtCore import QCoreApplication
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Seed a user message + assistant response directly in the DB
+        user_msg = Message(
+            role=Role.USER,
+            content="original pop-me text",
+            conversation_id=conv_id,
+        )
+        main_window._db.add_message(user_msg)
+        main_window._current_conv.messages.append(user_msg)
+        asst_msg = Message(
+            role=Role.ASSISTANT,
+            content="some response",
+            provider=Provider.CLAUDE,
+            conversation_id=conv_id,
+        )
+        main_window._db.add_message(asst_msg)
+        main_window._current_conv.messages.append(asst_msg)
+
+        # Fire //pop
+        main_window._on_message_submitted("//pop")
+
+        # Flush the QTimer.singleShot that schedules the input restore
+        QCoreApplication.processEvents()
+
+        text = main_window._input._text_edit.toPlainText()
+        assert text == "original pop-me text"
+
+    def test_pop_with_nothing_leaves_input_unchanged(self, main_window):
+        """//pop on an empty conversation should not clear or overwrite
+        the existing input text."""
+        from PySide6.QtCore import QCoreApplication
+
+        main_window._on_new_chat()
+        main_window._input._text_edit.setPlainText("don't touch me")
+
+        main_window._on_message_submitted("//pop")
+        QCoreApplication.processEvents()
+
+        assert main_window._input._text_edit.toPlainText() == "don't touch me"
