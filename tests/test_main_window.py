@@ -1352,3 +1352,62 @@ class TestInputDraftPerConversation:
 
         main_window._on_new_chat()
         assert main_window._input._text_edit.toPlainText() == ""
+
+
+class TestTitleWorkerRobustness:
+    """#129 — TitleWorker callbacks must never crash the app. Background
+    nicety; any exception (closed DB, gone widget, etc.) must be caught."""
+
+    def test_on_title_ready_swallows_closed_db(self, main_window):
+        """If the DB has been closed by the time the worker emits, the
+        callback must swallow the exception silently."""
+        from mchat.ui.send_controller import SendController
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+
+        # Close the DB out from under the worker
+        main_window._db.close()
+
+        # Must NOT raise
+        send._on_title_ready(conv_id, "some title")
+
+    def test_on_title_failed_swallows_closed_db(self, main_window):
+        """Same contract for the failed callback."""
+        from mchat.ui.send_controller import SendController
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+
+        main_window._db.close()
+        # Must NOT raise
+        send._on_title_failed(conv_id)
+
+    def test_apply_auto_title_swallows_closed_db(self, main_window):
+        """_apply_auto_title must not raise if the DB is gone."""
+        from mchat.ui.send_controller import SendController
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send: SendController = main_window._send
+
+        main_window._db.close()
+        send._apply_auto_title(conv_id, "new title")
+
+    def test_close_event_stops_title_workers(self, qtbot, main_window):
+        """MainWindow.closeEvent must stop/wait any running TitleWorkers
+        so they don't fire after the DB is closed."""
+        from unittest.mock import MagicMock
+        from PySide6.QtGui import QCloseEvent
+        from mchat.ui.send_controller import SendController
+        main_window._on_new_chat()
+        send: SendController = main_window._send
+
+        # Inject a fake worker that records its quit/wait calls
+        fake_worker = MagicMock()
+        fake_worker.isRunning.return_value = True
+        send._title_workers[main_window._current_conv.id] = fake_worker
+
+        main_window.closeEvent(QCloseEvent())
+
+        assert fake_worker.quit.called or fake_worker.requestInterruption.called
+        assert fake_worker.wait.called
