@@ -78,6 +78,14 @@ def main_window(qtbot, tmp_path, monkeypatch):
     window = MainWindow(cfg, db)
     qtbot.addWidget(window)
     yield window
+    # #129: stop any running TitleWorkers BEFORE closing the DB, so
+    # they can't fire _on_title_ready against a closed DB and trigger
+    # a "QThread: Destroyed while thread is still running" abort when
+    # the parent MainWindow is garbage-collected.
+    try:
+        window._send.stop_all_title_workers()
+    except Exception:
+        pass
     db.close()
 
 

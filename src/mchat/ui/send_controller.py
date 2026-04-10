@@ -801,22 +801,35 @@ class SendController:
         worker.start()
 
     def _on_title_ready(self, conv_id: int, raw_text: str) -> None:
-        """Handle a successful TitleWorker completion (main thread)."""
-        host = self._host
-        self._title_workers.pop(conv_id, None)
-        if hasattr(host._sidebar, "set_conversation_title_pending"):
-            host._sidebar.set_conversation_title_pending(conv_id, False)
-        cleaned = clean_title(raw_text)
-        if cleaned:
-            self._apply_auto_title(conv_id, cleaned)
+        """Handle a successful TitleWorker completion (main thread).
+
+        Title generation is a background nicety — any exception here
+        (closed DB, gone widget, teardown race) must be swallowed
+        silently. Never crash the app over a cosmetic feature (#129).
+        """
+        try:
+            host = self._host
+            self._title_workers.pop(conv_id, None)
+            if hasattr(host._sidebar, "set_conversation_title_pending"):
+                host._sidebar.set_conversation_title_pending(conv_id, False)
+            cleaned = clean_title(raw_text)
+            if cleaned:
+                self._apply_auto_title(conv_id, cleaned)
+        except Exception:
+            pass
 
     def _on_title_failed(self, conv_id: int) -> None:
         """Handle a TitleWorker error — silent fallback (no-op).
-        The first-50-char fallback already happened on the user's send."""
-        host = self._host
-        self._title_workers.pop(conv_id, None)
-        if hasattr(host._sidebar, "set_conversation_title_pending"):
-            host._sidebar.set_conversation_title_pending(conv_id, False)
+        The first-50-char fallback already happened on the user's send.
+        Wrapped in try/except for the same reason as _on_title_ready (#129).
+        """
+        try:
+            host = self._host
+            self._title_workers.pop(conv_id, None)
+            if hasattr(host._sidebar, "set_conversation_title_pending"):
+                host._sidebar.set_conversation_title_pending(conv_id, False)
+        except Exception:
+            pass
 
     def _apply_auto_title(self, conv_id: int, new_title: str) -> None:
         """Write the auto-generated title to the DB and sidebar.
@@ -824,24 +837,46 @@ class SendController:
         Allowed to overwrite the default 'New Chat' OR the fallback
         first-50-chars title we set on the first user message. NOT
         allowed to overwrite a title the user has manually renamed.
+
+        Wrapped in try/except — background nicety, must not crash (#129).
         """
-        host = self._host
-        svc = self._services
-        conv = svc.db.get_conversation(conv_id)
-        if conv is None:
-            return
-        is_default = conv.title == "New Chat"
-        is_fallback = conv.title == self._fallback_title_by_conv.get(conv_id)
-        if not (is_default or is_fallback):
-            return
-        svc.db.update_conversation_title(conv_id, new_title)
-        # Forget the recorded fallback so a future rename-back-to-it
-        # wouldn't be overwritten by a stale LLM result.
-        self._fallback_title_by_conv.pop(conv_id, None)
-        current = svc.session.current
-        if current and current.id == conv_id:
-            svc.session.set_title(new_title)
-        host._sidebar.update_conversation_title(conv_id, new_title)
+        try:
+            host = self._host
+            svc = self._services
+            conv = svc.db.get_conversation(conv_id)
+            if conv is None:
+                return
+            is_default = conv.title == "New Chat"
+            is_fallback = conv.title == self._fallback_title_by_conv.get(conv_id)
+            if not (is_default or is_fallback):
+                return
+            svc.db.update_conversation_title(conv_id, new_title)
+            # Forget the recorded fallback so a future rename-back-to-it
+            # wouldn't be overwritten by a stale LLM result.
+            self._fallback_title_by_conv.pop(conv_id, None)
+            current = svc.session.current
+            if current and current.id == conv_id:
+                svc.session.set_title(new_title)
+            host._sidebar.update_conversation_title(conv_id, new_title)
+        except Exception:
+            pass
+
+    def stop_all_title_workers(self, wait_ms: int = 2000) -> None:
+        """Request all running TitleWorkers to stop and wait briefly.
+
+        Called from MainWindow.closeEvent and test fixture teardown
+        so background title generation doesn't outlive the parent
+        (#129). Uses requestInterruption() + quit() + wait().
+        """
+        for worker in list(self._title_workers.values()):
+            try:
+                if worker.isRunning():
+                    worker.requestInterruption()
+                    worker.quit()
+                    worker.wait(wait_ms)
+            except Exception:
+                pass
+        self._title_workers.clear()
 
     # ------------------------------------------------------------------
     # Persistence of buffered responses

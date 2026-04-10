@@ -95,8 +95,16 @@ class TitleWorker(QThread):
             ]
             full_text = ""
             for token in self._provider.stream(messages, self._model):
+                # #129: Honor interruption requests so closeEvent/test
+                # teardown can stop this worker cleanly before the
+                # parent Python object is gc'd.
+                if self.isInterruptionRequested():
+                    return
                 full_text += token
+            if self.isInterruptionRequested():
+                return
             self.title_ready.emit(self._conv_id, full_text)
         except Exception:
             # Background nicety — never surface errors to the user.
-            self.title_failed.emit(self._conv_id)
+            if not self.isInterruptionRequested():
+                self.title_failed.emit(self._conv_id)

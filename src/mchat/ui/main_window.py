@@ -999,6 +999,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._prefs.save_geometry()
+        # #129: stop any background TitleWorkers so they don't fire
+        # after the DB is closed and crash the app during teardown.
+        try:
+            self._send.stop_all_title_workers()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def _open_personas(self) -> None:

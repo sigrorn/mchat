@@ -6,14 +6,44 @@
 from __future__ import annotations
 
 import sys
+import traceback
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from mchat.config import Config
+from mchat.config import DEFAULT_CONFIG_DIR, Config
 from mchat.db import Database
 from mchat.ui.main_window import MainWindow
+
+
+def _install_crash_logger() -> None:
+    """Install a global sys.excepthook that logs uncaught exceptions
+    to ~/.mchat/crash.log with a timestamp + full traceback (#129).
+
+    Without this, crashes in Qt signal handlers (e.g. a background
+    worker firing after its dependencies have been torn down) print
+    nothing to the terminal when mchat runs as a windowed build and
+    the user is left with no diagnostic trail.
+    """
+    crash_log = DEFAULT_CONFIG_DIR / "crash.log"
+
+    def _hook(exc_type, exc_value, exc_tb):
+        # Still print to stderr for terminal runs
+        try:
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+        except Exception:
+            pass
+        try:
+            crash_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(crash_log, "a", encoding="utf-8") as f:
+                f.write(f"\n===== {datetime.now().isoformat()} =====\n")
+                traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+        except Exception:
+            pass
+
+    sys.excepthook = _hook
 
 def _find_icon() -> Path:
     """Find the icon file, checking multiple bundle/source locations."""
@@ -42,6 +72,10 @@ def _find_icon() -> Path:
 
 
 def main() -> None:
+    # Install crash logger before anything else so we capture failures
+    # that happen during startup too.
+    _install_crash_logger()
+
     # Parse -debug / --debug flag before Qt consumes sys.argv
     import mchat.debug_logger as debug_logger
     if "-debug" in sys.argv or "--debug" in sys.argv:
