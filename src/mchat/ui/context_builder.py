@@ -154,7 +154,12 @@ def build_context(
     # For explicit personas, assistant messages from other personas
     # (even on the same provider) are relabeled as user-role context
     # so the provider sees them as "someone else said this", not as
-    # its own prior turns.
+    # its own prior turns. The label is the persona's display NAME,
+    # not the opaque persona_id (#126) — otherwise providers happily
+    # parrot internal ids back into their responses.
+    persona_name_by_id = {
+        p.id: p.name for p in db.list_personas_including_deleted(conv.id)
+    }
     for msg in messages:
         if msg.role == Role.USER:
             _, cleaned = Router._strip_prefix(msg.content)
@@ -177,8 +182,18 @@ def build_context(
             else:
                 is_own = (msg_persona == persona_target.persona_id)
             if not is_own:
-                # Cross-persona: relabel as user context with persona name
-                label = msg_persona or "assistant"
+                # Cross-persona: relabel as user context with persona name.
+                # Resolve persona_id → display name; fall back to provider
+                # display name for legacy rows; fall back to "assistant"
+                # only as a last resort.
+                if msg_persona and msg_persona in persona_name_by_id:
+                    label = persona_name_by_id[msg_persona]
+                elif msg.provider is not None:
+                    label = PROVIDER_META.get(msg.provider.value, {}).get(
+                        "display", msg.provider.value
+                    )
+                else:
+                    label = "assistant"
                 context.append(
                     Message(
                         role=Role.USER,
