@@ -50,6 +50,37 @@ class ConversationManager:
     def __init__(self, host: ConversationHost, services: ServicesContext) -> None:
         self._host = host
         self._services = services
+        # #128: in-memory per-conversation input drafts. Saved on
+        # switch-out, restored on switch-in. Not persisted — drafts
+        # live only for the current app session.
+        self._input_drafts: dict[int, str] = {}
+
+    # ------------------------------------------------------------------
+    # Input draft helpers (#128)
+    # ------------------------------------------------------------------
+
+    def _save_current_draft(self) -> None:
+        """Save the current input text as the draft for the currently
+        active conversation, if any."""
+        current = self._services.session.current
+        if current is None:
+            return
+        host = self._host
+        # Read raw (not stripped) so whitespace-only drafts also persist
+        text = host._input._text_edit.toPlainText()
+        if text:
+            self._input_drafts[current.id] = text
+        else:
+            # Empty — drop any stale entry so a cleared input doesn't
+            # resurrect on re-switch
+            self._input_drafts.pop(current.id, None)
+
+    def _restore_draft(self, conv_id: int) -> None:
+        """Restore the draft for a conversation, clearing the input
+        if none was saved."""
+        host = self._host
+        text = self._input_drafts.get(conv_id, "")
+        host._input._text_edit.setPlainText(text)
 
     # ------------------------------------------------------------------
     # Listing & selection
@@ -68,6 +99,11 @@ class ConversationManager:
         conv = db.get_conversation(conv_id)
         if not conv:
             return
+        # #128: save the outgoing conversation's input draft BEFORE
+        # the session swap, so we capture the right conv_id.
+        current = self._services.session.current
+        if current is not None and current.id != conv_id:
+            self._save_current_draft()
         messages = db.get_messages(conv_id)
         # Push the loaded conversation + messages through the session
         # in a single call so conversation_changed and messages_changed
@@ -116,6 +152,8 @@ class ConversationManager:
         host._sync_matrix_panel()
         # #124: restore per-conversation send mode (parallel/sequential)
         host._send._sequential_mode = (conv.send_mode == "sequential")
+        # #128: restore the incoming conversation's input draft (or clear)
+        self._restore_draft(conv_id)
         host._display_messages(messages)
 
     # ------------------------------------------------------------------
@@ -124,6 +162,10 @@ class ConversationManager:
 
     def new_chat(self) -> None:
         host = self._host
+        # #128: save any draft from the outgoing conversation before
+        # swapping — and clear the input so the new chat starts empty.
+        self._save_current_draft()
+        host._input._text_edit.setPlainText("")
         system_prompt = self._services.config.get("system_prompt")
         conv = self._services.db.create_conversation(system_prompt=system_prompt)
         self._services.session.set_current(conv)
@@ -182,6 +224,8 @@ class ConversationManager:
         current = self._services.session.current
         was_current = current is not None and current.id == conv_id
         self._services.db.delete_conversation(conv_id)
+        # #128: drop any cached input draft for the deleted conversation
+        self._input_drafts.pop(conv_id, None)
         # Remove from sidebar immediately
         host._sidebar.remove_conversation(conv_id)
         if was_current:
