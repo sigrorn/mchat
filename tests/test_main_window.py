@@ -1315,3 +1315,40 @@ class TestPopRestoresInputText:
         QCoreApplication.processEvents()
 
         assert main_window._input._text_edit.toPlainText() == "don't touch me"
+
+
+class TestInputDraftPerConversation:
+    """#128 — each conversation should have its own input draft. Switching
+    chats must save the outgoing draft and restore the incoming one."""
+
+    def test_draft_saved_and_restored_on_switch(self, main_window):
+        """Typing in chat A, switching to B, then back to A restores A's draft."""
+        main_window._on_new_chat()
+        conv_a = main_window._current_conv.id
+        main_window._input._text_edit.setPlainText("partial thought in A")
+
+        main_window._on_new_chat()
+        conv_b = main_window._current_conv.id
+
+        # Switching to B: A's draft is saved, B starts empty
+        assert main_window._input._text_edit.toPlainText() == ""
+
+        # Type in B
+        main_window._input._text_edit.setPlainText("different thought in B")
+
+        # Switch back to A
+        main_window._conv_mgr.on_conversation_selected(conv_a)
+        assert main_window._input._text_edit.toPlainText() == "partial thought in A"
+
+        # Switch to B again
+        main_window._conv_mgr.on_conversation_selected(conv_b)
+        assert main_window._input._text_edit.toPlainText() == "different thought in B"
+
+    def test_new_chat_starts_with_empty_input(self, main_window):
+        """A brand-new conversation must always start with an empty input,
+        even if the previous chat had a draft."""
+        main_window._on_new_chat()
+        main_window._input._text_edit.setPlainText("stale from before")
+
+        main_window._on_new_chat()
+        assert main_window._input._text_edit.toPlainText() == ""
