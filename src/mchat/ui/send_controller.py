@@ -296,12 +296,22 @@ class SendController:
         svc.session.append_message(user_msg)
         host._chat.add_message(user_msg)
 
-        # Auto-title on first message
-        if len(conv.messages) == 1:
-            title = text[:50] + ("..." if len(text) > 50 else "")
-            svc.db.update_conversation_title(conv.id, title)
-            svc.session.set_title(title)
-            host._sidebar.update_conversation_title(conv.id, title)
+        # Auto-title on the first real user message. Pinned messages
+        # (persona name/setup) may already be in conv.messages, so we
+        # can't rely on len(...) == 1. Instead, fire when the title is
+        # still the default and this is the first non-pinned user
+        # message in the conversation.
+        if conv.title == "New Chat":
+            non_pinned_user = [
+                m for m in conv.messages
+                if m.role == Role.USER and not m.pinned
+            ]
+            # The just-added user_msg is already in conv.messages
+            if len(non_pinned_user) == 1:
+                title = text[:50] + ("..." if len(text) > 50 else "")
+                svc.db.update_conversation_title(conv.id, title)
+                svc.session.set_title(title)
+                host._sidebar.update_conversation_title(conv.id, title)
 
         host._input.set_enabled(False)
         host._save_selection()
