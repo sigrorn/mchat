@@ -289,13 +289,16 @@ class Database:
         import re
 
         # Tokens recognised at the router level (no conversation
-        # context needed). Note: 'flipped' is the old keyword;
-        # migration normalises it to 'others' in the output.
+        # context needed). Notes:
+        # - 'flipped' was renamed to 'others'.
+        # - 'both' was an even older alias for 'all' that got
+        #   removed at some point; historical messages with it
+        #   should normalise to '@all'.
         provider_shorthands = {
             "claude", "gpt", "gemini", "perplexity", "pplx", "mistral",
         }
-        special_keywords = {"all", "flipped"}
-        keyword_rename = {"flipped": "others"}
+        special_keywords = {"all", "flipped", "both"}
+        keyword_rename = {"flipped": "others", "both": "all"}
 
         # The old prefix pattern: one or more '<word>(,|:)<ws>' chunks.
         token_pattern = re.compile(
