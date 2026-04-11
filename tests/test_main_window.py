@@ -1707,3 +1707,133 @@ class TestErrorOnSwitchedChat:
 
         msgs = main_window._db.get_messages(conv_id)
         assert any(m.content.startswith("[Error from") for m in msgs)
+
+
+class TestEditReplayTombstonedPersona:
+    """#135 — //edit on a message addressed to a tombstoned persona
+    must resolve the persona's original provider via
+    list_personas_including_deleted, not silently default to Claude."""
+
+    def test_edit_replay_uses_tombstoned_persona_provider(self, main_window):
+        """A tombstoned OpenAI persona's original addressed_to token
+        should still resolve to (persona_id, OpenAI), not (token, Claude)."""
+        from mchat.models.persona import Persona, generate_persona_id
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        # Create a persona backed by OpenAI, then tombstone it
+        pid = generate_persona_id()
+        p = Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.OPENAI, name="Critic", name_slug="critic",
+        )
+        main_window._db.create_persona(p)
+        main_window._db.tombstone_persona(conv_id, pid)
+
+        # Assert precondition: list_personas excludes it
+        active = main_window._db.list_personas(conv_id)
+        assert not any(ap.id == pid for ap in active), (
+            "persona should be tombstoned (not in active list)"
+        )
+        # And list_personas_including_deleted returns it
+        all_p = main_window._db.list_personas_including_deleted(conv_id)
+        assert any(ap.id == pid for ap in all_p)
+
+        # Seed an original user message addressed to this persona
+        original_msg = Message(
+            role=Role.USER,
+            content="first prompt",
+            conversation_id=conv_id,
+            addressed_to=pid,
+        )
+        main_window._db.add_message(original_msg)
+        main_window._current_conv.messages = main_window._db.get_messages(conv_id)
+        # Fetch the id-assigned copy
+        original_msg = next(
+            m for m in main_window._current_conv.messages
+            if m.content == "first prompt"
+        )
+
+        # Fake an edit state
+        send = main_window._send
+        main_window._edit_state = {
+            "original_msg": original_msg,
+            "replay_queue": [],
+            "replay_index": 0,
+        }
+
+        # Invoke the edit submit path with a replacement text
+        send._handle_edit_submit("edited prompt", main_window._edit_state)
+
+        # The send should have been dispatched. Inspect retry stash
+        # which records (persona_id, provider) via PersonaTarget.
+        # After send, _retry_targets[pid] should carry OpenAI provider,
+        # not Claude.
+        assert pid in send._retry_targets, (
+            "retry stash should be populated for the tombstoned persona"
+        )
+        target = send._retry_targets[pid]
+        assert target.provider == Provider.OPENAI, (
+            f"target should resolve to OpenAI, got {target.provider}"
+        )
+
+        # Wait for the send to finish so teardown is clean
+        from PySide6.QtCore import QCoreApplication
+        import time
+        for _ in range(100):
+            QCoreApplication.processEvents()
+            if len(send._multi_workers) == 0:
+                break
+            time.sleep(0.01)
+
+    def test_edit_replay_unknown_token_shows_error_does_not_send(
+        self, main_window,
+    ):
+        """If addressed_to contains a token that is neither a provider
+        value nor any active or tombstoned persona_id, the edit replay
+        must abort with a clear error, NOT silently default to Claude."""
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+
+        original_msg = Message(
+            role=Role.USER,
+            content="first prompt",
+            conversation_id=conv_id,
+            addressed_to="p_does_not_exist_anywhere",
+        )
+        main_window._db.add_message(original_msg)
+        main_window._current_conv.messages = main_window._db.get_messages(conv_id)
+        original_msg = next(
+            m for m in main_window._current_conv.messages
+            if m.content == "first prompt"
+        )
+
+        send = main_window._send
+        main_window._edit_state = {
+            "original_msg": original_msg,
+            "replay_queue": [],
+            "replay_index": 0,
+        }
+
+        # Capture notes
+        notes: list[str] = []
+        original_add_note = main_window._chat.add_note
+        main_window._chat.add_note = lambda text: (
+            notes.append(text), original_add_note(text)
+        )[1]
+
+        send._handle_edit_submit("edited", main_window._edit_state)
+
+        # Restore
+        main_window._chat.add_note = original_add_note
+
+        # No workers should have started
+        assert len(send._multi_workers) == 0, (
+            "unknown token must NOT trigger a send"
+        )
+        # And a clear error note should have been shown
+        assert any(
+            "unknown" in n.lower() or "error" in n.lower()
+            for n in notes
+        ), f"expected an error note, got: {notes}"
