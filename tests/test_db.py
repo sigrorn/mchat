@@ -572,6 +572,115 @@ class TestMigration4RewritePrefixes:
             db.close()
 
 
+class TestMigration5RerunForStragglers:
+    """#140 follow-up — users who ran the initial V4 migration (which
+    didn't recognise 'both,' as a legacy alias) have DBs stuck at
+    user_version=4 with 'both, ...' messages still in the old grammar.
+    Migration 5 re-runs the rewrite pass to catch those stragglers.
+    Because _migration_4_rewrite_prefixes is idempotent, this is safe
+    on DBs that don't have any stragglers.
+    """
+
+    def _seed_v4_db_with_content(self, tmp_path, conv_contents):
+        """Build a DB, let all migrations run, force user_version back
+        to 4, and insert messages as if the user had run the first
+        version of migration 4 that didn't handle 'both,'."""
+        import sqlite3
+        from datetime import datetime, timezone
+
+        path = tmp_path / "v4.db"
+        from mchat.db import Database
+        temp_db = Database(db_path=path)
+        temp_db.close()
+
+        raw = sqlite3.connect(str(path))
+        raw.execute("PRAGMA user_version = 4")
+        now = datetime.now(timezone.utc).isoformat()
+        conv_ids: dict = {}
+        for conv_hint, contents in conv_contents:
+            cur = raw.execute(
+                "INSERT INTO conversations (title, system_prompt, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                (f"conv-{conv_hint}", "", now, now),
+            )
+            conv_ids[conv_hint] = cur.lastrowid
+            for content in contents:
+                raw.execute(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (conv_ids[conv_hint], "user", content, now),
+                )
+        raw.commit()
+        raw.close()
+        return path, conv_ids
+
+    def _get_contents(self, db_path, conv_id):
+        import sqlite3
+        raw = sqlite3.connect(str(db_path))
+        rows = raw.execute(
+            "SELECT content FROM messages WHERE conversation_id = ? ORDER BY id",
+            (conv_id,),
+        ).fetchall()
+        raw.close()
+        return [r[0] for r in rows]
+
+    def test_migration_5_catches_both_straggler(self, tmp_path):
+        """A V4 DB with 'both, explain this' gets its content
+        rewritten to '@all explain this' when upgraded to V5."""
+        path, convs = self._seed_v4_db_with_content(
+            tmp_path, [("a", ["both, explain this"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@all explain this"]
+            # And user_version should now be 5
+            version = db._conn.execute("PRAGMA user_version").fetchone()[0]
+            assert version >= 5
+        finally:
+            db.close()
+
+    def test_migration_5_leaves_already_migrated_rows_alone(self, tmp_path):
+        """A V4 DB with '@claude hello' (already migrated) stays
+        unchanged — the rewrite is idempotent."""
+        path, convs = self._seed_v4_db_with_content(
+            tmp_path, [("a", ["@claude hello", "@all compare"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@claude hello", "@all compare"]
+        finally:
+            db.close()
+
+    def test_migration_5_mixed_content(self, tmp_path):
+        """A realistic V4 DB has some already-migrated rows plus
+        some 'both,' stragglers. Only the stragglers change."""
+        path, convs = self._seed_v4_db_with_content(
+            tmp_path,
+            [("a", [
+                "@claude hello",          # already migrated — untouched
+                "both, what do you think",  # straggler — rewritten
+                "plain text",              # never had a prefix — untouched
+                "@gpt @gemini compare",   # already migrated — untouched
+            ])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == [
+                "@claude hello",
+                "@all what do you think",
+                "plain text",
+                "@gpt @gemini compare",
+            ]
+        finally:
+            db.close()
+
+
 class TestVisibility:
     def test_addressed_to_roundtrip(self, db):
         conv = db.create_conversation()
