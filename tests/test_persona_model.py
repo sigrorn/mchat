@@ -119,3 +119,84 @@ class TestSlugifyPersonaName:
             slugify_persona_name("   ")
         with pytest.raises(ValueError):
             slugify_persona_name("---")
+
+
+class TestValidatePersonaName:
+    """#140 — validate_persona_name rejects names that contain
+    whitespace, punctuation other than - and _, the @ sigil, or
+    collide with reserved tokens. Applied on NEW write paths
+    (create_persona, //addpersona, //editpersona with name change,
+    persona import). Grandfathered personas don't go through this
+    path — slugify_persona_name still accepts historical names for
+    back-compat at read-time."""
+
+    def test_accepts_letters_digits_hyphen_underscore(self):
+        from mchat.models.persona import validate_persona_name
+        # Must not raise
+        validate_persona_name("partner")
+        validate_persona_name("Partner")
+        validate_persona_name("italian-tutor")
+        validate_persona_name("italian_tutor")
+        validate_persona_name("claude-bot_42")
+        validate_persona_name("X")  # single char is OK
+
+    def test_rejects_empty_string(self):
+        from mchat.models.persona import validate_persona_name
+        with pytest.raises(ValueError):
+            validate_persona_name("")
+
+    def test_rejects_whitespace(self):
+        from mchat.models.persona import validate_persona_name
+        with pytest.raises(ValueError, match=r"whitespace"):
+            validate_persona_name("Claude Bot")
+        with pytest.raises(ValueError, match=r"whitespace"):
+            validate_persona_name("  Partner")
+        with pytest.raises(ValueError, match=r"whitespace"):
+            validate_persona_name("Partner\t")
+
+    def test_rejects_at_sigil(self):
+        from mchat.models.persona import validate_persona_name
+        with pytest.raises(ValueError):
+            validate_persona_name("@partner")
+
+    def test_rejects_comma_colon_slash(self):
+        from mchat.models.persona import validate_persona_name
+        with pytest.raises(ValueError):
+            validate_persona_name("part,ner")
+        with pytest.raises(ValueError):
+            validate_persona_name("part:ner")
+        with pytest.raises(ValueError):
+            validate_persona_name("part/ner")
+
+    def test_rejects_other_punctuation(self):
+        from mchat.models.persona import validate_persona_name
+        for bad in ("part.ner", "part!ner", "part(ner)", "part#ner", "part$ner"):
+            with pytest.raises(ValueError):
+                validate_persona_name(bad)
+
+    def test_rejects_reserved_provider_shorthand(self):
+        from mchat.models.persona import validate_persona_name
+        for reserved in ("claude", "gpt", "gemini", "perplexity", "pplx", "mistral"):
+            with pytest.raises(ValueError, match=r"reserved"):
+                validate_persona_name(reserved)
+
+    def test_rejects_reserved_all_and_others(self):
+        from mchat.models.persona import validate_persona_name
+        with pytest.raises(ValueError, match=r"reserved"):
+            validate_persona_name("all")
+        with pytest.raises(ValueError, match=r"reserved"):
+            validate_persona_name("others")
+
+    def test_reserved_check_is_case_insensitive(self):
+        from mchat.models.persona import validate_persona_name
+        for bad in ("Claude", "CLAUDE", "GPT", "All", "Others", "OTHERS"):
+            with pytest.raises(ValueError, match=r"reserved"):
+                validate_persona_name(bad)
+
+    def test_slugify_does_not_call_validator(self):
+        """slugify_persona_name is still the back-compat path for
+        grandfathered data; it must NOT reject whitespace-containing
+        names. Only write-path validators call validate_persona_name."""
+        from mchat.models.persona import slugify_persona_name
+        # Historical data with a space should still slugify cleanly.
+        assert slugify_persona_name("Italian tutor") == "italian_tutor"
