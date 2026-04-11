@@ -147,8 +147,13 @@ class ConversationManager:
             host._sync_checkboxes_from_selection()
             host._update_input_placeholder()
             host._update_input_color()
-        host._update_spend_labels()
+        # #141: _sync_toolbar_personas must run BEFORE _update_spend_labels.
+        # The spend labels are keyed off the persona rows that
+        # _sync_toolbar_personas (re)builds; calling _update_spend_labels
+        # first writes "$0.00000" into whatever rows the previous
+        # conversation left behind, and the correct values never land.
         host._sync_toolbar_personas()
+        host._update_spend_labels()
         host._sync_matrix_panel()
         # #124: restore per-conversation send mode (parallel/sequential)
         host._send._sequential_mode = (conv.send_mode == "sequential")
@@ -170,8 +175,9 @@ class ConversationManager:
         conv = self._services.db.create_conversation(system_prompt=system_prompt)
         self._services.session.set_current(conv)
         host._chat.clear_messages()
-        host._update_spend_labels()
+        # #141: personas first, spend labels second (see on_conversation_selected).
         host._sync_toolbar_personas()
+        host._update_spend_labels()
         host._sync_matrix_panel()
         # #124: new chats always start in parallel mode (the DB default).
         # The DB column is already 'parallel' from the migration, but we
