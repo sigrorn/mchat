@@ -426,8 +426,17 @@ class SendController:
             # Fall back to current selection
             tokens = [t.persona_id for t in svc.selection.selection]
 
-        # Build PersonaTargets from the tokens
+        # Build PersonaTargets from the tokens. #135: use
+        # list_personas_including_deleted so tombstoned personas still
+        # resolve to their original provider. If a token is still
+        # unknown (not a provider value, not any active or tombstoned
+        # persona), abort the edit with a clear error — do NOT guess
+        # a provider, which used to silently route to Claude.
+        all_personas = svc.db.list_personas_including_deleted(conv.id)
+        persona_by_id = {p.id: p for p in all_personas}
+
         targets: list[PersonaTarget] = []
+        unknown_tokens: list[str] = []
         for token in tokens:
             # Check if token is a provider value (synthetic default)
             provider_match = None
@@ -437,14 +446,23 @@ class SendController:
                     break
             if provider_match:
                 targets.append(synthetic_default(provider_match))
+                continue
+            # Explicit persona — look up including tombstoned.
+            persona = persona_by_id.get(token)
+            if persona is not None:
+                targets.append(
+                    PersonaTarget(persona_id=persona.id, provider=persona.provider)
+                )
             else:
-                # Explicit persona — look up provider from DB
-                personas = svc.db.list_personas(conv.id)
-                persona = next((p for p in personas if p.id == token), None)
-                if persona:
-                    targets.append(PersonaTarget(persona_id=persona.id, provider=persona.provider))
-                else:
-                    targets.append(PersonaTarget(persona_id=token, provider=Provider.CLAUDE))
+                unknown_tokens.append(token)
+
+        if unknown_tokens:
+            host._chat.add_note(
+                f"Error: unknown persona id(s) in original message: "
+                f"{', '.join(unknown_tokens)} — cannot edit-replay"
+            )
+            host._edit_state = None
+            return
 
         if not targets:
             host._chat.add_note("Error: no targets for edit re-send")
