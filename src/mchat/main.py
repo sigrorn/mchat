@@ -91,6 +91,23 @@ def main() -> None:
             "mchat.mchat.app.1"
         )
 
+    # #146: log graphviz availability once at startup so a missing
+    # `dot` binary shows up in crash.log rather than failing silently
+    # the first time a model emits a DOT block.
+    try:
+        from mchat import dot_renderer
+        _available = dot_renderer.is_graphviz_available()
+        crash_log = DEFAULT_CONFIG_DIR / "crash.log"
+        crash_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(crash_log, "a", encoding="utf-8") as _f:
+            _f.write(
+                f"\n===== {datetime.now().isoformat()} startup =====\n"
+                f"graphviz available: {_available}\n"
+            )
+    except Exception:
+        # Best-effort logging — never let it crash startup.
+        pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("mchat")
     app.setStyle("Fusion")

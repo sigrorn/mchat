@@ -83,6 +83,10 @@ class HtmlExporter:
                 "tables", "fenced_code", "sane_lists", DotExtension(),
             ]
         )
+        # #146: bumped by _inline_dot_images every time a DOT block
+        # can't be rendered. Consumed by export() to decide whether
+        # to prepend a degradation banner above the messages.
+        self._dot_render_failures: int = 0
 
     def export(
         self,
@@ -100,6 +104,9 @@ class HtmlExporter:
         back to the provider display name.
         """
         personas_by_id = {p.id: p for p in (personas or [])}
+        # #146: reset per-export so each export counts only its own
+        # render failures.
+        self._dot_render_failures = 0
         parts: list[str] = []
         for msg in messages:
             colour = self._colors.color_for(msg, personas_by_id)
@@ -113,6 +120,20 @@ class HtmlExporter:
                 f"{content}"
                 f"</div>"
             )
+
+        # #146: if any DOT block failed to render, prepend a visible
+        # warning so the file's reader knows the graphics are missing.
+        if self._dot_render_failures > 0:
+            n = self._dot_render_failures
+            banner = (
+                f'<div style="background-color:#fff3cd; color:#664d03; '
+                f'padding:12px 16px; border-bottom:2px solid #ffc107; '
+                f'font-weight:bold;">'
+                f'\u26a0 Graphviz not available at export time; {n} '
+                f'diagram{"s" if n != 1 else ""} shown as source only.'
+                f'</div>'
+            )
+            parts.insert(0, banner)
 
         body = "\n".join(parts)
         return (
@@ -160,16 +181,19 @@ class HtmlExporter:
         the exported file has no app-internal URLs left.
 
         On render failure (graphviz missing, bad DOT, etc.) the
-        whole <img> tag is dropped and the <details> source fallback
-        emitted by dot_markdown_ext carries the graph."""
+        whole <img> tag is dropped, ``_dot_render_failures`` is
+        bumped, and the <details> source fallback emitted by
+        dot_markdown_ext carries the graph."""
 
         def repl(match: re.Match[str]) -> str:
             digest = match.group(2)
             source = DOT_SOURCE_MAP.get(digest)
             if source is None:
+                self._dot_render_failures += 1
                 return ""
             png = dot_renderer.render_dot(source)
             if not png:
+                self._dot_render_failures += 1
                 return ""
             b64 = _base64.b64encode(png).decode("ascii")
             pre_attrs = match.group(1) or ""

@@ -40,6 +40,20 @@ source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
 ```
 
+### Graphviz (optional)
+
+If you want inline DOT-language graphs in model responses, install
+Graphviz and make sure the `dot` binary is on your `PATH`:
+
+- **Windows**: `winget install Graphviz.Graphviz` (or download the
+  MSI from https://graphviz.org/download/ and tick "Add Graphviz to
+  the system PATH" during install)
+- **macOS**: `brew install graphviz`
+- **Linux**: `sudo apt install graphviz` / `sudo dnf install graphviz`
+
+When Graphviz isn't installed, DOT blocks fall back to a collapsible
+source-only view — the app stays fully usable.
+
 ## API Keys
 
 Get your API keys from:
