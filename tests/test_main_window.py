@@ -1887,3 +1887,54 @@ class TestResolveErrorRestoresInput:
             f"expected input to be restored to '@nobody hello world', "
             f"got {text_now!r}"
         )
+
+
+class TestAtTargetPlusCommand:
+    """#140 Phase 7: '@claudebot //retry' is ambiguous and should be
+    rejected with a clear error, not silently sent as message text."""
+
+    def test_at_target_plus_command_shows_error(self, main_window):
+        """Submitting '@claude //retry' must show a user-facing error
+        and NOT send anything (neither as a command nor as a message)."""
+        main_window._on_new_chat()
+
+        notes: list[str] = []
+        original_add_note = main_window._chat.add_note
+        main_window._chat.add_note = lambda text: (
+            notes.append(text), original_add_note(text)
+        )[1]
+
+        main_window._on_message_submitted("@claude //retry")
+
+        main_window._chat.add_note = original_add_note
+
+        # An error note should have been shown
+        assert any(
+            "command" in n.lower() and ("@" in n or "target" in n.lower())
+            for n in notes
+        ), f"expected error note about @target + //command, got: {notes}"
+        # No worker started
+        assert main_window._send._multi_workers == {}
+        # No messages persisted
+        msgs = main_window._db.get_messages(main_window._current_conv.id)
+        assert not any("//retry" in (m.content or "") for m in msgs), (
+            "/retry should not be persisted as message text"
+        )
+
+    def test_plain_command_still_works(self, main_window):
+        """Regression guard: a plain '//retry' with no @-prefix is
+        still dispatched as a command."""
+        main_window._on_new_chat()
+        # Can't actually retry without a failed send, but the
+        # dispatch path should run and show the 'nothing to retry'
+        # error note.
+        notes: list[str] = []
+        original_add_note = main_window._chat.add_note
+        main_window._chat.add_note = lambda text: (
+            notes.append(text), original_add_note(text)
+        )[1]
+
+        main_window._on_message_submitted("//retry")
+
+        main_window._chat.add_note = original_add_note
+        assert any("retry" in n.lower() for n in notes)
