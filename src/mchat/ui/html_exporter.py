@@ -32,9 +32,25 @@ class ExportColors:
     perplexity: str
     mistral: str
 
-    def color_for(self, message: Message) -> str:
+    def color_for(
+        self,
+        message: Message,
+        personas_by_id: dict[str, Persona] | None = None,
+    ) -> str:
+        """Return the background colour for a message.
+
+        #90: if the message has a persona_id matching a persona with
+        ``color_override`` set, that override wins over the provider
+        default — matching the in-app chat display behaviour (the
+        legacy exporter was on a provider-only path and lost custom
+        per-persona colours on export).
+        """
         if message.role == Role.USER:
             return self.user
+        if personas_by_id and message.persona_id is not None:
+            persona = personas_by_id.get(message.persona_id)
+            if persona is not None and persona.color_override:
+                return persona.color_override
         if message.provider is None:
             return self.user
         return getattr(self, message.provider.value, self.user)
@@ -74,7 +90,7 @@ class HtmlExporter:
         personas_by_id = {p.id: p for p in (personas or [])}
         parts: list[str] = []
         for msg in messages:
-            colour = self._colors.color_for(msg)
+            colour = self._colors.color_for(msg, personas_by_id)
             content = self._render(msg)
             label = self._label_for(msg, personas_by_id)
             parts.append(
