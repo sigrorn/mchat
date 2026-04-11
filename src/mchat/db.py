@@ -21,7 +21,7 @@ DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 # new _migration_N method whenever the schema changes. Each migration
 # runs exactly once per database, in ascending order, and must be
 # idempotent on partially-migrated legacy DBs where safe.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -87,6 +87,7 @@ class Database:
             (1, self._migration_1_initial),
             (2, self._migration_2_personas),
             (3, self._migration_3_send_mode),
+            (4, self._migration_4_rewrite_prefixes),
         ]
         for version, fn in migrations:
             if current < version:
@@ -257,6 +258,116 @@ class Database:
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN send_mode "
                 "TEXT NOT NULL DEFAULT 'parallel'"
+            )
+
+    def _migration_4_rewrite_prefixes(self) -> None:
+        """Rewrite historical message prefixes from '<word>,<ws>'
+        grammar to '@<word> <ws>' grammar (#140).
+
+        Walks every user message and tries to parse leading
+        '<word>(,|:)<ws>' chunks. Every consumed word is checked
+        against:
+          * provider shorthands (claude, gpt, gemini, perplexity,
+            pplx, mistral)
+          * special keywords (all, flipped → rewrites to others)
+          * active or tombstoned persona name_slugs in that
+            conversation
+
+        If every consumed word matches a known token, the prefix is
+        rewritten in place: each word becomes '@<word>' joined by
+        single spaces, followed by the remaining text. If any
+        consumed word does NOT match (e.g. 'ok, let's continue'),
+        the row is left unchanged — the false-positive immunity the
+        new grammar buys us starts here.
+
+        Persona rows are NOT modified (grandfathering). New-persona
+        validation lives on the write paths.
+
+        Idempotent by design: a message already starting with '@'
+        fails the '<word>,<ws>' regex and is skipped.
+        """
+        import re
+
+        # Tokens recognised at the router level (no conversation
+        # context needed). Note: 'flipped' is the old keyword;
+        # migration normalises it to 'others' in the output.
+        provider_shorthands = {
+            "claude", "gpt", "gemini", "perplexity", "pplx", "mistral",
+        }
+        special_keywords = {"all", "flipped"}
+        keyword_rename = {"flipped": "others"}
+
+        # The old prefix pattern: one or more '<word>(,|:)<ws>' chunks.
+        token_pattern = re.compile(
+            r"^\s*([A-Za-z][A-Za-z0-9_\-]*)\s*[,:]\s*",
+        )
+
+        # Load all messages in one shot. The set is small enough
+        # (chat size measured in thousands of rows tops).
+        rows = self._conn.execute(
+            "SELECT id, conversation_id, content FROM messages "
+            "WHERE role = 'user'"
+        ).fetchall()
+
+        # Per-conversation slug cache — avoids hitting the personas
+        # table for every message in the same conversation.
+        slugs_by_conv: dict[int, set[str]] = {}
+
+        def _slugs_for(conv_id: int) -> set[str]:
+            if conv_id not in slugs_by_conv:
+                persona_rows = self._conn.execute(
+                    "SELECT name_slug FROM personas WHERE conversation_id = ?",
+                    (conv_id,),
+                ).fetchall()
+                slugs_by_conv[conv_id] = {r[0] for r in persona_rows}
+            return slugs_by_conv[conv_id]
+
+        rewrites: list[tuple[int, str]] = []
+        for msg_id, conv_id, content in rows:
+            if not content:
+                continue
+            # Walk leading <word>(,|:)<ws> chunks.
+            remaining = content
+            consumed_words: list[str] = []
+            all_known = True
+            while True:
+                m = token_pattern.match(remaining)
+                if not m:
+                    break
+                word = m.group(1).lower()
+                # Known if it's a provider shorthand, a keyword, or
+                # an active/tombstoned persona slug.
+                if (
+                    word in provider_shorthands
+                    or word in special_keywords
+                    or word in _slugs_for(conv_id)
+                ):
+                    consumed_words.append(word)
+                    remaining = remaining[m.end():]
+                    continue
+                # Unknown word — bail and leave the whole row alone.
+                all_known = False
+                break
+
+            if not all_known or not consumed_words:
+                continue
+
+            # Rewrite: each consumed word becomes '@<word>', with
+            # the 'flipped' → 'others' rename applied.
+            at_tokens = [
+                "@" + keyword_rename.get(w, w) for w in consumed_words
+            ]
+            new_content = " ".join(at_tokens) + " " + remaining.lstrip()
+            new_content = new_content.rstrip()
+            rewrites.append((msg_id, new_content))
+
+        # Batch the UPDATEs into one transaction. SQLite already
+        # wraps each execute in an implicit transaction, but doing
+        # them in one go is faster and keeps the behaviour atomic.
+        for msg_id, new_content in rewrites:
+            self._conn.execute(
+                "UPDATE messages SET content = ? WHERE id = ?",
+                (new_content, msg_id),
             )
 
     def close(self) -> None:
