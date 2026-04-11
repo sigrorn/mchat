@@ -472,6 +472,76 @@ class TestHtmlExporterDotGraphs:
         # Source fallback is still in the output.
         assert "digraph" in html
 
+    def test_degradation_warning_when_render_fails(
+        self, exporter, monkeypatch
+    ):
+        """#146 — when at least one DOT block can't be rendered the
+        exported file must carry a visible warning at the top so
+        whoever opens the file realises graphics are missing."""
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot", lambda source, **kw: None,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { a -> b }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "Graphviz" in html or "graphviz" in html
+        assert "shown as source" in html or "source only" in html
+        # Should be BEFORE the first message so it can't be missed.
+        warn_pos = html.lower().find("graphviz")
+        msg_pos = html.find("digraph")
+        assert warn_pos != -1 and warn_pos < msg_pos
+
+    def test_no_degradation_warning_on_happy_path(
+        self, exporter, monkeypatch
+    ):
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { a -> b }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "shown as source" not in html
+        assert "source only" not in html
+
+    def test_no_degradation_warning_when_no_dot_blocks(
+        self, exporter, monkeypatch
+    ):
+        from mchat import dot_renderer
+
+        # render_dot should never be called — if it is, explode.
+        def boom(*a, **kw):
+            raise AssertionError("render_dot should not be called")
+
+        monkeypatch.setattr(dot_renderer, "render_dot", boom)
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="Plain **text**, no graphs.",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "shown as source" not in html
+        assert "source only" not in html
+
     def test_uses_disk_cache_so_no_subprocess_on_repeat_export(
         self, exporter, monkeypatch, tmp_path
     ):
@@ -531,3 +601,13 @@ class TestHtmlExporterDotGraphs:
         dot_renderer._MEMORY_CACHE.clear()
         exporter2.export(msgs)
         assert counter["n"] == 1  # still 1 — disk served it
+
+
+class TestHelpTextMentionsGraphviz:
+    """#146 — //help must tell the user that DOT graphs require
+    graphviz, so they know why their graphs aren't rendering."""
+
+    def test_help_commands_string_mentions_graphviz(self):
+        from mchat.ui.commands.help import HELP_COMMANDS
+
+        assert "raphviz" in HELP_COMMANDS or "DOT graph" in HELP_COMMANDS
