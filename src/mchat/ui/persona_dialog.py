@@ -42,6 +42,7 @@ from mchat.models.persona import (
     Persona,
     generate_persona_id,
     slugify_persona_name,
+    validate_persona_name,
 )
 from mchat.ui.persona_resolution import (
     resolve_persona_color,
@@ -99,9 +100,14 @@ class PersonaDialog(QDialog):
         color_override: str | None = None,
         created_at_message_index: int | None = None,
     ) -> Persona:
-        """Insert a new persona row for this conversation. Raises
-        sqlite3.IntegrityError if the name_slug collides with an
-        active persona."""
+        """Insert a new persona row for this conversation.
+
+        #140: validates the name against the new alphabet +
+        reserved-token rules before touching the DB. Raises
+        ``ValueError`` on any violation and ``sqlite3.IntegrityError``
+        if the name_slug collides with an active persona.
+        """
+        validate_persona_name(name)
         p = Persona(
             conversation_id=self._conv_id,
             id=generate_persona_id(),
@@ -555,13 +561,16 @@ class PersonaDialog(QDialog):
         )
 
     def _on_add_clicked(self) -> None:
-        # Create a persona with a unique default name
-        base = "New persona"
+        # Create a persona with a unique default name.
+        # #140: the default must pass validate_persona_name so the
+        # click-to-add flow keeps working — use 'new_persona' with
+        # an underscore, not 'New persona' with whitespace.
+        base = "new_persona"
         existing_slugs = {p.name_slug for p in self.list_items()}
         name = base
         suffix = 2
         while slugify_persona_name(name) in existing_slugs:
-            name = f"{base} {suffix}"
+            name = f"{base}_{suffix}"
             suffix += 1
 
         provider = self._provider_combo.currentData() or Provider.CLAUDE
@@ -572,6 +581,11 @@ class PersonaDialog(QDialog):
                 self, "Duplicate",
                 f"A persona named {name!r} already exists.",
             )
+            return
+        except ValueError as e:
+            # Shouldn't happen with the hardcoded default name, but
+            # be defensive so the button never silently no-ops.
+            QMessageBox.warning(self, "Invalid name", str(e))
             return
         self._refresh_list()
         # Select the new persona
@@ -622,6 +636,16 @@ class PersonaDialog(QDialog):
         if not new_name:
             QMessageBox.warning(self, "Invalid", "Name cannot be empty.")
             return
+        # #140: validate only when the name actually changed, so old
+        # grandfathered personas can still be edited (prompt, model,
+        # colour) without being forced to rename. Renaming to a
+        # fresh name must obey the new rules.
+        if new_name != persona.name:
+            try:
+                validate_persona_name(new_name)
+            except ValueError as e:
+                QMessageBox.warning(self, "Invalid name", str(e))
+                return
         try:
             new_slug = slugify_persona_name(new_name)
         except ValueError:

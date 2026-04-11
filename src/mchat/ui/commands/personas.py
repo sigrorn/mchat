@@ -15,10 +15,14 @@ import sqlite3
 from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor
 
 from mchat.models.message import Message, Role
-from mchat.models.persona import Persona, generate_persona_id, slugify_persona_name
+from mchat.models.persona import (
+    Persona,
+    generate_persona_id,
+    slugify_persona_name,
+    validate_persona_name,
+)
 from mchat.router import PREFIX_TO_PROVIDER
 from mchat.ui.commands.host import CommandHost
-from mchat.ui.persona_resolver import RESERVED_NAMES
 
 
 # Parse `<provider> as "<name>" [inherit|new] <prompt>`
@@ -77,18 +81,18 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         )
         return True
 
-    # Validate name — not reserved, produces a non-empty slug
+    # #140: validate name against the new alphabet + reserved-token
+    # rules. Produces a clean user-facing error on any violation.
+    try:
+        validate_persona_name(name)
+    except ValueError as e:
+        host._chat.add_note(f"Error: {e}")
+        return True
     try:
         name_slug = slugify_persona_name(name)
     except ValueError:
         host._chat.add_note(
             f"Error: persona name {name!r} produces an empty slug"
-        )
-        return True
-    if name_slug in RESERVED_NAMES:
-        host._chat.add_note(
-            f"Error: {name_slug!r} is a reserved name (provider shorthand "
-            f"or special keyword). Pick a different name."
         )
         return True
 
