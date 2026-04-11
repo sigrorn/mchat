@@ -231,7 +231,52 @@ class TestChatStatsLimitedSection:
         assert limit_all.chars == 12
 
 
-class TestFormatStats:
+class TestHandleStatsCommand:
+    """//stats command handler: prints heading + formatted lines
+    to host._chat via add_note / cursor insertion."""
+
+    def _build_host(self, db, config):
+        from unittest.mock import MagicMock
+        h = MagicMock()
+        h._db = db
+        h._config = config
+        conv = db.create_conversation()
+        h._current_conv = conv
+        h._current_conv.messages = []
+        h._chat.notes = []
+        h._chat.add_note = lambda text: h._chat.notes.append(text)
+        # Make textCursor and friends no-op so the cursor insertion
+        # loop in handle_stats doesn't blow up on MagicMock.
+        h._chat.textCursor = MagicMock()
+        return h
+
+    def test_handle_stats_no_conversation_shows_error(self, db, config):
+        host = self._build_host(db, config)
+        host._current_conv = None
+        from mchat.ui.commands.history import handle_stats
+        handle_stats(host)
+        assert any(
+            "no" in n.lower() or "error" in n.lower()
+            for n in host._chat.notes
+        )
+
+    def test_handle_stats_outputs_heading(self, db, config):
+        host = self._build_host(db, config)
+        _add_user(db, host._current_conv.id, "hi")
+        host._current_conv.messages = db.get_messages(host._current_conv.id)
+        from mchat.ui.commands.history import handle_stats
+        handle_stats(host)
+        # First added note should be the "Chat stats" heading
+        assert any("Chat stats" in n for n in host._chat.notes)
+
+    def test_handle_stats_shows_whole_chat_section(self, db, config):
+        host = self._build_host(db, config)
+        _add_user(db, host._current_conv.id, "hello")
+        host._current_conv.messages = db.get_messages(host._current_conv.id)
+        from mchat.ui.commands.history import handle_stats
+        handle_stats(host)
+        assert any("Whole chat" in n for n in host._chat.notes)
+        assert any("all visibility" in n for n in host._chat.notes)
     def test_format_whole_only(self):
         from mchat.ui.stats import (
             ChatStats,
