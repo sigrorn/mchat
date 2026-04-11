@@ -21,7 +21,7 @@ DEFAULT_DB_PATH = DEFAULT_CONFIG_DIR / "mchat.db"
 # new _migration_N method whenever the schema changes. Each migration
 # runs exactly once per database, in ascending order, and must be
 # idempotent on partially-migrated legacy DBs where safe.
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -88,6 +88,7 @@ class Database:
             (2, self._migration_2_personas),
             (3, self._migration_3_send_mode),
             (4, self._migration_4_rewrite_prefixes),
+            (5, self._migration_5_rerun_rewrite_for_stragglers),
         ]
         for version, fn in migrations:
             if current < version:
@@ -372,6 +373,24 @@ class Database:
                 "UPDATE messages SET content = ? WHERE id = ?",
                 (new_content, msg_id),
             )
+
+    def _migration_5_rerun_rewrite_for_stragglers(self) -> None:
+        """Re-run the prefix rewrite to catch historical aliases
+        missed by the first version of migration 4 (#140 follow-up).
+
+        The initial ship of migration 4 recognised ``flipped`` as a
+        legacy keyword but not ``both`` (an even older alias for
+        ``all`` that was removed even earlier). DBs that upgraded
+        via the first V4 code have ``both, ...`` messages still in
+        the old grammar at user_version=4.
+
+        Fix: re-run ``_migration_4_rewrite_prefixes`` now that the
+        rewrite logic recognises ``both``. The rewrite is idempotent
+        on already-migrated rows (they start with ``@``, which
+        doesn't match the old-grammar regex), so running it again
+        on a non-straggler DB is a safe no-op.
+        """
+        self._migration_4_rewrite_prefixes()
 
     def close(self) -> None:
         self._conn.close()
