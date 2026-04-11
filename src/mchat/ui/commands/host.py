@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from mchat.config import Config
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider
@@ -27,6 +28,7 @@ class CommandHost(Protocol):
 
     # Core services
     _db: Database
+    _config: Config
     _router: Router | None
     _current_conv: Conversation | None
     _column_mode: bool

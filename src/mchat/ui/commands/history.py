@@ -1,10 +1,12 @@
 # ------------------------------------------------------------------
 # Component: commands.history
 # Responsibility: History/editing commands — //limit, //pop, //hide,
-#                 //unhide, //retry, //rename, //vacuum.
-# Collaborators: CommandHost, config, db
+#                 //unhide, //retry, //rename, //vacuum, //stats.
+# Collaborators: CommandHost, config, db, ui.stats
 # ------------------------------------------------------------------
 from __future__ import annotations
+
+from PySide6.QtGui import QColor, QTextBlockFormat, QTextCursor
 
 from mchat.config import PROVIDER_META
 from mchat.models.message import Provider, Role
@@ -338,4 +340,53 @@ def handle_vacuum(host: CommandHost) -> bool:
         host._chat.add_note(
             f"database already compact ({size_after:,} bytes)"
         )
+    return True
+
+
+def handle_stats(host: CommandHost) -> bool:
+    """//stats — print size statistics for the current conversation.
+
+    Shows a 'Whole chat' section and, when //limit is active, a
+    'Limit' section. Each section has:
+      * an 'all visibility' baseline row (raw character sum)
+      * one row per persona, reflecting that persona's real outgoing
+        context size via build_context (respects the current
+        visibility matrix, pin rescue, and persona cutoffs)
+
+    Costs: runs build_context once per persona per section. On a
+    long conversation with 4 personas this may take a couple of
+    seconds. Caching is a future optimisation (#131).
+    """
+    if host._current_conv is None:
+        host._chat.add_note("Error: no active conversation")
+        return True
+
+    from mchat.ui.stats import compute_chat_stats, format_stats
+
+    stats = compute_chat_stats(
+        host._current_conv, host._db, host._config,
+    )
+    lines = format_stats(stats)
+
+    # Heading note via add_note (same shape as //providers)
+    host._chat.add_note(f"Chat stats — {host._current_conv.title}")
+
+    # Subsequent lines inserted as plain text blocks so the
+    # formatting (indentation, aligned columns) is preserved.
+    try:
+        cursor = host._chat.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        fmt = QTextBlockFormat()
+        fmt.setBackground(QColor("#f5f5f5"))
+        for line in lines:
+            cursor.insertBlock(fmt)
+            char_fmt = cursor.charFormat()
+            char_fmt.setForeground(QColor("#666"))
+            cursor.insertText(line, char_fmt)
+        host._chat._scroll_to_bottom()
+    except Exception:
+        # Fallback for test doubles / mock hosts: emit each line as
+        # its own add_note call. Matches the notes-list-based tests.
+        for line in lines:
+            host._chat.add_note(line)
     return True

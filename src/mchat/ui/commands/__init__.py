@@ -38,6 +38,8 @@ def dispatch(cmd: str, arg: str, host: CommandHost) -> bool:
         return history.handle_edit(arg, host)
     if cmd == "//vacuum":
         return history.handle_vacuum(host)
+    if cmd == "//stats":
+        return history.handle_stats(host)
 
     # Selection / layout
     if cmd == "//select":

@@ -43,6 +43,7 @@ HELP_COMMANDS = (
     "  //visibility separated|joined  — quick visibility presets\n"
     "  //columns (//cols) / //lines  — column vs list layout\n"
     "  //help                        — show this help\n"
+    "  //stats                       — size breakdown for the current chat\n"
     "  //vacuum                      — compact the database (rarely needed)\n"
     "\n"
     "Persona example (Italian tutor with 3 providers):\n"

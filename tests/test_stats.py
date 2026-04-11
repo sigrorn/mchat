@@ -269,14 +269,27 @@ class TestHandleStatsCommand:
         # First added note should be the "Chat stats" heading
         assert any("Chat stats" in n for n in host._chat.notes)
 
-    def test_handle_stats_shows_whole_chat_section(self, db, config):
+    def test_handle_stats_inserts_section_lines_via_cursor(self, db, config):
+        """The handler uses cursor insertion for per-line output to
+        preserve column alignment. Test asserts the cursor's insertText
+        was called with 'Whole chat' heading and 'all visibility' line."""
         host = self._build_host(db, config)
         _add_user(db, host._current_conv.id, "hello")
         host._current_conv.messages = db.get_messages(host._current_conv.id)
+
+        # Collect all insertText arguments
+        cursor_obj = host._chat.textCursor.return_value
+        inserted: list[str] = []
+        cursor_obj.insertText.side_effect = (
+            lambda text, *args, **kw: inserted.append(text)
+        )
+
         from mchat.ui.commands.history import handle_stats
         handle_stats(host)
-        assert any("Whole chat" in n for n in host._chat.notes)
-        assert any("all visibility" in n for n in host._chat.notes)
+
+        all_inserted = " ".join(inserted)
+        assert "Whole chat" in all_inserted
+        assert "all visibility" in all_inserted
     def test_format_whole_only(self):
         from mchat.ui.stats import (
             ChatStats,
