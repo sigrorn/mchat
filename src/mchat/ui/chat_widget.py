@@ -104,6 +104,13 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self.setPalette(pal)
         self.document().setDocumentMargin(16)
         self.document().setDefaultStyleSheet(_DOC_CSS)
+        # #132: disable undo/redo on the transcript document. The chat
+        # is read-only — there's nothing to undo — and the undo stack
+        # costs memory + per-insertion accounting that bulk re-renders
+        # pay for 400+ times on long conversations. Turning it off is
+        # a measurable speedup for //limit and other full-re-render
+        # paths, zero behavioural change.
+        self.document().setUndoRedoEnabled(False)
         self._apply_default_font()
 
     # ------------------------------------------------------------------
