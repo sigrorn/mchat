@@ -10,15 +10,25 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
+import base64 as _base64
 import html as html_mod
+import re
 from dataclasses import dataclass
 
 import markdown as _md
 
+from mchat import dot_renderer
 from mchat.config import PROVIDER_META
 from mchat.models.message import Message, Provider, Role
 from mchat.models.persona import Persona
 from mchat.ui.chat_export import short_model
+from mchat.ui.dot_markdown_ext import DOT_SOURCE_MAP, DotExtension
+
+# Match the mchat-graph://<hash>.png URL scheme the DOT markdown
+# extension stashes in <img> tags.
+_DOT_IMG_RE = re.compile(
+    r'<img([^>]*?)src="mchat-graph://([0-9a-f]+)\.png"([^>]*)/?>'
+)
 
 
 @dataclass(frozen=True)
@@ -69,7 +79,9 @@ class HtmlExporter:
         self._colors = colors
         self._font_size = font_size
         self._md = _md.Markdown(
-            extensions=["tables", "fenced_code", "sane_lists"]
+            extensions=[
+                "tables", "fenced_code", "sane_lists", DotExtension(),
+            ]
         )
 
     def export(
@@ -131,9 +143,43 @@ class HtmlExporter:
     def _render(self, msg: Message) -> str:
         if msg.role == Role.ASSISTANT and msg.content:
             self._md.reset()
-            return self._md.convert(msg.content)
+            rendered = self._md.convert(msg.content)
+            if "mchat-graph://" in rendered:
+                rendered = self._inline_dot_images(rendered)
+            return rendered
         text = html_mod.escape(msg.content) if msg.content else ""
         return text.replace("\n", "<br>")
+
+    # ------------------------------------------------------------------
+    # DOT graphics inlining (#145)
+    # ------------------------------------------------------------------
+
+    def _inline_dot_images(self, html: str) -> str:
+        """Rewrite every <img src="mchat-graph://<hash>.png"> in
+        ``html`` to a self-contained data:image/png;base64 URI so
+        the exported file has no app-internal URLs left.
+
+        On render failure (graphviz missing, bad DOT, etc.) the
+        whole <img> tag is dropped and the <details> source fallback
+        emitted by dot_markdown_ext carries the graph."""
+
+        def repl(match: re.Match[str]) -> str:
+            digest = match.group(2)
+            source = DOT_SOURCE_MAP.get(digest)
+            if source is None:
+                return ""
+            png = dot_renderer.render_dot(source)
+            if not png:
+                return ""
+            b64 = _base64.b64encode(png).decode("ascii")
+            pre_attrs = match.group(1) or ""
+            post_attrs = match.group(3) or ""
+            return (
+                f'<img{pre_attrs}src="data:image/png;base64,{b64}"'
+                f'{post_attrs}/>'
+            )
+
+        return _DOT_IMG_RE.sub(repl, html)
 
     @staticmethod
     def _label_for(
