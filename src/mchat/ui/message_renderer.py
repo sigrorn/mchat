@@ -250,10 +250,13 @@ class MessageRenderer:
         personas_by_id = self._live_personas_by_id(ordered)
         for m in ordered:
             self._chat._messages.append(m)
-        table_html, provider_colors = self._build_column_table(
+        table_html, provider_colors, base_colors = self._build_column_table(
             ordered, excluded=False, personas_by_id=personas_by_id,
         )
-        self._chat._insert_column_table(table_html, provider_colors)
+        self._chat._insert_column_table(
+            table_html, provider_colors,
+            group_size=len(ordered), base_colors=base_colors,
+        )
 
     # ------------------------------------------------------------------
     # Internals
@@ -313,12 +316,15 @@ class MessageRenderer:
     ) -> None:
         personas_by_id = personas_by_id or {}
         excluded = any(idx in self._chat._excluded_indices for idx in group_indices)
-        table_html, provider_colors = self._build_column_table(
+        table_html, provider_colors, base_colors = self._build_column_table(
             ordered, excluded, personas_by_id=personas_by_id,
         )
         for m in ordered:
             self._chat._messages.append(m)
-        self._chat._insert_column_table(table_html, provider_colors)
+        self._chat._insert_column_table(
+            table_html, provider_colors,
+            group_size=len(ordered), base_colors=base_colors,
+        )
 
     def _build_column_table(
         self,
@@ -326,12 +332,21 @@ class MessageRenderer:
         excluded: bool,
         *,
         personas_by_id: dict[str, Persona] | None = None,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], list[str]]:
+        """Return (table_html, effective_colors, base_colors).
+
+        ``effective_colors`` are what the table is rendered with
+        (shaded if ``excluded=True``). ``base_colors`` are the
+        unshaded originals — ChatWidget stashes them so the partial
+        exclusion-update path (#133) can re-derive shaded vs unshaded
+        versions when the limit flips without having to re-render.
+        """
         personas_by_id = personas_by_id or {}
         md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
         header_cells: list[str] = []
         body_cells: list[str] = []
         provider_colors: list[str] = []
+        base_colors: list[str] = []
         for m in ordered:
             label = resolve_message_label(m, personas_by_id)
             # Use persona colour override if available, else provider colour
@@ -342,6 +357,7 @@ class MessageRenderer:
                 base_color = self._provider_color(m.provider)
             else:
                 base_color = "#d4d4d4"
+            base_colors.append(base_color)
             color = self._chat._shade(base_color) if excluded else base_color
             provider_colors.append(color)
             md.reset()
@@ -360,4 +376,4 @@ class MessageRenderer:
             f'<tr>{"".join(body_cells)}</tr>'
             f'</table>'
         )
-        return table_html, provider_colors
+        return table_html, provider_colors, base_colors

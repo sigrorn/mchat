@@ -89,6 +89,17 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         # Rendered with paler colours.
         self._excluded_indices: set[int] = set()
         self._block_roles: dict[int, tuple] = {}
+        # #133: per-message block ranges so //limit (and other exclusion
+        # flips) can reapply shading without a full re-render. Populated
+        # by _insert_rendered and _insert_column_table. Index-aligned
+        # with _messages.
+        self._message_block_starts: list[int] = []
+        self._message_block_ends: list[int] = []
+        # Column groups share a single document block range across all
+        # their member messages. Keyed by the FIRST message index in the
+        # group, so we don't re-shade a table N times per group.
+        # Each entry holds (start_block, end_block, base_colors, member_indices).
+        self._column_group_info: dict[int, tuple[int, int, list[str], list[int]]] = {}
         self._is_empty = True
         self._md = markdown.Markdown(
             extensions=["tables", "fenced_code", "sane_lists"]
@@ -239,6 +250,9 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self._message_positions.clear()
         self._block_roles.clear()
         self._excluded_indices.clear()
+        self._message_block_starts.clear()
+        self._message_block_ends.clear()
+        self._column_group_info.clear()
         self._is_empty = True
 
     def update_font_size(self, size: int) -> None:

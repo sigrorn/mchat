@@ -91,6 +91,127 @@ class ChatDocumentMixin:
         """Set which message indices are excluded from provider context."""
         self._excluded_indices = set(indices)
 
+    def apply_excluded_indices(self, new_indices: set[int]) -> None:
+        """Update excluded-indices shading in place without re-parsing
+        markdown or re-inserting messages (#133).
+
+        For each message whose exclusion state changed (symmetric diff
+        of old vs new set), reapply the background colour to its stored
+        block range. Column groups share one range across all their
+        members: their effective exclusion is ``any(idx in new_set for
+        idx in members)``, and all cells are re-shaded together using
+        the base colours stored on insert.
+        """
+        old = set(self._excluded_indices)
+        new = set(new_indices)
+        changed = old.symmetric_difference(new)
+        if not changed:
+            self._excluded_indices = new
+            return
+
+        # Write the new state first so _effective_color_for and
+        # _make_block_fmt_for_index pick it up during reapplication.
+        self._excluded_indices = new
+
+        # Collect single-message updates and column-group updates.
+        # For column groups: pick the group once per first_msg_idx.
+        handled_group_starts: set[int] = set()
+        single_indices: set[int] = set()
+
+        for idx in changed:
+            # Is this index a member of a column group?
+            group_first: int | None = None
+            for first, (_s, _e, _bc, members) in self._column_group_info.items():
+                if idx in members:
+                    group_first = first
+                    break
+            if group_first is not None:
+                handled_group_starts.add(group_first)
+            else:
+                single_indices.add(idx)
+
+        # --- Apply single-message updates ---
+        for idx in single_indices:
+            if idx < 0 or idx >= len(self._message_block_starts):
+                continue
+            msg = self._messages[idx]
+            start_block = self._message_block_starts[idx]
+            end_block = self._message_block_ends[idx]
+            block_fmt = self._make_block_fmt_for_index(msg, idx)
+            info = self._role_info(msg)
+            color = QColor(self._effective_color_for(msg, idx))
+            text_color = self._effective_text_color(idx)
+            self._apply_bg_to_range(
+                start_block, end_block, block_fmt, info, color, text_color,
+            )
+
+        # --- Apply column-group updates ---
+        for first in handled_group_starts:
+            self._reshade_column_group(first)
+
+    def _reshade_column_group(self, first_msg_idx: int) -> None:
+        """Reapply per-cell backgrounds for a column group based on the
+        current exclusion state. Used by apply_excluded_indices (#133)
+        when the group's exclusion flips without content change.
+        """
+        info = self._column_group_info.get(first_msg_idx)
+        if info is None:
+            return
+        start_block, end_block, base_colors, members = info
+        # The group is excluded if any member is in the excluded set.
+        excluded = any(idx in self._excluded_indices for idx in members)
+        effective_colors = [
+            self._shade(bc) if excluded else bc for bc in base_colors
+        ]
+
+        doc = self.document()
+        # Walk the range looking for the table.
+        bn = start_block
+        while bn <= end_block:
+            block = doc.findBlockByNumber(bn)
+            if not block.isValid():
+                bn += 1
+                continue
+            bc = QTextCursor(block)
+            table = bc.currentTable()
+            if table:
+                table_last = doc.findBlock(
+                    table.lastCursorPosition().position()
+                ).blockNumber()
+                for row in range(table.rows()):
+                    for col in range(table.columns()):
+                        cell = table.cellAt(row, col)
+                        cell_color = (
+                            QColor(effective_colors[col])
+                            if col < len(effective_colors)
+                            else QColor("#f5f5f5")
+                        )
+                        cell_fmt = cell.format()
+                        cell_fmt.setBackground(cell_color)
+                        cell.setFormat(cell_fmt)
+
+                        block_bg = QTextBlockFormat()
+                        block_bg.setBackground(cell_color)
+                        cell_start = cell.firstCursorPosition().position()
+                        cell_end = cell.lastCursorPosition().position()
+                        blk = doc.findBlock(cell_start)
+                        while blk.isValid() and blk.position() <= cell_end:
+                            blk_cursor = QTextCursor(blk)
+                            blk_cursor.setBlockFormat(block_bg)
+                            blk = blk.next()
+
+                        char_bg = QTextCharFormat()
+                        char_bg.setBackground(cell_color)
+                        cell_cursor = cell.firstCursorPosition()
+                        cell_cursor.setPosition(
+                            cell_end,
+                            QTextCursor.MoveMode.KeepAnchor,
+                        )
+                        cell_cursor.mergeCharFormat(char_bg)
+                bn = table_last + 1
+            else:
+                bn += 1
+
     def _make_block_fmt_for_index(
         self, message: Message, index: int
     ) -> QTextBlockFormat:
@@ -214,14 +335,36 @@ class ChatDocumentMixin:
         end_block = cursor.block().blockNumber()
         self._apply_bg_to_range(start_block, end_block, block_fmt, info, color, text_color)
 
+        # #133: track this message's block range so partial-update
+        # paths (apply_excluded_indices) can locate it without a
+        # full re-render.
+        self._message_block_starts.append(start_block)
+        self._message_block_ends.append(end_block)
+
     # ------------------------------------------------------------------
     # Column table (multi-provider response grid)
     # ------------------------------------------------------------------
 
     def _insert_column_table(
-        self, table_html: str, provider_colors: list[str]
+        self,
+        table_html: str,
+        provider_colors: list[str],
+        group_size: int | None = None,
+        base_colors: list[str] | None = None,
     ) -> None:
-        """Insert a pre-built HTML table for column-mode multi-provider responses."""
+        """Insert a pre-built HTML table for column-mode multi-provider responses.
+
+        ``group_size`` tells the widget how many messages this table
+        represents. ``base_colors`` are the unshaded originals per
+        column — stored so ``apply_excluded_indices`` (#133) can
+        reapply shaded vs unshaded backgrounds on exclusion flip
+        without re-parsing markdown.
+        """
+        if group_size is None:
+            group_size = len(provider_colors)
+        if base_colors is None:
+            base_colors = list(provider_colors)
+
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
@@ -308,6 +451,20 @@ class ChatDocumentMixin:
                 bc.setBlockFormat(fmt)
                 bn += 1
 
+        # #133: record the shared block range for all group members.
+        # The group's message indices are the last ``group_size`` entries
+        # of self._messages (the caller appends them before calling here).
+        first_msg_idx = len(self._messages) - group_size
+        if first_msg_idx < 0:
+            first_msg_idx = 0
+        member_indices = list(range(first_msg_idx, len(self._messages)))
+        for _ in member_indices:
+            self._message_block_starts.append(start_block)
+            self._message_block_ends.append(end_block)
+        self._column_group_info[first_msg_idx] = (
+            start_block, end_block, list(base_colors), member_indices,
+        )
+
         self._scroll_to_bottom()
 
     # ------------------------------------------------------------------
@@ -328,6 +485,10 @@ class ChatDocumentMixin:
         self._messages.clear()
         self._message_positions.clear()
         self._block_roles.clear()
+        # #133: per-message block ranges must also reset on rebuild
+        self._message_block_starts.clear()
+        self._message_block_ends.clear()
+        self._column_group_info.clear()
         self._is_empty = True
         self.setUpdatesEnabled(False)
         try:

@@ -15,6 +15,21 @@ from mchat.ui.commands.host import CommandHost
 _PROVIDER_DISPLAY = {p: PROVIDER_META[p.value]["display"] for p in Provider}
 
 
+def _refresh_limit_shading(host: CommandHost) -> None:
+    """#133: recompute excluded indices and apply them via the chat
+    widget's partial-update path, avoiding a full re-render. Called
+    after handle_limit changes the conversation's limit_mark.
+    """
+    from mchat.ui.context_builder import compute_excluded_indices
+    configured = (
+        set(host._router._providers.keys()) if host._router else set()
+    )
+    excluded = compute_excluded_indices(
+        host._current_conv, host._db, configured,
+    )
+    host._chat.apply_excluded_indices(excluded)
+
+
 def handle_limit(tag: str, host: CommandHost) -> bool:
     if not host._current_conv:
         host._on_new_chat()
@@ -24,7 +39,7 @@ def handle_limit(tag: str, host: CommandHost) -> bool:
     if tag.upper() == "ALL":
         host._current_conv.limit_mark = None
         host._db.set_conversation_limit(host._current_conv.id, None)
-        host._display_messages(host._current_conv.messages)
+        _refresh_limit_shading(host)
         host._chat.add_note("limit removed — full chat history will be sent")
         return True
     if tag.lower() == "last":
@@ -42,7 +57,7 @@ def handle_limit(tag: str, host: CommandHost) -> bool:
         host._db.set_mark(host._current_conv.id, mark_name, last_user_idx)
         host._current_conv.limit_mark = mark_name
         host._db.set_conversation_limit(host._current_conv.id, mark_name)
-        host._display_messages(host._current_conv.messages)
+        _refresh_limit_shading(host)
         host._chat.add_note(
             f"limit set to last request (message {msg_num}) — earlier context will not be sent"
         )
@@ -63,7 +78,7 @@ def handle_limit(tag: str, host: CommandHost) -> bool:
         host._db.set_mark(host._current_conv.id, mark_name, idx - 1)
         host._current_conv.limit_mark = mark_name
         host._db.set_conversation_limit(host._current_conv.id, mark_name)
-        host._display_messages(messages)
+        _refresh_limit_shading(host)
         host._chat.add_note(
             f"limit set to message {idx} — earlier context will not be sent"
         )
