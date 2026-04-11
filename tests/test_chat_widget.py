@@ -202,3 +202,12 @@ class TestPersonaColorOverride:
 
         # Still rendered in the persona's colour
         assert chat._color_for(msg) == "#333333"
+
+
+class TestUndoRedoDisabled:
+    """#132 — undo/redo must be disabled on the chat document to
+    avoid allocating undo records on every insertion. The chat is a
+    read-only transcript; there is nothing to undo."""
+
+    def test_undo_redo_disabled_on_init(self, chat):
+        assert chat.document().isUndoRedoEnabled() is False
