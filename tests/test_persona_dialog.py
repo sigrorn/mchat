@@ -138,6 +138,43 @@ class TestCreatePersona:
         with pytest.raises(sqlite3.IntegrityError):
             dialog.create_persona(provider=Provider.CLAUDE, name="Dup")
 
+    def test_create_rejects_whitespace_name(self, dialog, db, conv):
+        """#140: create_persona validates the name against the new
+        alphabet before inserting. Whitespace is forbidden."""
+        with pytest.raises(ValueError, match=r"whitespace"):
+            dialog.create_persona(provider=Provider.CLAUDE, name="Claude Bot")
+        # No persona row written
+        assert len(db.list_personas(conv.id)) == 0
+
+    def test_create_rejects_reserved_name(self, dialog, db, conv):
+        """#140: reserved provider shorthands and @all/@others cannot
+        be used for new personas. Grandfathered personas in the DB
+        still work (not re-validated)."""
+        for reserved in ("claude", "gpt", "all", "others"):
+            with pytest.raises(ValueError, match=r"reserved"):
+                dialog.create_persona(
+                    provider=Provider.CLAUDE, name=reserved,
+                )
+        assert len(db.list_personas(conv.id)) == 0
+
+    def test_create_rejects_at_sigil(self, dialog, db, conv):
+        """#140: '@' is reserved for targeting, can't be in a name."""
+        with pytest.raises(ValueError):
+            dialog.create_persona(
+                provider=Provider.CLAUDE, name="@partner",
+            )
+        assert len(db.list_personas(conv.id)) == 0
+
+    def test_create_accepts_hyphen_and_underscore(self, dialog, db, conv):
+        """Hyphen and underscore are in the allowed alphabet."""
+        dialog.create_persona(
+            provider=Provider.CLAUDE, name="italian-tutor",
+        )
+        dialog.create_persona(
+            provider=Provider.CLAUDE, name="claude_bot",
+        )
+        assert len(db.list_personas(conv.id)) == 2
+
 
 class TestEditPersona:
     def test_edit_updates_all_override_fields(self, dialog, db, conv):
