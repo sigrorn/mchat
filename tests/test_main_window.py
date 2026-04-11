@@ -283,6 +283,43 @@ class TestConversationSwitching:
         assert main_window._db.get_conversation(cid).title == "renamed title"
 
 
+class TestSpendLabelRestore:
+    """#141 — switching back into a conversation that already has spend
+    recorded must show the correct per-persona amounts in the toolbar
+    immediately, not $0.00000 until the next send completes."""
+
+    def test_spend_labels_populated_on_conversation_switch(self, main_window):
+        from mchat.models.persona import Persona, generate_persona_id
+
+        # Create two conversations; the first gets a persona + stored spend.
+        conv1 = main_window._db.create_conversation("first")
+        p = Persona(
+            conversation_id=conv1.id,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name="Partner",
+            name_slug="partner",
+        )
+        main_window._db.create_persona(p)
+        main_window._db.add_conversation_spend(
+            conv1.id, p.id, 0.01234, estimated=False
+        )
+
+        conv2 = main_window._db.create_conversation("second")
+
+        # Land on conv2 first so the toolbar holds conv2's (empty) rows.
+        main_window._on_conversation_selected(conv2.id)
+        # Then switch back to conv1 — the bug: the label reads "$0.00000".
+        main_window._on_conversation_selected(conv1.id)
+
+        label = main_window._provider_panel._spend_labels[p.id]
+        assert label.text() != "$0.00000", (
+            "Spend label should reflect the stored amount immediately "
+            "after switching back into a conversation; instead it shows "
+            f"{label.text()!r}."
+        )
+
+
 class TestEmptySelectionSend:
     """Stage 3A.4 — sending with zero targets must produce a clear
     user-facing message, not a silent no-op or crash."""
