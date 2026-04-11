@@ -323,6 +323,240 @@ class TestSchemaVersioning:
             db.close()
 
 
+class TestMigration4RewritePrefixes:
+    """#140 — migration 4 rewrites historical message content from the
+    old '<word>,<ws>' grammar to the new '@<word> <ws>' grammar, so
+    context-builder's strip path keeps working cleanly. Persona rows
+    are NOT touched (grandfathering decision)."""
+
+    def _seed_v3_db_with_content(
+        self, tmp_path, conv_content_pairs, persona_rows=None,
+    ):
+        """Create a raw SQLite DB at schema version 3, seed one
+        conversation per entry with the given message contents and
+        (optionally) persona rows, then return the path for
+        upgrading via Database().
+
+        ``conv_content_pairs`` is a list of (conv_id_hint, [message
+        contents]) tuples. ``persona_rows`` is a list of
+        (conv_id_hint, [(name, slug, provider_value), ...]) tuples
+        — the migration should NOT rewrite these.
+        """
+        import sqlite3
+        from datetime import datetime, timezone
+
+        path = tmp_path / "v3.db"
+        raw = sqlite3.connect(str(path))
+        # Recreate the schema up to and including V3.
+        # Rather than hand-copying the full schema, let a regular
+        # Database() instance build it and then manually roll back
+        # to V3 by setting the pragma.
+        raw.close()
+        from mchat.db import Database
+        temp_db = Database(db_path=path)
+        temp_db.close()
+
+        # Reopen raw and roll back to V3.
+        raw = sqlite3.connect(str(path))
+        raw.execute("PRAGMA user_version = 3")
+
+        now = datetime.now(timezone.utc).isoformat()
+        conv_ids: dict = {}
+        for conv_hint, contents in conv_content_pairs:
+            cur = raw.execute(
+                "INSERT INTO conversations (title, system_prompt, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                (f"conv-{conv_hint}", "", now, now),
+            )
+            conv_ids[conv_hint] = cur.lastrowid
+            for content in contents:
+                raw.execute(
+                    "INSERT INTO messages (conversation_id, role, content, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (conv_ids[conv_hint], "user", content, now),
+                )
+
+        if persona_rows:
+            for conv_hint, rows in persona_rows:
+                cid = conv_ids[conv_hint]
+                for name, slug, provider_value in rows:
+                    raw.execute(
+                        "INSERT INTO personas (conversation_id, id, provider, "
+                        "name, name_slug, sort_order) VALUES (?, ?, ?, ?, ?, 0)",
+                        (
+                            cid,
+                            f"p_test_{slug}",
+                            provider_value,
+                            name,
+                            slug,
+                        ),
+                    )
+
+        raw.commit()
+        raw.close()
+        return path, conv_ids
+
+    def _get_contents(self, db_path, conv_id):
+        import sqlite3
+        raw = sqlite3.connect(str(db_path))
+        rows = raw.execute(
+            "SELECT content FROM messages WHERE conversation_id = ? "
+            "ORDER BY id",
+            (conv_id,),
+        ).fetchall()
+        raw.close()
+        return [r[0] for r in rows]
+
+    def test_migration_rewrites_provider_prefix(self, tmp_path):
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["claude, hello"])],
+        )
+        # Trigger migration 4 by opening via Database()
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@claude hello"]
+        finally:
+            db.close()
+
+    def test_migration_rewrites_multi_token_prefix(self, tmp_path):
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["claude, gpt, compare these"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@claude @gpt compare these"]
+        finally:
+            db.close()
+
+    def test_migration_rewrites_flipped_to_others(self, tmp_path):
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["flipped, continue"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@others continue"]
+        finally:
+            db.close()
+
+    def test_migration_rewrites_all_prefix(self, tmp_path):
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["all, hello everyone"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@all hello everyone"]
+        finally:
+            db.close()
+
+    def test_migration_rewrites_persona_name_prefix(self, tmp_path):
+        """Conversation has an explicit persona 'partner'. A message
+        like 'partner, ciao' should rewrite to '@partner ciao'."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path,
+            [("a", ["partner, ciao"])],
+            persona_rows=[("a", [("Partner", "partner", "claude")])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@partner ciao"]
+        finally:
+            db.close()
+
+    def test_migration_leaves_natural_english_unchanged(self, tmp_path):
+        """'ok, let's continue' does NOT start with a recognised token.
+        The migration must leave it alone — exactly the false-positive
+        immunity the new grammar buys us."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["ok, let's continue"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["ok, let's continue"]
+        finally:
+            db.close()
+
+    def test_migration_is_idempotent(self, tmp_path):
+        """Running migration 4 twice yields the same result — the
+        second run finds no '<word>,<ws>' prefixes to rewrite because
+        the messages already start with '@'."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["claude, hello"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            after_first = self._get_contents(path, convs["a"])
+        finally:
+            db.close()
+        # Simulate a second run: bump the schema back and reopen.
+        import sqlite3
+        raw = sqlite3.connect(str(path))
+        raw.execute("PRAGMA user_version = 3")
+        raw.commit()
+        raw.close()
+        db = Database(db_path=path)
+        try:
+            after_second = self._get_contents(path, convs["a"])
+            assert after_first == after_second == ["@claude hello"]
+        finally:
+            db.close()
+
+    def test_migration_does_not_touch_persona_rows(self, tmp_path):
+        """Grandfathering: persona rows with whitespace-containing
+        names, reserved names, etc. are NOT rewritten. Only message
+        content is touched."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path,
+            [("a", ["partner, hi"])],
+            persona_rows=[
+                ("a", [
+                    ("Partner", "partner", "claude"),
+                    ("Claude Bot", "claude_bot", "openai"),
+                    ("claude", "claude", "openai"),
+                ]),
+            ],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            personas = db.list_personas(convs["a"])
+            names = sorted(p.name for p in personas)
+            assert names == sorted(["Partner", "Claude Bot", "claude"])
+            # And their slugs are unchanged
+            slugs = {p.name for p in personas}
+            assert "Claude Bot" in slugs  # still has whitespace
+            assert "claude" in slugs  # still a reserved name
+        finally:
+            db.close()
+
+    def test_migration_leaves_unknown_prefix_alone(self, tmp_path):
+        """A 'word, text' where 'word' is not a recognised token
+        (not a provider shorthand, not all/flipped, not an active
+        persona slug in this conv) must be left alone."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["nobody, hi there"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["nobody, hi there"]
+        finally:
+            db.close()
+
+
 class TestVisibility:
     def test_addressed_to_roundtrip(self, db):
         conv = db.create_conversation()
