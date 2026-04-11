@@ -248,6 +248,20 @@ class SendController:
             QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(text))
             return
 
+        # #140 Phase 7: '@claude //retry' is ambiguous. If the text
+        # after consuming @-targets starts with '//', the user
+        # probably meant a command — but commands don't take
+        # targets. Reject with a clear error instead of sending
+        # '//retry' to claude as literal message text.
+        if targets and cleaned_text.lstrip().startswith("//"):
+            host._chat.add_note(
+                "Error: cannot combine @target with // command. "
+                "Send '//<command>' alone, or drop the // to send as text."
+            )
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: host._input._text_edit.setPlainText(text))
+            return
+
         # Stage 3A.4: empty selection with no prefix → no targets.
         # Show a user-facing hint instead of silently doing nothing.
         if not targets and cleaned_text.strip() == text.strip():
