@@ -79,6 +79,49 @@ class TestDatabase:
         convs = db.list_conversations()
         assert convs[0].title == "New Title"
 
+    def test_update_message_content_rewrites_text_and_mode(self, db):
+        """#130 — update_message_content replaces content (and optional
+        display_mode) in place without changing message id or position."""
+        conv = db.create_conversation()
+        m1 = Message(
+            role=Role.ASSISTANT, content="[Error from claude: overloaded]",
+            provider=Provider.CLAUDE, persona_id="p_a",
+            conversation_id=conv.id, display_mode=None,
+        )
+        m2 = Message(
+            role=Role.ASSISTANT, content="original text",
+            provider=Provider.OPENAI, persona_id="p_b",
+            conversation_id=conv.id, display_mode="cols",
+        )
+        db.add_message(m1)
+        db.add_message(m2)
+        m1_id = db.get_messages(conv.id)[0].id
+
+        db.update_message_content(
+            m1_id, "actual response text", display_mode="cols",
+        )
+        msgs = db.get_messages(conv.id)
+        assert msgs[0].id == m1_id
+        assert msgs[0].content == "actual response text"
+        assert msgs[0].display_mode == "cols"
+        # Second message unchanged
+        assert msgs[1].content == "original text"
+
+    def test_update_message_content_without_mode(self, db):
+        """display_mode left alone when update_message_content is called
+        with display_mode=None (default)."""
+        conv = db.create_conversation()
+        m = Message(
+            role=Role.ASSISTANT, content="old", provider=Provider.CLAUDE,
+            conversation_id=conv.id, display_mode="lines",
+        )
+        db.add_message(m)
+        mid = db.get_messages(conv.id)[0].id
+        db.update_message_content(mid, "new")
+        msgs = db.get_messages(conv.id)
+        assert msgs[0].content == "new"
+        assert msgs[0].display_mode == "lines"
+
     def test_cascade_delete(self, db):
         conv = db.create_conversation()
         db.add_message(Message(role=Role.USER, content="test", conversation_id=conv.id))

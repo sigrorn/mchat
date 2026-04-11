@@ -1419,3 +1419,151 @@ class TestTitleWorkerRobustness:
 
         assert fake_worker.quit.called or fake_worker.requestInterruption.called
         assert fake_worker.wait.called
+
+
+class TestRetryInPlaceReplacement:
+    """#130 — //retry updates the original error message's content in
+    place instead of hiding it and appending a new message."""
+
+    def test_retry_updates_error_message_content(self, qtbot, main_window):
+        """After a successful retry, the error message row's content is
+        replaced with the successful response text (same id, same position)."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        conv = main_window._current_conv
+
+        # Create a persona to retry
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=pid,
+            provider=Provider.CLAUDE, name="BotA", name_slug="bota",
+        ))
+        target = PersonaTarget(persona_id=pid, provider=Provider.CLAUDE)
+
+        # Seed a user message and an error "assistant" message in the DB
+        user_msg = Message(
+            role=Role.USER, content="what is 2+2?",
+            conversation_id=conv_id,
+        )
+        main_window._db.add_message(user_msg)
+        conv.messages.append(user_msg)
+
+        error_msg = Message(
+            role=Role.ASSISTANT,
+            content="[Error from claude: overloaded]",
+            provider=Provider.CLAUDE,
+            persona_id=pid,
+            conversation_id=conv_id,
+            display_mode=None,
+        )
+        main_window._db.add_message(error_msg)
+        conv.messages.append(error_msg)
+        # Re-fetch to get the real id
+        conv.messages = main_window._db.get_messages(conv_id)
+        error_id = next(
+            m.id for m in conv.messages
+            if m.content.startswith("[Error from")
+        )
+
+        # Seed SendController retry stash as if _on_error had fired
+        send = main_window._send
+        send._retry_targets[pid] = target
+        send._retry_contexts[pid] = []  # empty context ok for fake provider
+        send._retry_models[pid] = "fake-model"
+        send._retry_labels[pid] = "BotA"
+        send._retry_failed[pid] = ("overloaded", True)
+        send._retry_error_msg_ids[pid] = error_id
+
+        # Fire //retry
+        main_window._on_message_submitted("//retry")
+
+        # Wait for the fake worker to complete
+        qtbot.waitUntil(
+            lambda: len(main_window._send._multi_workers) == 0,
+            timeout=5000,
+        )
+
+        # The error message row MUST still exist with the same id,
+        # but with updated content (the fake provider yields "ok").
+        msgs = main_window._db.get_messages(conv_id)
+        retried = [m for m in msgs if m.id == error_id]
+        assert len(retried) == 1, (
+            "error message row should still exist (in-place update)"
+        )
+        assert "ok" in retried[0].content.lower()
+        assert not retried[0].content.startswith("[Error from"), (
+            f"content should no longer be an error string, got {retried[0].content!r}"
+        )
+
+    def test_retry_updates_display_mode_to_match_siblings(
+        self, qtbot, main_window,
+    ):
+        """When siblings have display_mode='cols', the retried message's
+        display_mode must also become 'cols' so the renderer groups them."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        conv = main_window._current_conv
+
+        # Two personas
+        p_a_id = generate_persona_id()
+        p_b_id = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=p_a_id,
+            provider=Provider.CLAUDE, name="A", name_slug="a",
+        ))
+        main_window._db.create_persona(Persona(
+            conversation_id=conv_id, id=p_b_id,
+            provider=Provider.OPENAI, name="B", name_slug="b",
+        ))
+
+        user_msg = Message(
+            role=Role.USER, content="q", conversation_id=conv_id,
+        )
+        main_window._db.add_message(user_msg)
+        conv.messages.append(user_msg)
+
+        # A errored (display_mode=None), B succeeded (display_mode='cols')
+        err = Message(
+            role=Role.ASSISTANT, content="[Error from claude: x]",
+            provider=Provider.CLAUDE, persona_id=p_a_id,
+            conversation_id=conv_id, display_mode=None,
+        )
+        success = Message(
+            role=Role.ASSISTANT, content="b-answer",
+            provider=Provider.OPENAI, persona_id=p_b_id,
+            conversation_id=conv_id, display_mode="cols",
+        )
+        main_window._db.add_message(err)
+        main_window._db.add_message(success)
+        conv.messages = main_window._db.get_messages(conv_id)
+        err_id = next(m.id for m in conv.messages if m.persona_id == p_a_id)
+
+        # Enable column mode so the retry picks "cols"
+        main_window._column_mode = True
+
+        send = main_window._send
+        target = PersonaTarget(persona_id=p_a_id, provider=Provider.CLAUDE)
+        send._retry_targets[p_a_id] = target
+        send._retry_contexts[p_a_id] = []
+        send._retry_models[p_a_id] = "fake-model"
+        send._retry_labels[p_a_id] = "A"
+        send._retry_failed[p_a_id] = ("x", True)
+        send._retry_error_msg_ids[p_a_id] = err_id
+
+        main_window._on_message_submitted("//retry")
+        qtbot.waitUntil(
+            lambda: len(main_window._send._multi_workers) == 0,
+            timeout=5000,
+        )
+
+        msgs = main_window._db.get_messages(conv_id)
+        retried = next(m for m in msgs if m.id == err_id)
+        assert retried.display_mode == "cols", (
+            f"retried message should adopt 'cols' display_mode, got {retried.display_mode!r}"
+        )
