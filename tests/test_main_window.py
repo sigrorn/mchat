@@ -1837,3 +1837,53 @@ class TestEditReplayTombstonedPersona:
             "unknown" in n.lower() or "error" in n.lower()
             for n in notes
         ), f"expected an error note, got: {notes}"
+
+
+class TestResolveErrorRestoresInput:
+    """#140 Phase 6: an unknown @<token> target must show a clear
+    error note AND put the original text back into the input box
+    so the user can correct the typo without retyping."""
+
+    def test_unknown_at_token_shows_error(self, main_window):
+        """An unknown @token raises ResolveError; the handler turns
+        it into a user-facing note."""
+        main_window._on_new_chat()
+        from mchat.models.persona import Persona, generate_persona_id
+        pid = generate_persona_id()
+        main_window._db.create_persona(Persona(
+            conversation_id=main_window._current_conv.id, id=pid,
+            provider=Provider.CLAUDE, name="partner", name_slug="partner",
+        ))
+
+        notes: list[str] = []
+        original_add_note = main_window._chat.add_note
+        main_window._chat.add_note = lambda text: (
+            notes.append(text), original_add_note(text)
+        )[1]
+
+        main_window._on_message_submitted("@clauebot hello")
+
+        main_window._chat.add_note = original_add_note
+        assert any(
+            "error" in n.lower() or "unknown" in n.lower()
+            for n in notes
+        ), f"expected error note, got: {notes}"
+
+    def test_unknown_at_token_restores_text_to_input(
+        self, qtbot, main_window,
+    ):
+        """After a ResolveError, the offending text is put back
+        into the input widget via a deferred setPlainText."""
+        from PySide6.QtCore import QCoreApplication
+
+        main_window._on_new_chat()
+        main_window._on_message_submitted("@nobody hello world")
+        # Flush the deferred QTimer.singleShot that schedules the
+        # input restoration.
+        QCoreApplication.processEvents()
+
+        text_now = main_window._input._text_edit.toPlainText()
+        assert text_now == "@nobody hello world", (
+            f"expected input to be restored to '@nobody hello world', "
+            f"got {text_now!r}"
+        )
