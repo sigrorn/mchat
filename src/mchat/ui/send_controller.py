@@ -767,19 +767,37 @@ class SendController:
         worker = self._multi_workers.pop(target.persona_id, None)
         transient = worker.last_error_transient if worker else False
 
-        current = svc.session.current
+        # #134: mirror the #122 fix from _on_complete. If the user
+        # switched conversations since this send started, persist the
+        # error message against the ORIGINAL conversation (via
+        # _seq_conv_id) and skip rendering into the now-current chat.
+        # The retry stash still gets the error row's id so //retry
+        # can find it when the user switches back.
+        current_conv = svc.session.current
+        conv_switched = (
+            self._seq_conv_id is not None
+            and (current_conv is None or current_conv.id != self._seq_conv_id)
+        )
+        conv_id_for_persist = (
+            self._seq_conv_id if self._seq_conv_id is not None
+            else (current_conv.id if current_conv else None)
+        )
+
         error_msg = Message(
             role=Role.ASSISTANT,
             content=f"[Error from {target.provider.value}: {error}]",
             provider=target.provider,
             persona_id=target.persona_id,
-            conversation_id=current.id if current else None,
+            conversation_id=conv_id_for_persist,
         )
         svc.db.add_message(error_msg)
-        svc.session.append_message(error_msg)
-        host._chat.add_message(error_msg)
+        if not conv_switched:
+            # Append + render only when the original conv is still visible.
+            svc.session.append_message(error_msg)
+            host._chat.add_message(error_msg)
 
-        # Stash for //retry (keyed by persona_id).
+        # Stash for //retry (keyed by persona_id). Always populated so
+        # //retry works after switching back.
         self._retry_failed[target.persona_id] = (error, transient)
         self._retry_error_msg_ids[target.persona_id] = error_msg.id
 
@@ -788,9 +806,10 @@ class SendController:
             for t in self._seq_queue:
                 host._provider_panel.apply_combo_style(t.persona_id)
             self._seq_queue.clear()
-            host._input.set_enabled(True)
-            host._update_input_placeholder()
-            host._update_input_color()
+            if not conv_switched:
+                host._input.set_enabled(True)
+                host._update_input_placeholder()
+                host._update_input_color()
 
     # ------------------------------------------------------------------
     # #125: LLM-based auto-titling
