@@ -481,6 +481,115 @@ New instructions
         assert alpha.model_override == "claude-opus-4"
         assert alpha.color_override == "#112233"
 
+    def test_import_aborts_on_invalid_name_before_touching_db(
+        self, dialog, db, conv,
+    ):
+        """#140: import pre-flight must validate every parsed persona
+        name BEFORE tombstoning existing rows or creating new ones.
+        If any name is invalid, the import is a no-op — the DB state
+        is unchanged."""
+        dialog.create_persona(provider=Provider.CLAUDE, name="Original")
+        md = """# Personas
+
+## GoodOne
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+first
+
+---
+
+## Bad Name
+- Provider: openai
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+second
+
+---
+
+## claude
+- Provider: gemini
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+third
+"""
+        from mchat.ui.persona_dialog import PersonaImportError
+        with pytest.raises(PersonaImportError) as exc:
+            dialog.import_personas_md(md)
+        # The error lists ALL offending rows at once, not just the first
+        msg = str(exc.value)
+        assert "Bad Name" in msg
+        assert "claude" in msg
+        # DB is unchanged: the original persona is still active, no
+        # new personas, no tombstones beyond what was already there.
+        active = db.list_personas(conv.id)
+        assert len(active) == 1
+        assert active[0].name == "Original"
+
+    def test_import_aborts_on_case_collision_within_file(
+        self, dialog, db, conv,
+    ):
+        """#140: two personas in the SAME import file that case-collide
+        (e.g. 'Partner' and 'partner') must be caught in the pre-flight,
+        not at create_persona time (which would have left the first one
+        inserted and the second one failing)."""
+        md = """# Personas
+
+## Partner
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+first
+
+---
+
+## partner
+- Provider: openai
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+second
+"""
+        from mchat.ui.persona_dialog import PersonaImportError
+        with pytest.raises(PersonaImportError) as exc:
+            dialog.import_personas_md(md)
+        msg = str(exc.value).lower()
+        assert "collision" in msg or "duplicate" in msg
+        assert len(db.list_personas(conv.id)) == 0
+
+    def test_import_aborts_on_whitespace_name(self, dialog, db, conv):
+        """A whitespace-containing name in the import file is caught
+        by the pre-flight validator."""
+        md = """# Personas
+
+## Italian Tutor
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+translate
+"""
+        from mchat.ui.persona_dialog import PersonaImportError
+        with pytest.raises(PersonaImportError):
+            dialog.import_personas_md(md)
+        assert len(db.list_personas(conv.id)) == 0
+
 
 class TestModelOverrideCombo:
     """#81 — per-persona model override via a combo in PersonaDialog.
