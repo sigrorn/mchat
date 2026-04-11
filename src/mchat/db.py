@@ -500,6 +500,35 @@ class Database:
         )
         self._conn.commit()
 
+    def update_message_content(
+        self,
+        msg_id: int,
+        content: str,
+        display_mode: str | None = None,
+    ) -> None:
+        """Replace a message's content (and optionally its display_mode)
+        in place, without touching its id or position.
+
+        Used by //retry (#130) so a successful retry replaces the
+        original error message's text in the same transcript slot
+        instead of appending a new message.
+
+        Passing ``display_mode=None`` (default) leaves the existing
+        display_mode untouched; pass an explicit string (e.g. ``"cols"``)
+        to update it alongside the content.
+        """
+        if display_mode is None:
+            self._conn.execute(
+                "UPDATE messages SET content = ? WHERE id = ?",
+                (content, msg_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE messages SET content = ?, display_mode = ? WHERE id = ?",
+                (content, display_mode, msg_id),
+            )
+        self._conn.commit()
+
     def hide_messages(self, msg_ids: list[int]) -> None:
         """Mark messages as hidden."""
         if not msg_ids:

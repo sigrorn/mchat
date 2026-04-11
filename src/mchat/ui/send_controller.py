@@ -126,6 +126,11 @@ class SendController:
         self._retry_models: dict[str, str] = {}
         self._retry_failed: dict[str, tuple[str, bool]] = {}
         self._retry_error_msg_ids: dict[str, int | None] = {}
+        # #130: persona_id → error msg id to update on successful retry.
+        # Populated by handle_retry before calling send_multi; consumed
+        # by _on_complete to branch to in-place-update instead of
+        # appending a new assistant message.
+        self._retry_in_progress_ids: dict[str, int] = {}
         # Display labels (persona name or provider display name) for
         # the retry command's user-facing notes, so the retry handler
         # doesn't need to re-query the DB.
@@ -142,6 +147,7 @@ class SendController:
         self._retry_failed.clear()
         self._retry_error_msg_ids.clear()
         self._retry_labels.clear()
+        self._retry_in_progress_ids.clear()
 
     @property
     def retry_contexts(self) -> dict[str, list[Message]]:
@@ -627,6 +633,18 @@ class SendController:
         if not self._conv_switched:
             host._update_spend_labels()
 
+        # #130: in-place retry replacement. If this persona was retried,
+        # update the original error message's content (and display_mode)
+        # rather than appending a new row. The retried message keeps its
+        # id, position in the DB, and sits in the correct slot within
+        # its sibling group on re-render.
+        retry_msg_id = self._retry_in_progress_ids.pop(target.persona_id, None)
+        if retry_msg_id is not None:
+            self._complete_retry_in_place(
+                target, model, full_text, retry_msg_id,
+            )
+            return
+
         # Buffer and render once every worker has finished.
         label = self._retry_labels.get(
             target.persona_id,
@@ -683,6 +701,64 @@ class SendController:
                 )
             # If in edit mode, advance the replay queue
             self._advance_edit_replay()
+
+    def _complete_retry_in_place(
+        self,
+        target: PersonaTarget,
+        model: str,
+        full_text: str,
+        msg_id: int,
+    ) -> None:
+        """#130: handle a successful //retry by updating the existing
+        error message's content (and display_mode) in place.
+
+        The message keeps its id, its position in the DB, and its
+        persona_id. A full re-render picks up the new content so the
+        renderer re-groups it with its siblings (e.g. into the same
+        column table) based on the updated display_mode.
+        """
+        host = self._host
+        svc = self._services
+
+        # Determine the target display_mode from current layout.
+        mode = "seq" if self._sequential_mode else (
+            "cols" if host._column_mode else "lines"
+        )
+
+        # Update the DB row in place.
+        cleaned = strip_echoed_heading(full_text)
+        svc.db.update_message_content(msg_id, cleaned, display_mode=mode)
+
+        # Update the in-memory conv.messages copy too (so the re-render
+        # reads the new content without a round-trip to SQLite).
+        conv = svc.session.current
+        if conv is not None and not self._conv_switched:
+            for i, m in enumerate(conv.messages):
+                if m.id == msg_id:
+                    conv.messages[i] = Message(
+                        role=m.role,
+                        content=cleaned,
+                        provider=m.provider,
+                        model=model,
+                        persona_id=m.persona_id,
+                        conversation_id=m.conversation_id,
+                        display_mode=mode,
+                        id=m.id,
+                        pinned=m.pinned,
+                        pin_target=m.pin_target,
+                        addressed_to=m.addressed_to,
+                    )
+                    break
+
+            # Re-render the full transcript so grouping picks up the
+            # updated message alongside its siblings.
+            host._display_messages(conv.messages)
+
+        # Re-enable the input if no more workers are outstanding.
+        if not self._multi_workers:
+            host._input.set_enabled(True)
+            host._update_input_placeholder()
+            host._update_input_color()
 
     def _on_error(self, target: PersonaTarget, error: str) -> None:
         host = self._host
