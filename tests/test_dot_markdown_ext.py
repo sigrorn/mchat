@@ -49,8 +49,12 @@ class TestFenceRewrite:
     def test_source_is_preserved_in_details_block(self):
         html = _convert(SIMPLE_MD)
         # The DOT source needs to survive end-to-end so the user can
-        # read what was requested even if the image fails.
-        assert SIMPLE_DOT in html
+        # read what was requested even if the image fails. HTML
+        # escaping rewrites `->` as `-&gt;`, so assert on the
+        # escaped form — both directions must be usable in practice.
+        import html as _h
+
+        assert _h.escape(SIMPLE_DOT) in html
 
     def test_intro_and_outro_still_rendered(self):
         html = _convert(SIMPLE_MD)
