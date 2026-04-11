@@ -51,6 +51,12 @@ from mchat.ui.persona_resolution import (
 )
 
 
+class PersonaImportError(ValueError):
+    """Raised when a .md persona import file fails pre-flight
+    validation. Message lists every offending row in one go so the
+    user can fix them all at once (#140)."""
+
+
 class PersonaDialog(QDialog):
     """Modal persona editor for one conversation.
 
@@ -201,22 +207,28 @@ class PersonaDialog(QDialog):
 
     def import_personas_md(self, md: str) -> None:
         """Parse a .md string and replace all active personas with the
-        imported ones. Existing personas are tombstoned (not deleted)."""
-        import re
-        # Tombstone all existing personas
-        for p in self.list_items():
-            self.remove_persona(p.id)
+        imported ones. Existing personas are tombstoned (not deleted).
 
-        # Parse sections separated by --- or ## headers
-        import_idx = 0
+        #140: two-pass import. The first pass parses every section
+        and validates every name against ``validate_persona_name``
+        plus a case-insensitive duplicate check within the file.
+        If anything fails, raises ``PersonaImportError`` with a
+        consolidated message listing every offending row — and the
+        DB is untouched. Only when the whole file passes does the
+        destructive second pass (tombstone existing + create new)
+        run.
+        """
+        import re
+
+        # --- Pass 1: parse + validate. Nothing written yet. ---
+        parsed: list[dict] = []
+        errors: list[str] = []
         sections = re.split(r"\n---\n|\n(?=## )", md)
         for section in sections:
             section = section.strip()
             if not section or section.startswith("# Personas"):
-                # Skip the top-level header
                 if "## " not in section:
                     continue
-                # Header might be on same block as first persona
                 idx = section.index("## ")
                 section = section[idx:]
 
@@ -234,17 +246,26 @@ class PersonaDialog(QDialog):
                     return None if val == "(none)" else val
                 return None
 
+            # Validate the name against the new rules.
+            try:
+                validate_persona_name(name)
+            except ValueError as e:
+                errors.append(f"{name!r}: {e}")
+                continue
+
             provider_str = _field("Provider") or "claude"
             try:
                 provider = Provider(provider_str)
             except ValueError:
-                continue  # skip unknown providers
+                errors.append(
+                    f"{name!r}: unknown provider {provider_str!r}"
+                )
+                continue
 
             mode = _field("Mode") or "inherit"
             model_override = _field("Model override")
             color_override = _field("Color override")
 
-            # Extract prompt: everything after "- Prompt:\n\n"
             prompt_match = re.search(
                 r"^- Prompt:\s*\n\n(.*)", section, re.MULTILINE | re.DOTALL,
             )
@@ -256,18 +277,47 @@ class PersonaDialog(QDialog):
 
             cutoff = None if mode == "inherit" else 0
 
-            persona = self.create_persona(
-                provider=provider,
-                name=name,
-                system_prompt_override=prompt,
-                model_override=model_override,
-                color_override=color_override,
-                created_at_message_index=cutoff,
+            parsed.append({
+                "name": name,
+                "provider": provider,
+                "prompt": prompt,
+                "model_override": model_override,
+                "color_override": color_override,
+                "cutoff": cutoff,
+            })
+
+        # Case-insensitive duplicate check within the file.
+        seen: dict[str, str] = {}  # lowercased name → original name
+        for row in parsed:
+            lower = row["name"].lower()
+            if lower in seen:
+                errors.append(
+                    f"duplicate/case-collision: {seen[lower]!r} "
+                    f"and {row['name']!r} resolve to the same slug"
+                )
+            else:
+                seen[lower] = row["name"]
+
+        if errors:
+            raise PersonaImportError(
+                "Cannot import — " + " | ".join(errors)
             )
-            # Preserve file order via sort_order
+
+        # --- Pass 2: destructive. Tombstone existing, create new. ---
+        for p in self.list_items():
+            self.remove_persona(p.id)
+
+        for import_idx, row in enumerate(parsed):
+            persona = self.create_persona(
+                provider=row["provider"],
+                name=row["name"],
+                system_prompt_override=row["prompt"],
+                model_override=row["model_override"],
+                color_override=row["color_override"],
+                created_at_message_index=row["cutoff"],
+            )
             persona.sort_order = import_idx
             self._db.update_persona(persona)
-            import_idx += 1
         self._refresh_list()
 
     def effective_prompt(self, persona: Persona) -> str:
@@ -719,7 +769,12 @@ class PersonaDialog(QDialog):
             return
         with open(path, "r", encoding="utf-8") as f:
             md = f.read()
-        self.import_personas_md(md)
+        try:
+            self.import_personas_md(md)
+        except PersonaImportError as e:
+            # #140: pre-flight validation failed — show every issue
+            # at once and leave the DB untouched.
+            QMessageBox.warning(self, "Import failed", str(e))
 
     def _on_pick_color(self) -> None:
         current = self._color_edit.text().strip() or "#ffffff"
