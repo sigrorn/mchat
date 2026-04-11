@@ -319,13 +319,13 @@ class TestPartialExclusionUpdate:
 
 # A real 91-byte PNG of a 1x1 red pixel, generated via QImage.save.
 # Used by the DOT tests so QTextDocument.addResource can round-trip
-# an actual image instead of a magic-bytes stub.
-_MINI_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\tpHYs\x00\x00\x0f"
-    b"a\x00\x00\x0fa\x01\xa8?\xa7i\x00\x00\x00\rIDAT\x08\x99c\xf8\xcf\xc0"
-    b"\xf0\x1f\x00\x05\x00\x01\xff\xab\xce\xb6\x89\x00\x00\x00\x00IEND\xae"
-    b"B`\x82"
+# an actual image instead of a magic-bytes stub. Base64-decoded at
+# import time so we don't have to hand-transcribe the binary bytes.
+import base64 as _b64
+
+_MINI_PNG = _b64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9hAAAP"
+    "YQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
 )
 
 
@@ -376,12 +376,11 @@ class TestDotGraphRendering:
             QTextDocument.ResourceType.ImageResource, url
         )
         # Resource resolves to a non-null QImage.
-        assert resource is not None
-        img = QImage(resource) if not isinstance(resource, QImage) else resource
-        assert not img.isNull(), (
-            "expected a valid QImage at mchat-graph://<hash>.png, "
+        assert isinstance(resource, QImage), (
+            f"expected QImage at mchat-graph://<hash>.png, "
             f"got {type(resource).__name__}"
         )
+        assert not resource.isNull()
 
     def test_plain_markdown_message_still_renders(self, chat):
         """Regression guard: non-dot messages must still flow through
@@ -430,8 +429,10 @@ class TestDotGraphRendering:
         )
         # Either None or a null image — the point is there's no
         # loadable pixel data at this URL.
-        if resource is not None and isinstance(resource, QImage):
+        if isinstance(resource, QImage):
             assert resource.isNull()
+        else:
+            assert resource is None
         # Source fallback still visible in the plain text.
         assert "digraph" in chat.toPlainText()
 
@@ -467,5 +468,5 @@ class TestDotGraphRendering:
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
-        img = QImage(resource) if not isinstance(resource, QImage) else resource
-        assert not img.isNull()
+        assert isinstance(resource, QImage)
+        assert not resource.isNull()
