@@ -187,6 +187,57 @@ class TestCommandDrivenState:
         main_window._handle_command("//limit ALL")
         assert main_window._current_conv.limit_mark is None
 
+    def test_limit_uses_partial_update_not_full_rerender(
+        self, main_window, monkeypatch,
+    ):
+        """#133 — //limit must call apply_excluded_indices on the chat
+        widget (partial update) rather than _display_messages
+        (full re-render) so it doesn't re-parse markdown or re-insert
+        every message just to change background colours."""
+        main_window._on_new_chat()
+        # Need at least one user message for //limit last
+        main_window._db.add_message(Message(
+            role=Role.USER, content="q1",
+            conversation_id=main_window._current_conv.id,
+        ))
+        main_window._db.add_message(Message(
+            role=Role.ASSISTANT, content="a1",
+            provider=Provider.CLAUDE,
+            conversation_id=main_window._current_conv.id,
+        ))
+        main_window._current_conv.messages = main_window._db.get_messages(
+            main_window._current_conv.id
+        )
+        main_window._display_messages(main_window._current_conv.messages)
+
+        # Count calls
+        display_calls = [0]
+        apply_calls = [0]
+        orig_display = main_window._display_messages
+        orig_apply = main_window._chat.apply_excluded_indices
+
+        def counting_display(msgs):
+            display_calls[0] += 1
+            return orig_display(msgs)
+
+        def counting_apply(indices):
+            apply_calls[0] += 1
+            return orig_apply(indices)
+
+        monkeypatch.setattr(main_window, "_display_messages", counting_display)
+        monkeypatch.setattr(
+            main_window._chat, "apply_excluded_indices", counting_apply,
+        )
+
+        main_window._handle_command("//limit last")
+
+        assert apply_calls[0] >= 1, (
+            "handle_limit must call apply_excluded_indices"
+        )
+        assert display_calls[0] == 0, (
+            "handle_limit must NOT call _display_messages (full re-render)"
+        )
+
 
 class TestConversationSwitching:
     def test_new_chat_creates_conversation(self, main_window):
