@@ -46,22 +46,30 @@ HELP_COMMANDS = (
     "  //stats                       — size breakdown for the current chat\n"
     "  //vacuum                      — compact the database (rarely needed)\n"
     "\n"
+    "Targeting (#140):\n"
+    "  @<persona> <message>          — send to a specific persona\n"
+    "  @<p1> @<p2> <message>         — send to multiple targets\n"
+    "  @all <message>                — send to every persona in the chat\n"
+    "  @others <message>             — send to non-selected personas\n"
+    "  (no @)                        — send to the current selection\n"
+    "\n"
     "Persona example (Italian tutor with 3 providers):\n"
-    '  //addpersona claude as "Friend" new Start an Italian conversation\n'
-    '  //addpersona openai as "Critic" new Review my replies for mistakes\n'
-    '  //addpersona mistral as "Translator" new Word-level translations only\n'
-    "  friend, ciao come stai?"
+    '  //addpersona claude as "friend" new Start an Italian conversation\n'
+    '  //addpersona openai as "critic" new Review my replies for mistakes\n'
+    '  //addpersona mistral as "translator" new Word-level translations only\n'
+    "  @friend ciao come stai?\n"
+    "  @critic @translator what about my last answer?"
 )
 
 HELP_PROVIDERS = [
-    ("<name>, <message>", "send to a specific persona by name", None),
-    ("claude, <message>", "send to Claude (synthetic default)", Provider.CLAUDE),
-    ("gpt, <message>", "send to GPT (synthetic default)", Provider.OPENAI),
-    ("gemini, <message>", "send to Gemini (synthetic default)", Provider.GEMINI),
-    ("perplexity, <message>", "send to Perplexity (also: pplx,)", Provider.PERPLEXITY),
-    ("mistral, <message>", "send to Mistral (synthetic default)", Provider.MISTRAL),
-    ("all, <message>", "send to all personas in the chat", None),
-    ("flipped, <message>", "send to non-selected personas", None),
+    ("@<name> <message>", "send to a specific persona by name", None),
+    ("@claude <message>", "send to Claude (synthetic default)", Provider.CLAUDE),
+    ("@gpt <message>", "send to GPT (synthetic default)", Provider.OPENAI),
+    ("@gemini <message>", "send to Gemini (synthetic default)", Provider.GEMINI),
+    ("@perplexity <message>", "send to Perplexity (also: @pplx)", Provider.PERPLEXITY),
+    ("@mistral <message>", "send to Mistral (synthetic default)", Provider.MISTRAL),
+    ("@all <message>", "send to all personas in the chat", None),
+    ("@others <message>", "send to non-selected personas", None),
     ("(no prefix)", "send to current selection", None),
 ]
 

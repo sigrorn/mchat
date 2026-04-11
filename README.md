@@ -6,7 +6,7 @@ A multi-provider LLM chat application with a desktop UI. Chat with Claude, GPT, 
 
 - **5 providers** — Claude, GPT, Gemini, Perplexity, and Mistral, all in one chat
 - **Named personas** — give each provider a role ("Partner", "Critic", "Translator") with its own system prompt, model override, and colour
-- **Flexible targeting** — prefix a message with a persona or provider name, use `+name`/`-name`, `all,` for everyone, or `flipped,` for the complement
+- **Flexible targeting** — prefix a message with `@<persona>` or `@<provider>`, use `+name`/`-name`, `@all` for everyone, or `@others` for the complement
 - **Shared context** — each persona sees the full conversation transcript (filtered by visibility matrix), with other personas' responses labeled as context
 - **Persona dialog** — create, edit, and manage personas via a GUI; auto-opens on new chat
 - **Export/import** — save and restore persona setups or provider settings as `.md` files
@@ -72,21 +72,24 @@ mchat -debug   # writes per-persona I/O logs to <persona-name>.txt
 New chats auto-open the Personas dialog. Create personas with a name, provider, and system prompt:
 
 ```
-//addpersona claude as "Partner" new Start an Italian conversation
-//addpersona openai as "Critic" new Review my replies for mistakes
-//addpersona mistral as "Translator" new Word-level translations only
+//addpersona claude as "partner" new Start an Italian conversation
+//addpersona openai as "critic" new Review my replies for mistakes
+//addpersona mistral as "translator" new Word-level translations only
 ```
 
 Or use `//addpersona` (no args) to open the dialog. Personas can also be exported/imported as `.md` files from the dialog.
 
 ### Addressing personas
 
-- `partner, <message>` — send to the "partner" persona
-- `claude, <message>` — send to the Claude provider (synthetic default)
-- `all, <message>` — send to all personas in the conversation
-- `flipped, <message>` — send to non-selected personas and switch selection to them
+- `@partner <message>` — send to the "partner" persona
+- `@claude <message>` — send to the Claude provider (synthetic default)
+- `@partner @critic <message>` — send to multiple targets
+- `@all <message>` — send to every persona in the conversation
+- `@others <message>` — send to non-selected personas and switch selection to them
 - `+partner` / `-partner` — add/remove the "partner" persona from the selection
-- No prefix — send to current selection (sticky per conversation)
+- No `@` prefix — send to current selection (sticky per conversation)
+
+The first word that doesn't start with `@` begins the prompt, so natural English like `ok, but what about that?` works without any prefix parsing. Persona names can contain letters, digits, `-`, and `_` (no whitespace, no `@`, no punctuation, no reserved words like provider names).
 
 Use the checkboxes in the toolbar, or `//select`.
 
