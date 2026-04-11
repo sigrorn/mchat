@@ -1618,3 +1618,92 @@ class TestRetryInPlaceReplacement:
         assert retried.display_mode == "cols", (
             f"retried message should adopt 'cols' display_mode, got {retried.display_mode!r}"
         )
+
+
+class TestErrorOnSwitchedChat:
+    """#134 — if the user switches conversations mid-send, a subsequent
+    provider error must still persist to the ORIGINAL conversation, not
+    the currently-visible one. Mirrors the #122 fix for success path."""
+
+    def test_on_error_persists_to_original_conv_after_switch(
+        self, qtbot, main_window,
+    ):
+        from mchat.ui.persona_target import PersonaTarget
+
+        # Create conv A and seed the send state as if a send were in flight
+        main_window._on_new_chat()
+        conv_a_id = main_window._current_conv.id
+        send = main_window._send
+        send._seq_conv_id = conv_a_id
+        # Register a fake outstanding worker so _on_error's pop path works
+        fake_worker = type("W", (), {"last_error_transient": True})()
+        send._multi_workers["claude"] = fake_worker
+
+        # Create conv B and switch to it
+        main_window._on_new_chat()
+        conv_b_id = main_window._current_conv.id
+        assert conv_b_id != conv_a_id
+
+        # Fire _on_error as if the claude worker errored AFTER the switch
+        target = PersonaTarget(persona_id="claude", provider=Provider.CLAUDE)
+        send._on_error(target, "overloaded 529")
+
+        # Error message must be in conv A's messages, NOT conv B's
+        conv_a_msgs = main_window._db.get_messages(conv_a_id)
+        conv_b_msgs = main_window._db.get_messages(conv_b_id)
+
+        error_in_a = any(
+            m.content.startswith("[Error from")
+            for m in conv_a_msgs
+        )
+        error_in_b = any(
+            m.content.startswith("[Error from")
+            for m in conv_b_msgs
+        )
+        assert error_in_a, "error message should be persisted to conv A (original)"
+        assert not error_in_b, "error message must NOT leak into conv B (current)"
+
+    def test_on_error_retry_stash_populated_even_after_switch(
+        self, main_window,
+    ):
+        """Even when the user switched chats, //retry must still be
+        able to find the error message, so the retry stash needs the
+        DB id of the error row persisted to the original conversation."""
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_a_id = main_window._current_conv.id
+        send = main_window._send
+        send._seq_conv_id = conv_a_id
+        fake_worker = type("W", (), {"last_error_transient": True})()
+        send._multi_workers["claude"] = fake_worker
+
+        main_window._on_new_chat()
+
+        target = PersonaTarget(persona_id="claude", provider=Provider.CLAUDE)
+        send._on_error(target, "overloaded")
+
+        assert "claude" in send._retry_failed
+        err_id = send._retry_error_msg_ids.get("claude")
+        assert err_id is not None
+        # And that id must resolve to a message in conv A
+        conv_a_msgs = main_window._db.get_messages(conv_a_id)
+        assert any(m.id == err_id for m in conv_a_msgs)
+
+    def test_on_error_without_switch_behaves_as_before(self, main_window):
+        """When no conversation switch happened, _on_error should still
+        persist + render into the current (and original) conversation."""
+        from mchat.ui.persona_target import PersonaTarget
+
+        main_window._on_new_chat()
+        conv_id = main_window._current_conv.id
+        send = main_window._send
+        send._seq_conv_id = conv_id
+        fake_worker = type("W", (), {"last_error_transient": True})()
+        send._multi_workers["claude"] = fake_worker
+
+        target = PersonaTarget(persona_id="claude", provider=Provider.CLAUDE)
+        send._on_error(target, "some error")
+
+        msgs = main_window._db.get_messages(conv_id)
+        assert any(m.content.startswith("[Error from") for m in msgs)
