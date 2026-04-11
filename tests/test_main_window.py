@@ -283,6 +283,50 @@ class TestConversationSwitching:
         assert main_window._db.get_conversation(cid).title == "renamed title"
 
 
+class TestDotGraphEndToEnd:
+    """#147 — end-to-end smoke test: a DOT block that lands on the
+    chat widget as an assistant message via the normal add_message
+    path must produce a visible image resource in the document.
+    This is the integration check that DOT 1-5 compose correctly."""
+
+    def test_assistant_message_with_dot_block_renders_inline_image(
+        self, main_window, monkeypatch,
+    ):
+        import base64 as _b64
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import dot_renderer
+
+        # Real 91-byte PNG so QImage.fromData returns a non-null image.
+        mini_png = _b64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9h"
+            "AAAPYQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+        )
+        monkeypatch.setattr(
+            dot_renderer, "render_dot", lambda source, **kw: mini_png,
+        )
+
+        main_window._on_new_chat()
+        source = "digraph { user -> app -> db }"
+        assistant = Message(
+            role=Role.ASSISTANT,
+            content=f"```dot\n{source}\n```",
+            provider=Provider.CLAUDE,
+        )
+        main_window._chat.add_message(assistant)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-graph://{digest}.png")
+        resource = main_window._chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        assert isinstance(resource, QImage)
+        assert not resource.isNull()
+
+
 class TestSpendLabelRestore:
     """#141 — switching back into a conversation that already has spend
     recorded must show the correct per-persona amounts in the toolbar
