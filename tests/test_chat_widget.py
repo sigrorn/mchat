@@ -211,3 +211,107 @@ class TestUndoRedoDisabled:
 
     def test_undo_redo_disabled_on_init(self, chat):
         assert chat.document().isUndoRedoEnabled() is False
+
+
+class TestPartialExclusionUpdate:
+    """#133 — chat widget must support updating the excluded-indices
+    shading without a full re-render. //limit uses this path so it
+    doesn't re-parse markdown and re-insert every message just to
+    change background colours."""
+
+    def test_apply_excluded_indices_updates_block_backgrounds(
+        self, qtbot, chat, db, conv,
+    ):
+        """After apply_excluded_indices(new_set), the chat document's
+        block backgrounds reflect the new exclusion state without
+        content being re-inserted."""
+        # Seed three messages
+        msgs = [
+            Message(role=Role.USER, content="q1"),
+            Message(role=Role.ASSISTANT, content="a1", provider=Provider.CLAUDE),
+            Message(role=Role.USER, content="q2"),
+        ]
+        for m in msgs:
+            chat.add_message(m)
+
+        # Capture baseline colour of message 0 (no exclusion)
+        doc = chat.document()
+        msg0_start_block = chat._message_block_starts[0]
+        block0 = doc.findBlockByNumber(msg0_start_block)
+        baseline_bg = block0.blockFormat().background().color().name()
+
+        # Apply exclusion to message 0
+        chat.apply_excluded_indices({0})
+
+        # Message 0 block should now have the shaded colour
+        block0 = doc.findBlockByNumber(msg0_start_block)
+        shaded_bg = block0.blockFormat().background().color().name()
+        assert shaded_bg != baseline_bg
+
+        # Message 1 block should still have its unshaded colour
+        msg1_start = chat._message_block_starts[1]
+        block1 = doc.findBlockByNumber(msg1_start)
+        bg1 = block1.blockFormat().background().color().name()
+        # (Not shaded — unchanged from its original)
+        assert bg1 != shaded_bg or block1.blockNumber() == block0.blockNumber()
+
+    def test_apply_excluded_indices_no_markdown_re_parsing(
+        self, qtbot, chat, monkeypatch,
+    ):
+        """apply_excluded_indices must NOT call md.convert() — that's
+        the expensive path we're trying to avoid."""
+        msgs = [
+            Message(role=Role.USER, content="q1"),
+            Message(
+                role=Role.ASSISTANT,
+                content="**markdown** here",
+                provider=Provider.CLAUDE,
+            ),
+            Message(role=Role.USER, content="q2"),
+        ]
+        for m in msgs:
+            chat.add_message(m)
+
+        # Count md.convert calls during apply_excluded_indices
+        call_count = [0]
+        original_convert = chat._md.convert
+
+        def counting_convert(text):
+            call_count[0] += 1
+            return original_convert(text)
+
+        monkeypatch.setattr(chat._md, "convert", counting_convert)
+
+        chat.apply_excluded_indices({0, 2})
+        assert call_count[0] == 0, (
+            "apply_excluded_indices must not re-parse markdown"
+        )
+
+    def test_apply_excluded_indices_updates_set(self, chat):
+        """The helper must update _excluded_indices so subsequent
+        renders pick up the new state."""
+        msgs = [
+            Message(role=Role.USER, content="q"),
+            Message(role=Role.ASSISTANT, content="a", provider=Provider.CLAUDE),
+        ]
+        for m in msgs:
+            chat.add_message(m)
+
+        assert chat._excluded_indices == set()
+        chat.apply_excluded_indices({0, 1})
+        assert chat._excluded_indices == {0, 1}
+
+    def test_message_block_starts_populated_on_insert(self, chat):
+        """The chat widget must track each message's starting block
+        number so partial updates can locate them."""
+        msgs = [
+            Message(role=Role.USER, content="q1"),
+            Message(role=Role.ASSISTANT, content="a1", provider=Provider.CLAUDE),
+        ]
+        for m in msgs:
+            chat.add_message(m)
+        assert hasattr(chat, "_message_block_starts")
+        assert len(chat._message_block_starts) == 2
+        # Block numbers are non-negative and strictly increasing
+        assert chat._message_block_starts[0] >= 0
+        assert chat._message_block_starts[1] > chat._message_block_starts[0]
