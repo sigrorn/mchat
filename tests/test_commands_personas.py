@@ -127,6 +127,44 @@ class TestAddPersona:
             after = len(db.list_personas(host._current_conv.id))
             assert after == before, f"reserved name {reserved} should be rejected"
 
+    def test_rejects_whitespace_in_name(self, host, db):
+        """#140: new persona names cannot contain whitespace."""
+        from mchat.ui.commands.personas import handle_addpersona
+        before = len(db.list_personas(host._current_conv.id))
+        handle_addpersona('claude as "Claude Bot" new text', host)
+        after = len(db.list_personas(host._current_conv.id))
+        assert after == before, "whitespace name should be rejected"
+        # And the error note should mention whitespace
+        assert any(
+            "whitespace" in n.lower() for n in host._chat.notes
+        ), f"expected whitespace error, got: {host._chat.notes}"
+
+    def test_rejects_at_sigil_in_name(self, host, db):
+        """#140: '@' is reserved for targeting, can't be in a name."""
+        from mchat.ui.commands.personas import handle_addpersona
+        before = len(db.list_personas(host._current_conv.id))
+        handle_addpersona('claude as "@partner" new text', host)
+        after = len(db.list_personas(host._current_conv.id))
+        assert after == before
+
+    def test_rejects_punctuation_in_name(self, host, db):
+        """#140: only letters, digits, '-', '_' allowed."""
+        from mchat.ui.commands.personas import handle_addpersona
+        for bad in ('"part,ner"', '"part.ner"', '"part:ner"', '"part/ner"'):
+            before = len(db.list_personas(host._current_conv.id))
+            handle_addpersona(f'claude as {bad} new text', host)
+            after = len(db.list_personas(host._current_conv.id))
+            assert after == before, f"{bad} should be rejected"
+
+    def test_accepts_hyphen_and_underscore(self, host, db):
+        """Hyphen and underscore are in the allowed alphabet."""
+        from mchat.ui.commands.personas import handle_addpersona
+        before = len(db.list_personas(host._current_conv.id))
+        handle_addpersona('claude as "italian-tutor" new text', host)
+        handle_addpersona('claude as "claude_bot" new text', host)
+        after = len(db.list_personas(host._current_conv.id))
+        assert after == before + 2
+
     def test_rejects_duplicate_slug(self, host, db):
         from mchat.ui.commands.personas import handle_addpersona
         handle_addpersona('claude as "Partner" new first', host)
