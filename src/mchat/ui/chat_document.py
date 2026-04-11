@@ -10,16 +10,27 @@
 from __future__ import annotations
 
 import html as html_mod
+import re
 
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import (
     QColor,
+    QImage,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
+    QTextDocument,
     QTextLength,
 )
 
+from mchat import dot_renderer
 from mchat.models.message import Message, Provider, Role
+from mchat.ui.dot_markdown_ext import DOT_SOURCE_MAP
+
+# Match the mchat-graph://<hash>.png URL scheme we stash in DOT
+# <img> tags. The hash is a 64-char hex sha256; we accept the full
+# hex alphabet here for defensive pattern matching.
+_DOT_URL_RE = re.compile(r'mchat-graph://([0-9a-f]+)\.png')
 
 # Role info stored per text-block: (role, provider, model)
 _RoleInfo = tuple[Role, Provider | None, str | None]
@@ -241,6 +252,42 @@ class ChatDocumentMixin:
         return text.replace("\n", "<br>")
 
     # ------------------------------------------------------------------
+    # DOT graphics resource wiring (#144)
+    # ------------------------------------------------------------------
+
+    def _wire_dot_resources(self, html: str) -> None:
+        """Scan rendered HTML for mchat-graph://<hash>.png URLs and
+        pre-register matching QImage resources on the document, so
+        Qt's layout engine finds them when it lays out the <img> tag.
+
+        Renders are served from dot_renderer's two-tier cache, so
+        this is cheap on re-insertion of the same chat. When
+        ``render_dot`` returns None (graphviz missing, bad DOT, etc.)
+        no resource is added — the <details> source fallback
+        emitted by dot_markdown_ext stays visible as a graceful
+        degradation path."""
+        if "mchat-graph://" not in html:
+            return
+        doc = self.document()
+        for match in _DOT_URL_RE.finditer(html):
+            digest = match.group(1)
+            url = match.group(0)
+            source = DOT_SOURCE_MAP.get(digest)
+            if source is None:
+                continue
+            png = dot_renderer.render_dot(source)
+            if not png:
+                continue
+            img = QImage.fromData(png, "PNG")
+            if img.isNull():
+                continue
+            doc.addResource(
+                QTextDocument.ResourceType.ImageResource,
+                QUrl(url),
+                img,
+            )
+
+    # ------------------------------------------------------------------
     # Background application
     # ------------------------------------------------------------------
 
@@ -330,6 +377,7 @@ class ChatDocumentMixin:
             cursor.setCharFormat(char_fmt)
 
         rendered = self._render(message)
+        self._wire_dot_resources(rendered)
         cursor.insertHtml(rendered)
 
         end_block = cursor.block().blockNumber()
@@ -378,6 +426,7 @@ class ChatDocumentMixin:
             cursor.insertBlock(fmt)
 
         start_block = cursor.block().blockNumber()
+        self._wire_dot_resources(table_html)
         cursor.insertHtml(table_html)
         end_block = cursor.block().blockNumber()
 

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QTextEdit, QWidget
 from mchat.models.message import Message
 from mchat.ui.chat_document import ChatDocumentMixin
 from mchat.ui.chat_export import ChatExportMixin
+from mchat.ui.dot_markdown_ext import DotExtension
 
 # Default background colours per participant
 COLOR_USER = "#d4d4d4"
@@ -102,7 +103,9 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self._column_group_info: dict[int, tuple[int, int, list[str], list[int]]] = {}
         self._is_empty = True
         self._md = markdown.Markdown(
-            extensions=["tables", "fenced_code", "sane_lists"]
+            extensions=[
+                "tables", "fenced_code", "sane_lists", DotExtension(),
+            ]
         )
         self._build_ui()
 

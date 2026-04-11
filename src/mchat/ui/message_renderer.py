@@ -23,6 +23,7 @@ from mchat.models.message import Message, Provider, Role
 from mchat.models.persona import Persona
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.context_builder import compute_excluded_indices
+from mchat.ui.dot_markdown_ext import DotExtension
 
 # Stable display order for multi-provider responses
 PROVIDER_ORDER: list[Provider] = [
@@ -342,7 +343,11 @@ class MessageRenderer:
         versions when the limit flips without having to re-render.
         """
         personas_by_id = personas_by_id or {}
-        md = md_lib.Markdown(extensions=["tables", "fenced_code", "sane_lists"])
+        md = md_lib.Markdown(
+            extensions=[
+                "tables", "fenced_code", "sane_lists", DotExtension(),
+            ]
+        )
         header_cells: list[str] = []
         body_cells: list[str] = []
         provider_colors: list[str] = []
