@@ -444,6 +444,21 @@ class TestMigration4RewritePrefixes:
         finally:
             db.close()
 
+    def test_migration_rewrites_both_to_all(self, tmp_path):
+        """'both, ...' was an old alias for 'all, ...' before it was
+        removed. Historical messages with 'both,' must rewrite to
+        '@all ...' — the same semantics the user originally typed."""
+        path, convs = self._seed_v3_db_with_content(
+            tmp_path, [("a", ["both, what do you think?"])],
+        )
+        from mchat.db import Database
+        db = Database(db_path=path)
+        try:
+            contents = self._get_contents(path, convs["a"])
+            assert contents == ["@all what do you think?"]
+        finally:
+            db.close()
+
     def test_migration_rewrites_all_prefix(self, tmp_path):
         path, convs = self._seed_v3_db_with_content(
             tmp_path, [("a", ["all, hello everyone"])],
