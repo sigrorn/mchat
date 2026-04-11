@@ -27,6 +27,7 @@ A multi-provider LLM chat application with a desktop UI. Chat with Claude, GPT, 
 - **Font zoom** — Ctrl+/- to resize, Ctrl+0 to reset
 - **Customisable colours** — per-persona and per-provider background colours
 - **Message numbers** — user messages show their position for easy reference
+- **DOT graphs** — models can emit ```` ```dot ... ``` ```` fenced blocks that render inline as PNG (requires Graphviz; falls back to a collapsible source view when unavailable)
 - **Debug mode** — `mchat -debug` dumps per-persona provider I/O to timestamped text files
 
 ## Setup
@@ -171,9 +172,48 @@ Paris is the capital of France.
 
 Pasting text with these prefixes into the input box automatically strips them.
 
+### DOT graphs
+
+Models can embed DOT-language diagrams in fenced code blocks. If Graphviz
+is installed the graph renders inline as a PNG; otherwise you still see
+the source in a collapsible `<details>` block.
+
+Example prompt:
+> Draw me a state machine for a TCP connection in DOT.
+
+A model's reply might contain something like:
+```
+​```dot
+digraph tcp {
+    rankdir=LR;
+    CLOSED -> LISTEN [label="listen"];
+    LISTEN -> SYN_RCVD [label="recv SYN"];
+    CLOSED -> SYN_SENT [label="connect"];
+    SYN_SENT -> ESTABLISHED [label="recv SYN/ACK"];
+    SYN_RCVD -> ESTABLISHED [label="recv ACK"];
+    ESTABLISHED -> CLOSED [label="close"];
+}
+​```
+```
+
+Rendered graphs are cached as PNG files under `~/.mchat/graph_cache/`
+keyed by the sha256 of the DOT source, so repeat viewings of the same
+chat don't re-invoke `dot`. The cache is regenerable — delete the
+directory at any time to reclaim disk space (the app re-renders on
+next view).
+
+HTML export inlines every graph as a base64 `data:` URI so exported
+files are fully self-contained. If you export while Graphviz isn't
+installed, the exported file carries a visible "Graphviz not
+available" warning banner so nothing degrades silently.
+
 ### Database maintenance
 
 Chat history and settings are stored in `~/.mchat/` (SQLite database + JSON config). The database is self-maintaining under normal use. If you delete many large conversations and want to reclaim disk space, run `//vacuum` in the chat.
+
+Rendered DOT graphs live separately in `~/.mchat/graph_cache/` and are
+safe to delete at any time; the backup story is: keep your `.db`, the
+cache is regenerable on next open.
 
 ## Development
 
