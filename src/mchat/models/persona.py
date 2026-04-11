@@ -67,12 +67,71 @@ def slugify_persona_name(name: str) -> str:
 
     Lowercased, non-alphanumeric runs collapsed to a single underscore,
     leading/trailing underscores stripped. Used for user-input prefix
-    matching (``partner,`` → slug ``partner``).
+    matching (``@partner`` → slug ``partner``).
 
     Raises ValueError if the resulting slug is empty, which the
     command layer should surface as an error to the user.
+
+    #140: this helper stays back-compat — it still accepts names
+    with whitespace or punctuation so grandfathered personas
+    continue to produce usable slugs at read time. The write-path
+    guard is ``validate_persona_name`` below, called explicitly
+    before create/edit operations.
     """
     slug = _SLUG_NON_ALNUM.sub("_", name.strip().lower()).strip("_")
     if not slug:
         raise ValueError(f"persona name {name!r} produces an empty slug")
     return slug
+
+
+# #140: allowed-character alphabet for new persona names. No
+# whitespace, no punctuation other than '-' and '_', no '@'
+# sigil. Matched as a complete string (^...$).
+_VALID_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def validate_persona_name(name: str) -> None:
+    """Validate a new persona name against the #140 rules.
+
+    Raises ``ValueError`` with a human-readable message when:
+      * the name is empty or whitespace-only
+      * the name contains whitespace
+      * the name contains characters other than ``[A-Za-z0-9_-]``
+      * the name (lowercased) collides with a reserved token —
+        a provider shorthand (``claude``, ``gpt``, ...) or one
+        of the special keywords ``all`` / ``others``.
+
+    Called only on **new write paths** (create, edit with name
+    change, import pre-flight). Grandfathered personas in the DB
+    are NOT re-validated — they bypass this function entirely,
+    matching the grandfathering decision from the #140 plan.
+    """
+    if not name or not name.strip():
+        raise ValueError("persona name cannot be empty")
+    if name != name.strip():
+        raise ValueError(
+            f"persona name {name!r} has leading or trailing whitespace"
+        )
+    if any(ch.isspace() for ch in name):
+        raise ValueError(
+            f"persona name {name!r} contains whitespace — use '-' or "
+            f"'_' as separators instead"
+        )
+    if "@" in name:
+        raise ValueError(
+            f"persona name {name!r} contains '@' — reserved for targeting"
+        )
+    if not _VALID_NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"persona name {name!r} contains disallowed characters. "
+            f"Allowed: letters, digits, '-', '_'."
+        )
+    # Reserved-name check — import here to avoid a circular import
+    # with persona_resolver (which imports persona in turn via
+    # PersonaTarget).
+    from mchat.ui.persona_resolver import RESERVED_NAMES
+    if name.lower() in RESERVED_NAMES:
+        raise ValueError(
+            f"persona name {name!r} is a reserved token. Reserved: "
+            f"{', '.join(sorted(RESERVED_NAMES))}."
+        )
