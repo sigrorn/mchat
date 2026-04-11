@@ -5,19 +5,14 @@
 # ------------------------------------------------------------------
 from __future__ import annotations
 
-import re
-
 from mchat.models.message import Provider
 from mchat.providers.base import BaseProvider
 
-# Single-word prefix pattern (used for iterative parsing)
-_WORD_PREFIX = re.compile(
-    r"^(claude|gpt|gemini|perplexity|pplx|mistral|all|flipped)\s*[,:]\s*",
-    re.IGNORECASE,
-)
-
+# #140: grammar switched from '<word>,<ws>' to '@<word> <ws>'.
+# Router.parse and _strip_prefix both tokenise on whitespace and
+# accept tokens starting with '@'.
 ALL = "all"
-FLIPPED = "flipped"
+OTHERS = "others"  # #140: renamed from 'flipped' — reads more naturally
 
 PREFIX_TO_PROVIDER = {
     "claude": Provider.CLAUDE,
@@ -29,7 +24,12 @@ PREFIX_TO_PROVIDER = {
 }
 
 # Special prefixes that are not combinable with others
-_SPECIAL_PREFIXES = {ALL, FLIPPED}
+_SPECIAL_PREFIXES = {ALL, OTHERS}
+
+# #140: legacy alias map used only by the context_builder strip path
+# and by the one-shot migration. 'flipped' maps to 'others' for
+# historical messages that still use the old keyword.
+_LEGACY_ALIAS = {"flipped": OTHERS}
 
 
 class Router:
@@ -86,54 +86,99 @@ class Router:
     def parse(self, user_input: str) -> tuple[list[Provider], str]:
         """Parse user input, returning (target provider list, cleaned message).
 
-        Supports multiple provider prefixes:
-            ``claude, gemini, what's your take?``
-        Parses provider names from the start until a non-provider word,
-        then everything after is the message.
+        #140 grammar:
+            @<provider> [<@provider> ...] <message>
 
-        ``all,`` and ``flipped,`` are special — not combinable with others.
+        Walks whitespace-separated tokens from the start; every token
+        beginning with '@' is a provider target. The first token not
+        starting with '@' begins the message. Unknown '@' tokens are
+        treated as plain text here (PersonaResolver raises for them
+        at command level — Router.parse is lower-level and only
+        recognises provider shorthands + @all/@others).
+
+        ``@all`` and ``@others`` are special — not combinable with
+        other @-prefixes. If either appears after a regular provider
+        prefix, it's treated as message text starting at that token.
         """
-        remaining = user_input
         collected: list[Provider] = []
+        offset = 0
+        special: str | None = None
 
-        # Try to match one or more provider prefixes
-        while True:
-            match = _WORD_PREFIX.match(remaining)
-            if not match:
+        while offset < len(user_input):
+            # Skip whitespace at offset
+            while offset < len(user_input) and user_input[offset].isspace():
+                offset += 1
+            if offset >= len(user_input):
                 break
-            prefix = match.group(1).lower()
 
-            # Special prefixes: handle alone, stop parsing
-            if prefix in _SPECIAL_PREFIXES:
+            tok_start = offset
+            while offset < len(user_input) and not user_input[offset].isspace():
+                offset += 1
+            tok_end = offset
+            token_full = user_input[tok_start:tok_end]
+
+            if not token_full.startswith("@"):
+                # First non-@ token — rewind to its start so the
+                # message begins here with its original whitespace
+                # trimmed later.
+                offset = tok_start
+                break
+
+            token = token_full[1:].lower()
+            if not token:
+                # Lone '@' — treat as unknown at this level; message
+                # starts here.
+                offset = tok_start
+                break
+
+            # Special keywords (@all / @others) aren't combinable.
+            if token in _SPECIAL_PREFIXES:
                 if collected:
-                    # Hit 'all'/'flipped' after real providers — stop,
-                    # treat 'all'/'flipped' as part of the message
+                    # Already collected provider prefixes — stop and
+                    # treat the special keyword as message text.
+                    offset = tok_start
                     break
-                cleaned = remaining[match.end():].strip()
-                if prefix == ALL:
-                    configured = [p for p in Provider if p in self._providers]
-                    if configured:
-                        self._store_selection(configured)
-                elif prefix == FLIPPED:
-                    configured = set(p for p in Provider if p in self._providers)
-                    current = set(self._selection)
-                    flipped = [p for p in Provider if p in configured and p not in current]
-                    if flipped and current != configured:
-                        self._store_selection(flipped)
-                return list(self._selection), cleaned
+                special = token
+                # offset already past the keyword; break out.
+                break
 
-            # Regular provider prefix
-            provider = PREFIX_TO_PROVIDER[prefix]
+            # Regular provider shorthand?
+            provider = PREFIX_TO_PROVIDER.get(token)
+            if provider is None:
+                # Unknown @ token — Router.parse is a lower-level
+                # parser that doesn't know about personas, so it
+                # treats unknown prefixes as plain text. PersonaResolver
+                # raises ResolveError for this case at command level.
+                offset = tok_start
+                break
+
             if provider not in collected:
                 collected.append(provider)
-            remaining = remaining[match.end():]
+
+        message = user_input[offset:].strip()
+
+        # Handle special @all / @others expansion
+        if special is not None:
+            if special == ALL:
+                configured = [p for p in Provider if p in self._providers]
+                if configured:
+                    self._store_selection(configured)
+            elif special == OTHERS:
+                configured = set(p for p in Provider if p in self._providers)
+                current = set(self._selection)
+                others = [
+                    p for p in Provider
+                    if p in configured and p not in current
+                ]
+                if others and current != configured:
+                    self._store_selection(others)
+            return list(self._selection), message
 
         if collected:
-            message = remaining.strip()
             self._store_selection(collected)
             return list(self._selection), message
 
-        # No prefix matched — use current selection
+        # No prefix matched — return current selection + full input
         return list(self._selection), user_input
 
     def set_selection(self, providers: list[Provider]) -> None:
@@ -148,28 +193,79 @@ class Router:
 
     @staticmethod
     def _strip_prefix(text: str) -> tuple[list[str], str]:
-        """Strip provider prefixes from text without changing any state.
+        """Strip @-prefix targets from text without changing any state.
 
-        Returns (list of prefix names found, cleaned text).
+        Returns ``(list of prefix names found, cleaned text)``. Used
+        by context_builder to clean stored user messages before
+        sending them to providers as context. #140: switched from
+        the old ``<word>,<ws>`` grammar to ``@<word> <ws>``.
+
+        Personas are addressed by name in the new grammar, but
+        ``_strip_prefix`` doesn't have conversation context to
+        resolve names — it only strips provider shorthands and
+        ``@all`` / ``@others``. Tokens that don't match those
+        are left in place as part of the cleaned text, which
+        matches the behaviour needed by context_builder: a user
+        message like ``@partner hi`` with an unknown-at-this-
+        level ``partner`` gets stripped of its leading whitespace
+        but not of ``@partner`` — safe, because context_builder
+        uses this purely for display hygiene, not for routing.
+
+        Also strips legacy ``flipped`` tokens (maps to ``others``
+        in the returned list) for back-compat on messages that
+        survived the migration without rewriting.
         """
-        remaining = text
         found: list[str] = []
-        while True:
-            match = _WORD_PREFIX.match(remaining)
-            if not match:
+        offset = 0
+        consumed_any = False
+
+        while offset < len(text):
+            while offset < len(text) and text[offset].isspace():
+                offset += 1
+            if offset >= len(text):
                 break
-            prefix = match.group(1).lower()
-            if prefix in _SPECIAL_PREFIXES:
+
+            tok_start = offset
+            while offset < len(text) and not text[offset].isspace():
+                offset += 1
+            token_full = text[tok_start:offset]
+
+            if not token_full.startswith("@"):
+                offset = tok_start
+                break
+
+            token = token_full[1:].lower()
+            if not token:
+                offset = tok_start
+                break
+
+            # Legacy alias — 'flipped' only exists on old unmigrated
+            # messages (if any); normalise to 'others' in the output.
+            token = _LEGACY_ALIAS.get(token, token)
+
+            if token in _SPECIAL_PREFIXES:
                 if found:
+                    # Special keywords not combinable — stop here and
+                    # treat the keyword as text (rewind).
+                    offset = tok_start
                     break
-                found.append(prefix)
-                remaining = remaining[match.end():]
+                found.append(token)
+                consumed_any = True
+                # offset already past it; break.
                 break
-            prov = PREFIX_TO_PROVIDER.get(prefix)
-            if prov:
-                found.append(prefix)
-            remaining = remaining[match.end():]
-        return found, remaining.strip() if found else text
+
+            if token in PREFIX_TO_PROVIDER:
+                found.append(token)
+                consumed_any = True
+                continue
+
+            # Unknown @ token at strip level — leave it alone, stop.
+            offset = tok_start
+            break
+
+        if not consumed_any:
+            return [], text
+        return found, text[offset:].strip()
 
     @property
     def last_used(self) -> Provider | list[Provider]:

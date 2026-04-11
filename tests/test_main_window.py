@@ -319,12 +319,12 @@ class TestPrefixOnlySelection:
     treated as selection changes, not as empty sends."""
 
     def test_bare_provider_prefix_changes_selection(self, main_window):
-        """'gpt,' with no trailing text should select GPT and not start a send."""
+        """'@gpt' with no trailing text should select GPT and not start a send."""
         from mchat.models.message import Provider
         # Start with Claude selected
         main_window._router.set_selection([Provider.CLAUDE])
         # Submit prefix-only input
-        main_window._on_message_submitted("gpt,")
+        main_window._on_message_submitted("@gpt")
         # Selection should have flipped to GPT
         assert main_window._router.selection == [Provider.OPENAI]
         # Critical: no worker should have been started. If the prefix-only
@@ -334,12 +334,12 @@ class TestPrefixOnlySelection:
         assert main_window._send._multi_workers == {}
 
     def test_all_prefix_with_no_personas_stays_unchanged(self, main_window):
-        """Stage 4.4: all, with no explicit personas in the conversation
+        """Stage 4.4: @all with no explicit personas in the conversation
         returns empty — selection stays unchanged."""
         from mchat.models.message import Provider
         main_window._router.set_selection([Provider.CLAUDE])
-        main_window._on_message_submitted("all,")
-        # No personas in this conversation → all, resolves to empty →
+        main_window._on_message_submitted("@all")
+        # No personas in this conversation → @all resolves to empty →
         # selection stays as it was (prefix-only path doesn't change
         # selection when targets are empty)
         assert main_window._input.isEnabled() is True
@@ -352,7 +352,7 @@ class TestPrefixOnlySelection:
         main_window._on_new_chat()
         conv_id = main_window._current_conv.id
         main_window._router.set_selection([Provider.CLAUDE])
-        main_window._on_message_submitted("gpt,")
+        main_window._on_message_submitted("@gpt")
         msgs = main_window._db.get_messages(conv_id)
         assert all("gpt" not in (m.content or "").lower()[:10] for m in msgs), (
             "prefix-only input should not end up in DB as a user message"
@@ -361,7 +361,7 @@ class TestPrefixOnlySelection:
     def test_multi_prefix_only(self, main_window):
         from mchat.models.message import Provider
         main_window._router.set_selection([Provider.CLAUDE])
-        main_window._on_message_submitted("gpt, gemini,")
+        main_window._on_message_submitted("@gpt @gemini")
         assert set(main_window._router.selection) == {
             Provider.OPENAI, Provider.GEMINI,
         }
@@ -551,7 +551,7 @@ class TestSendControllerPersonas:
         guarantee that legacy chats still behave identically."""
         main_window._on_new_chat()
         conv_id = main_window._current_conv.id
-        self._send_and_wait(main_window, qtbot, "claude, hello")
+        self._send_and_wait(main_window, qtbot, "@claude hello")
 
         msgs = main_window._db.get_messages(conv_id)
         # First is user, second+ are assistant replies
@@ -570,7 +570,7 @@ class TestSendControllerPersonas:
         partner = self._make_persona(
             main_window._db, conv_id, name="Partner", slug="partner",
         )
-        self._send_and_wait(main_window, qtbot, "partner, Ciao!")
+        self._send_and_wait(main_window, qtbot, "@partner Ciao!")
 
         assistants = [
             m for m in main_window._db.get_messages(conv_id)
@@ -595,7 +595,7 @@ class TestSendControllerPersonas:
             name="Translator", slug="translator",
             model_override="claude-haiku-override",
         )
-        self._send_and_wait(main_window, qtbot, "translator, word")
+        self._send_and_wait(main_window, qtbot, "@translator word")
 
         assistants = [
             m for m in main_window._db.get_messages(conv_id)
@@ -618,7 +618,7 @@ class TestSendControllerPersonas:
             name="Partner", slug="partner",
             model_override=None,
         )
-        self._send_and_wait(main_window, qtbot, "partner, hi")
+        self._send_and_wait(main_window, qtbot, "@partner hi")
 
         assistants = [
             m for m in main_window._db.get_messages(conv_id)
@@ -642,7 +642,7 @@ class TestSendControllerPersonas:
         evaluator = self._make_persona(
             main_window._db, conv_id, name="Evaluator", slug="evaluator",
         )
-        self._send_and_wait(main_window, qtbot, "partner, evaluator, go")
+        self._send_and_wait(main_window, qtbot, "@partner @evaluator go")
 
         assistants = [
             m for m in main_window._db.get_messages(conv_id)
@@ -662,7 +662,7 @@ class TestSendControllerPersonas:
         from mchat.models.message import Provider
         main_window._on_new_chat()
         main_window._router.set_selection([Provider.CLAUDE])
-        main_window._on_message_submitted("gpt,")
+        main_window._on_message_submitted("@gpt")
         # No worker should have started
         assert main_window._send._multi_workers == {}
         assert main_window._router.selection == [Provider.OPENAI]

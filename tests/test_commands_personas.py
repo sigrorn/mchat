@@ -116,8 +116,10 @@ class TestAddPersona:
         assert p.system_prompt_override is None
 
     def test_rejects_reserved_name(self, host, db):
+        """#140: 'flipped' was renamed to 'others'. The validator
+        blocks both (plus provider shorthands) on new personas."""
         from mchat.ui.commands.personas import handle_addpersona
-        for reserved in ("all", "flipped", "claude", "gpt", "gemini", "pplx"):
+        for reserved in ("all", "others", "claude", "gpt", "gemini", "pplx"):
             before = len(db.list_personas(host._current_conv.id))
             handle_addpersona(
                 f'claude as "{reserved}" new text', host,
