@@ -338,3 +338,196 @@ class TestHtmlExporterPersonaColorOverride:
         ]
         html = exporter.export(msgs, personas=[p])
         assert "#fedcba" in html
+
+
+# A real 91-byte PNG of a 1x1 red pixel, used as a drop-in for
+# dot_renderer.render_dot when graphviz isn't available in the
+# test environment.
+import base64 as _b64
+
+_MINI_PNG = _b64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9hAAAP"
+    "YQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+)
+
+
+class TestHtmlExporterDotGraphs:
+    """#145 — HTML export must inline DOT graph PNGs as base64 data
+    URIs so the exported .html file is self-contained and viewable
+    in any browser without the app."""
+
+    def test_dot_block_becomes_base64_data_uri(self, exporter, monkeypatch):
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { a -> b }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "data:image/png;base64," in html
+        # The mchat-graph:// URL should have been replaced, not left
+        # in place alongside the data URI.
+        assert "mchat-graph://" not in html
+
+    def test_data_uri_decodes_to_valid_png(self, exporter, monkeypatch):
+        import re as _re
+
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { x -> y }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        m = _re.search(r'data:image/png;base64,([A-Za-z0-9+/=]+)', html)
+        assert m is not None
+        decoded = _b64.b64decode(m.group(1))
+        assert decoded.startswith(b"\x89PNG\r\n\x1a\n")
+        assert decoded == _MINI_PNG
+
+    def test_details_source_fallback_preserved(self, exporter, monkeypatch):
+        """The <details> source block must survive into the export
+        even on the happy path so the user can still read the raw
+        DOT if they want."""
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { a -> b }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "<details" in html
+        assert "dot source" in html
+
+    def test_no_dot_block_unchanged(self, exporter, monkeypatch):
+        """Regression: a message with no DOT block must round-trip
+        through export unchanged — no base64 URI, no broken markup."""
+        from mchat import dot_renderer
+
+        # render_dot would fail the test if accidentally called.
+        def boom(*a, **kw):
+            raise AssertionError("render_dot should not be called")
+
+        monkeypatch.setattr(dot_renderer, "render_dot", boom)
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="Just **bold** text, no graphs.",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "data:image/png" not in html
+        assert "mchat-graph://" not in html
+        assert "<strong>bold</strong>" in html
+
+    def test_render_failure_leaves_source_fallback_only(
+        self, exporter, monkeypatch
+    ):
+        """When render_dot returns None (graphviz missing, bad source,
+        timeout, …) the exporter must NOT produce a broken
+        <img src="mchat-graph://..."> — it must either drop the tag
+        or fall back to the <details> source block alone."""
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot", lambda source, **kw: None,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { a -> b }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "mchat-graph://" not in html  # no broken img remains
+        assert "data:image/png" not in html
+        # Source fallback is still in the output.
+        assert "digraph" in html
+
+    def test_uses_disk_cache_so_no_subprocess_on_repeat_export(
+        self, exporter, monkeypatch, tmp_path
+    ):
+        """The exporter reads through dot_renderer.render_dot, which
+        consults the in-memory + disk cache before shelling out. A
+        second export of the same DOT source must not re-run the
+        subprocess."""
+        from mchat import dot_renderer
+
+        # Redirect disk cache at a tmp path and wipe in-memory state.
+        monkeypatch.setattr(
+            dot_renderer, "cache_dir",
+            lambda: tmp_path / "graph_cache",
+        )
+        dot_renderer._MEMORY_CACHE.clear()
+        dot_renderer.is_graphviz_available.cache_clear()
+
+        # Pretend graphviz is installed.
+        monkeypatch.setattr(
+            dot_renderer.shutil, "which",
+            lambda n: "/usr/bin/dot" if n == "dot" else None,
+        )
+
+        import subprocess as _sp
+        counter = {"n": 0}
+
+        def fake_run(cmd, **kw):
+            counter["n"] += 1
+            return _sp.CompletedProcess(
+                cmd, returncode=0, stdout=_MINI_PNG, stderr=b""
+            )
+
+        monkeypatch.setattr(dot_renderer.subprocess, "run", fake_run)
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```dot\ndigraph { x -> y }\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        exporter.export(msgs)
+        assert counter["n"] == 1
+
+        # Second exporter instance → fresh Markdown state, but the
+        # disk cache should still serve the render.
+        colors = ExportColors(
+            user="#d4d4d4",
+            claude="#b0b0b0",
+            openai="#e8e8e8",
+            gemini="#c8d8e8",
+            perplexity="#d8c8e8",
+            mistral="#ffe0c8",
+        )
+        exporter2 = HtmlExporter(colors, font_size=14)
+        # Wipe in-memory cache to force the disk cache path.
+        dot_renderer._MEMORY_CACHE.clear()
+        exporter2.export(msgs)
+        assert counter["n"] == 1  # still 1 — disk served it
