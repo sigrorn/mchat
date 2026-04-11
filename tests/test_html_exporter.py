@@ -224,3 +224,117 @@ class TestHtmlExporterPersonas:
         ]
         html = exporter.export(msgs, personas=[])
         assert "Claude" in html
+
+
+class TestHtmlExporterPersonaColorOverride:
+    """#90 — the HTML export must honour persona.color_override when
+    the persona has one set, falling back to the provider colour
+    otherwise. The in-app chat display already honours the override;
+    the exporter was on a legacy provider-only path."""
+
+    def _make_persona(self, **overrides):
+        from mchat.models.persona import Persona, generate_persona_id
+        fields = dict(
+            conversation_id=1,
+            id=generate_persona_id(),
+            provider=Provider.CLAUDE,
+            name="Partner",
+            name_slug="partner",
+        )
+        fields.update(overrides)
+        return Persona(**fields)
+
+    @pytest.fixture
+    def exporter(self):
+        colors = ExportColors(
+            user="#d4d4d4",
+            claude="#b0b0b0",
+            openai="#e8e8e8",
+            gemini="#c8d8e8",
+            perplexity="#d8c8e8",
+            mistral="#ffe0c8",
+        )
+        return HtmlExporter(colors, font_size=14)
+
+    def test_persona_color_override_used_in_export(self, exporter):
+        """A persona with color_override='#abcdef' must have its
+        messages rendered with that background colour, NOT the
+        provider default."""
+        p = self._make_persona(color_override="#abcdef")
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="critique",
+                provider=Provider.CLAUDE,
+                persona_id=p.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p])
+        assert "#abcdef" in html, (
+            "persona.color_override must appear in the exported HTML"
+        )
+
+    def test_persona_without_override_falls_back_to_provider_color(
+        self, exporter,
+    ):
+        """A persona with color_override=None must fall back to the
+        provider colour from ExportColors."""
+        p = self._make_persona(color_override=None)
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="hi",
+                provider=Provider.CLAUDE,
+                persona_id=p.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p])
+        assert "#b0b0b0" in html  # claude provider colour from fixture
+
+    def test_override_applies_per_message_not_globally(self, exporter):
+        """Two personas backing the same provider: one with override,
+        one without. Each message must get its own colour."""
+        p_custom = self._make_persona(
+            name="Custom", color_override="#112233",
+        )
+        p_default = self._make_persona(
+            name="Default", color_override=None,
+        )
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="a",
+                provider=Provider.CLAUDE,
+                persona_id=p_custom.id,
+            ),
+            Message(
+                role=Role.ASSISTANT,
+                content="b",
+                provider=Provider.CLAUDE,
+                persona_id=p_default.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p_custom, p_default])
+        assert "#112233" in html  # custom override
+        assert "#b0b0b0" in html  # claude provider default
+
+    def test_tombstoned_persona_color_override_still_applied(self, exporter):
+        """A tombstoned persona with color_override should still paint
+        its historical messages with the override colour."""
+        from datetime import datetime, timezone
+        p = self._make_persona(
+            name="Archived",
+            name_slug="archived",
+            color_override="#fedcba",
+            deleted_at=datetime.now(timezone.utc),
+        )
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="old",
+                provider=Provider.CLAUDE,
+                persona_id=p.id,
+            ),
+        ]
+        html = exporter.export(msgs, personas=[p])
+        assert "#fedcba" in html
