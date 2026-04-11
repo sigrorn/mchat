@@ -315,3 +315,157 @@ class TestPartialExclusionUpdate:
         # Block numbers are non-negative and strictly increasing
         assert chat._message_block_starts[0] >= 0
         assert chat._message_block_starts[1] > chat._message_block_starts[0]
+
+
+# A real 91-byte PNG of a 1x1 red pixel, generated via QImage.save.
+# Used by the DOT tests so QTextDocument.addResource can round-trip
+# an actual image instead of a magic-bytes stub.
+_MINI_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\tpHYs\x00\x00\x0f"
+    b"a\x00\x00\x0fa\x01\xa8?\xa7i\x00\x00\x00\rIDAT\x08\x99c\xf8\xcf\xc0"
+    b"\xf0\x1f\x00\x05\x00\x01\xff\xab\xce\xb6\x89\x00\x00\x00\x00IEND\xae"
+    b"B`\x82"
+)
+
+
+class TestDotGraphRendering:
+    """#144 — DOT fences in assistant messages must render as inline
+    images in the chat document via the `mchat-graph://` resource
+    scheme and the dot_markdown_ext + dot_renderer pair."""
+
+    def test_chat_widget_markdown_instance_has_dot_extension(self, chat):
+        """The ChatWidget's markdown converter must carry the
+        DotExtension so assistant messages with ```dot``` fences
+        get rewritten to <img> placeholders."""
+        html = chat._md.convert("```dot\ndigraph { a -> b }\n```")
+        assert 'class="mchat-dot"' in html
+        assert "mchat-graph://" in html
+
+    def test_dot_message_adds_image_resource(
+        self, chat, monkeypatch,
+    ):
+        """After inserting an assistant message with a DOT block,
+        the chat document should have an ImageResource registered
+        at the corresponding mchat-graph://<hash>.png URL."""
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import dot_renderer
+
+        # Pretend graphviz is present and stub render_dot so the test
+        # doesn't depend on the system binary.
+        monkeypatch.setattr(
+            dot_renderer, "render_dot",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        source = "digraph { a -> b }"
+        msg = Message(
+            role=Role.ASSISTANT,
+            content=f"Intro\n\n```dot\n{source}\n```\n\nOutro",
+            provider=Provider.CLAUDE,
+        )
+        chat.add_message(msg)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-graph://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        # Resource resolves to a non-null QImage.
+        assert resource is not None
+        img = QImage(resource) if not isinstance(resource, QImage) else resource
+        assert not img.isNull(), (
+            "expected a valid QImage at mchat-graph://<hash>.png, "
+            f"got {type(resource).__name__}"
+        )
+
+    def test_plain_markdown_message_still_renders(self, chat):
+        """Regression guard: non-dot messages must still flow through
+        insert_rendered without resource-wiring side effects."""
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="A **bold** answer with `code`.",
+            provider=Provider.CLAUDE,
+        )
+        chat.add_message(msg)
+        # Message landed in the document — check by reading plain text.
+        txt = chat.toPlainText()
+        assert "bold" in txt
+        assert "code" in txt
+
+    def test_dot_message_when_render_returns_none_has_no_image(
+        self, chat, monkeypatch,
+    ):
+        """Graceful degradation: when render_dot returns None
+        (graphviz missing, bad DOT, timeout, …), no image resource
+        is registered, and the details fallback is still present
+        in the rendered text."""
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot", lambda source, **kw: None,
+        )
+
+        source = "digraph { a -> b }"
+        msg = Message(
+            role=Role.ASSISTANT,
+            content=f"```dot\n{source}\n```",
+            provider=Provider.CLAUDE,
+        )
+        chat.add_message(msg)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-graph://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        # Either None or a null image — the point is there's no
+        # loadable pixel data at this URL.
+        if resource is not None and isinstance(resource, QImage):
+            assert resource.isNull()
+        # Source fallback still visible in the plain text.
+        assert "digraph" in chat.toPlainText()
+
+    def test_bulk_load_messages_wires_dot_resources(
+        self, chat, monkeypatch,
+    ):
+        """load_messages() (used on chat reload / conversation switch)
+        must also pre-wire DOT resources — not just add_message."""
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import dot_renderer
+
+        monkeypatch.setattr(
+            dot_renderer, "render_dot", lambda source, **kw: _MINI_PNG,
+        )
+
+        source = "digraph { x -> y }"
+        msgs = [
+            Message(role=Role.USER, content="draw me"),
+            Message(
+                role=Role.ASSISTANT,
+                content=f"```dot\n{source}\n```",
+                provider=Provider.CLAUDE,
+            ),
+        ]
+        chat.load_messages(msgs)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-graph://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        img = QImage(resource) if not isinstance(resource, QImage) else resource
+        assert not img.isNull()
