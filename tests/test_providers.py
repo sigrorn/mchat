@@ -130,3 +130,51 @@ class TestMistralProvider:
         result = BaseProvider.format_messages_openai(msgs, Provider.OPENAI)
         assert result[0]["role"] == "user"
         assert "[MISTRAL responded]" in result[0]["content"]
+
+
+class TestApertusProvider:
+    """#156 — ApertusProvider via Infomaniak's OpenAI-compatible API."""
+
+    def test_provider_class_exists(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert issubclass(ApertusProvider, OpenAICompatibleProvider)
+
+    def test_provider_id(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        p = ApertusProvider(api_key="fake", product_id="12345")
+        assert p.provider_id == Provider.APERTUS
+        assert p.display_name == "Apertus"
+
+    def test_base_url_includes_product_id(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        p = ApertusProvider(api_key="fake", product_id="99999")
+        assert "99999" in p._base_url
+        assert "infomaniak" in p._base_url
+
+    def test_does_not_override_stream(self):
+        """stream() should live on the base class, not be overridden."""
+        from mchat.providers.apertus_provider import ApertusProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert ApertusProvider.stream is OpenAICompatibleProvider.stream
+
+    def test_does_not_override_get_client(self):
+        """_get_client() should live on the base class."""
+        from mchat.providers.apertus_provider import ApertusProvider
+        from mchat.providers.openai_compat import OpenAICompatibleProvider
+        assert ApertusProvider._get_client is OpenAICompatibleProvider._get_client
+
+    def test_cross_provider_formatting_with_apertus(self):
+        """Messages from Apertus should be reformatted as user context
+        when sent to another provider."""
+        msgs = [
+            Message(role=Role.ASSISTANT, content="I think Z", provider=Provider.APERTUS),
+        ]
+        result = BaseProvider.format_messages_openai(msgs, Provider.OPENAI)
+        assert result[0]["role"] == "user"
+        assert "[APERTUS responded]" in result[0]["content"]
+
+    def test_fallback_models(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        p = ApertusProvider(api_key="fake", product_id="12345")
+        assert "swiss-ai/Apertus-70B-Instruct-2509" in p._fallback_models

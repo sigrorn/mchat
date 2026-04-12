@@ -97,3 +97,27 @@ class TestMistralConfig:
         assert "color_key" in meta
         assert "system_prompt_key" in meta
         assert "display" in meta
+
+
+class TestApertusConfig:
+    """#156 — Apertus config keys must exist in DEFAULTS and PROVIDER_META."""
+
+    def test_apertus_defaults_exist(self, config):
+        assert config.get("apertus_api_key") == ""
+        assert config.get("apertus_product_id") == ""
+        assert config.get("apertus_model") != ""  # has a default model
+        assert config.get("color_apertus") != ""
+        assert config.get("system_prompt_apertus") == ""
+
+    def test_apertus_provider_meta(self):
+        from mchat.config import PROVIDER_META
+        assert "apertus" in PROVIDER_META
+        meta = PROVIDER_META["apertus"]
+        assert "api_key" in meta
+        assert "model_key" in meta
+        assert "color_key" in meta
+        assert "system_prompt_key" in meta
+        assert "display" in meta
+        assert meta["display"] == "Apertus"
+        # Apertus needs a product_id_key for the Infomaniak URL
+        assert "product_id_key" in meta

@@ -44,6 +44,15 @@ class TestMistralPricing:
         assert cost > 0
 
 
+class TestApertusPricing:
+    """#156 — Apertus model must have a pricing entry."""
+
+    def test_apertus_pricing(self):
+        cost = estimate_cost("swiss-ai/Apertus-70B-Instruct-2509", 1000, 500)
+        assert cost is not None
+        assert cost > 0
+
+
 class TestFormatCost:
     def test_format(self):
         assert format_cost(0.00123) == "$0.00123"

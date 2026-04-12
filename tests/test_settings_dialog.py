@@ -297,3 +297,70 @@ Be very concise
         assert "mistral" in d._api_key_edits
         assert "mistral" in d._color_btns
         assert "mistral" in d._system_prompt_edits
+
+    def test_apertus_tab_exists(self, qtbot, config):
+        """#156 — ProvidersDialog must have an Apertus tab."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        assert "apertus" in d._api_key_edits
+        assert "apertus" in d._color_btns
+        assert "apertus" in d._system_prompt_edits
+
+    def test_apertus_product_id_field_exists(self, qtbot, config):
+        """#156 — Apertus tab must have a Product ID field."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        assert "apertus" in d._product_id_edits
+
+    def test_apertus_product_id_saved(self, qtbot, config):
+        """#156 — Product ID must be saved to config."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        config.set("apertus_product_id", "12345")
+        config.save()
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        d._product_id_edits["apertus"].setText("99999")
+        d._save()
+        assert config.get("apertus_product_id") == "99999"
+
+    def test_apertus_product_id_loads(self, qtbot, config):
+        """#156 — Product ID must be loaded from config."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        config.set("apertus_product_id", "107927")
+        config.save()
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        assert d._product_id_edits["apertus"].text() == "107927"
+
+    def test_apertus_export_includes_product_id(self, qtbot, config):
+        """#156 — Provider export must include product_id for Apertus."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        config.set("apertus_product_id", "107927")
+        config.set("apertus_api_key", "test-key")
+        config.save()
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        md = d.export_providers_md()
+        assert "Product ID: 107927" in md
+
+    def test_apertus_import_reads_product_id(self, qtbot, config):
+        """#156 — Provider import must parse product_id for Apertus."""
+        from mchat.ui.providers_dialog import ProvidersDialog
+        d = ProvidersDialog(config)
+        qtbot.addWidget(d)
+        md = """# Provider Settings
+
+## Apertus
+- API key: apertus-key-123
+- Product ID: 55555
+- Model: swiss-ai/Apertus-70B-Instruct-2509
+- Color: #a0c8e8
+- System prompt:
+
+Be helpful
+"""
+        d.import_providers_md(md)
+        assert config.get("apertus_product_id") == "55555"
+        assert config.get("apertus_api_key") == "apertus-key-123"
