@@ -470,3 +470,114 @@ class TestDotGraphRendering:
         )
         assert isinstance(resource, QImage)
         assert not resource.isNull()
+
+
+class TestMermaidGraphRendering:
+    """#150 — Mermaid fences in assistant messages must render as inline
+    images in the chat document via the `mchat-mermaid://` resource
+    scheme and the mermaid_markdown_ext + mermaid_renderer pair."""
+
+    def test_chat_widget_markdown_instance_has_mermaid_extension(self, chat):
+        html = chat._md.convert("```mermaid\ngraph TD\n  A --> B\n```")
+        assert 'class="mchat-mermaid"' in html
+        assert "mchat-mermaid://" in html
+
+    def test_mermaid_message_adds_image_resource(
+        self, chat, monkeypatch,
+    ):
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        source = "graph TD\n  A --> B"
+        msg = Message(
+            role=Role.ASSISTANT,
+            content=f"Intro\n\n```mermaid\n{source}\n```\n\nOutro",
+            provider=Provider.CLAUDE,
+        )
+        chat.add_message(msg)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-mermaid://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        assert isinstance(resource, QImage), (
+            f"expected QImage at mchat-mermaid://<hash>.png, "
+            f"got {type(resource).__name__}"
+        )
+        assert not resource.isNull()
+
+    def test_mermaid_message_when_render_returns_none_has_no_image(
+        self, chat, monkeypatch,
+    ):
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid", lambda source, **kw: None,
+        )
+
+        source = "graph TD\n  A --> B"
+        msg = Message(
+            role=Role.ASSISTANT,
+            content=f"```mermaid\n{source}\n```",
+            provider=Provider.CLAUDE,
+        )
+        chat.add_message(msg)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-mermaid://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        if isinstance(resource, QImage):
+            assert resource.isNull()
+        else:
+            assert resource is None
+        assert "graph TD" in chat.toPlainText()
+
+    def test_bulk_load_messages_wires_mermaid_resources(
+        self, chat, monkeypatch,
+    ):
+        import hashlib
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QImage, QTextDocument
+
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid", lambda source, **kw: _MINI_PNG,
+        )
+
+        source = "graph TD\n  X --> Y"
+        msgs = [
+            Message(role=Role.USER, content="draw me"),
+            Message(
+                role=Role.ASSISTANT,
+                content=f"```mermaid\n{source}\n```",
+                provider=Provider.CLAUDE,
+            ),
+        ]
+        chat.load_messages(msgs)
+
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        url = QUrl(f"mchat-mermaid://{digest}.png")
+        resource = chat.document().resource(
+            QTextDocument.ResourceType.ImageResource, url
+        )
+        assert isinstance(resource, QImage)
+        assert not resource.isNull()
