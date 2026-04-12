@@ -59,6 +59,26 @@ class TestConfig:
         assert config.get("default_provider") == "claude"
 
 
+class TestWorkDirectory:
+    """#154 — work_directory config and work_dir() helper."""
+
+    def test_default_is_empty(self, config):
+        assert config.get("work_directory") == ""
+
+    def test_work_dir_returns_cwd_when_not_set(self, config):
+        import os
+        assert config.work_dir() == os.getcwd()
+
+    def test_work_dir_returns_configured_path(self, config):
+        config.set("work_directory", "C:/my/exports")
+        assert config.work_dir() == "C:/my/exports"
+
+    def test_work_dir_returns_cwd_when_empty_string(self, config):
+        import os
+        config.set("work_directory", "")
+        assert config.work_dir() == os.getcwd()
+
+
 class TestMistralConfig:
     """#80 — Mistral config keys must exist in DEFAULTS and PROVIDER_META."""
 

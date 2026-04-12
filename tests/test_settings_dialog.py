@@ -110,6 +110,29 @@ class TestSettingsDialogGeneralOnly:
         d._save()
         assert config.get("diagram_format") == "mermaid"
 
+    def test_work_directory_field_exists(self, qtbot, config):
+        """#154 — SettingsDialog exposes work_directory."""
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        assert hasattr(d, "_work_directory")
+
+    def test_work_directory_loads_from_config(self, qtbot, config):
+        config.set("work_directory", "C:/some/path")
+        config.save()
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        assert d._work_directory.text() == "C:/some/path"
+
+    def test_work_directory_saved_to_config(self, qtbot, config):
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        d._work_directory.setText("D:/exports")
+        d._save()
+        assert config.get("work_directory") == "D:/exports"
+
     def test_save_does_not_touch_provider_fields(self, qtbot, config):
         """The dialog must not clobber provider-specific config values
         (empty API key fields would wipe the real ones)."""

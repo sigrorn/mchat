@@ -43,6 +43,7 @@ DEFAULTS = {
         "So, when I ask whether something is agreeable to all of you, only answer whether it's agreeable "
         "from your own perspective."
     ),
+    "work_directory": "",  # default import/export directory; "" = use CWD
     "diagram_format": "auto",  # "auto", "mermaid", "graphviz", "none"
     "system_prompt_claude": "",
     "system_prompt_openai": "",
@@ -125,6 +126,12 @@ class Config:
         self._path.write_text(
             json.dumps(self._data, indent=2), encoding="utf-8"
         )
+
+    def work_dir(self) -> str:
+        """Return the configured work directory, or CWD if not set."""
+        import os
+        d = self.get("work_directory")
+        return d if d else os.getcwd()
 
     @property
     def anthropic_api_key(self) -> str:
