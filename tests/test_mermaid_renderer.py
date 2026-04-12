@@ -4,6 +4,7 @@
 #                 shell-out with two-tier (memory + disk) cache,
 #                 failure handling, and graceful degradation when
 #                 the `mmdc` binary is missing.
+#                 #152: renders to SVG for scalable diagrams.
 # Collaborators: mchat.mermaid_renderer, subprocess, shutil
 # ------------------------------------------------------------------
 from __future__ import annotations
@@ -14,8 +15,7 @@ import pytest
 
 from mchat import mermaid_renderer
 
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-DUMMY_PNG = PNG_MAGIC + b"fake-mermaid-payload"
+DUMMY_SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><text>test</text></svg>'
 
 VALID_MERMAID = "graph TD\n  A --> B"
 
@@ -44,18 +44,18 @@ def _fake_mmdc_present(monkeypatch):
 
 
 def _fake_subprocess_success(monkeypatch, tmp_path):
-    """Replace subprocess.run with a stub that writes DUMMY_PNG to the
+    """Replace subprocess.run with a stub that writes DUMMY_SVG to the
     output file path extracted from the command args.
     Returns a dict with 'n' — the number of times run() was called."""
     counter = {"n": 0}
 
     def fake_run(cmd, **kwargs):
         counter["n"] += 1
-        # Find the -o flag and write PNG to that path
+        # Find the -o flag and write SVG to that path
         for i, arg in enumerate(cmd):
             if arg == "-o" and i + 1 < len(cmd):
                 from pathlib import Path
-                Path(cmd[i + 1]).write_bytes(DUMMY_PNG)
+                Path(cmd[i + 1]).write_bytes(DUMMY_SVG)
                 break
         return subprocess.CompletedProcess(
             cmd, returncode=0, stdout=b"", stderr=b""
@@ -66,12 +66,12 @@ def _fake_subprocess_success(monkeypatch, tmp_path):
 
 
 class TestRenderMermaidHappyPath:
-    def test_returns_png_bytes(self, monkeypatch, tmp_path):
+    def test_returns_svg_bytes(self, monkeypatch, tmp_path):
         _fake_mmdc_present(monkeypatch)
         counter = _fake_subprocess_success(monkeypatch, tmp_path)
         result = mermaid_renderer.render_mermaid(VALID_MERMAID)
         assert result is not None
-        assert result.startswith(PNG_MAGIC)
+        assert b"<svg" in result
 
 
 class TestInputGuards:
@@ -200,12 +200,12 @@ class TestCaching:
         mermaid_renderer.render_mermaid(VALID_MERMAID)
         assert counter["n"] == 1
         assert mermaid_renderer._MEMORY_CACHE
-        cache_files = list((tmp_path / "mermaid_cache").glob("*.png"))
+        cache_files = list((tmp_path / "mermaid_cache").glob("*.svg"))
         assert len(cache_files) == 1
 
         mermaid_renderer.clear_cache()
         assert mermaid_renderer._MEMORY_CACHE == {}
-        assert list((tmp_path / "mermaid_cache").glob("*.png")) == []
+        assert list((tmp_path / "mermaid_cache").glob("*.svg")) == []
         mermaid_renderer.render_mermaid(VALID_MERMAID)
         assert counter["n"] == 2
 
@@ -216,4 +216,4 @@ class TestCaching:
         _fake_subprocess_success(monkeypatch, tmp_path)
         mermaid_renderer.render_mermaid(VALID_MERMAID)
         expected = hashlib.sha256(VALID_MERMAID.encode("utf-8")).hexdigest()
-        assert (tmp_path / "mermaid_cache" / f"{expected}.png").exists()
+        assert (tmp_path / "mermaid_cache" / f"{expected}.svg").exists()

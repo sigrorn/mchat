@@ -321,12 +321,7 @@ class TestPartialExclusionUpdate:
 # Used by the DOT tests so QTextDocument.addResource can round-trip
 # an actual image instead of a magic-bytes stub. Base64-decoded at
 # import time so we don't have to hand-transcribe the binary bytes.
-import base64 as _b64
-
-_MINI_PNG = _b64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9hAAAP"
-    "YQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
-)
+_MINI_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>'
 
 
 class TestDotGraphRendering:
@@ -347,7 +342,7 @@ class TestDotGraphRendering:
     ):
         """After inserting an assistant message with a DOT block,
         the chat document should have an ImageResource registered
-        at the corresponding mchat-graph://<hash>.png URL."""
+        at the corresponding mchat-graph://<hash>.svg URL."""
         import hashlib
 
         from PySide6.QtCore import QUrl
@@ -359,7 +354,7 @@ class TestDotGraphRendering:
         # doesn't depend on the system binary.
         monkeypatch.setattr(
             dot_renderer, "render_dot",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         source = "digraph { a -> b }"
@@ -371,13 +366,13 @@ class TestDotGraphRendering:
         chat.add_message(msg)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-graph://{digest}.png")
+        url = QUrl(f"mchat-graph://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
         # Resource resolves to a non-null QImage.
         assert isinstance(resource, QImage), (
-            f"expected QImage at mchat-graph://<hash>.png, "
+            f"expected QImage at mchat-graph://<hash>.svg, "
             f"got {type(resource).__name__}"
         )
         assert not resource.isNull()
@@ -423,7 +418,7 @@ class TestDotGraphRendering:
         chat.add_message(msg)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-graph://{digest}.png")
+        url = QUrl(f"mchat-graph://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
@@ -449,7 +444,7 @@ class TestDotGraphRendering:
         from mchat import dot_renderer
 
         monkeypatch.setattr(
-            dot_renderer, "render_dot", lambda source, **kw: _MINI_PNG,
+            dot_renderer, "render_dot", lambda source, **kw: _MINI_SVG,
         )
 
         source = "digraph { x -> y }"
@@ -464,7 +459,7 @@ class TestDotGraphRendering:
         chat.load_messages(msgs)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-graph://{digest}.png")
+        url = QUrl(f"mchat-graph://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
@@ -473,9 +468,10 @@ class TestDotGraphRendering:
 
 
 class TestMermaidGraphRendering:
-    """#150 — Mermaid fences in assistant messages must render as inline
-    images in the chat document via the `mchat-mermaid://` resource
-    scheme and the mermaid_markdown_ext + mermaid_renderer pair."""
+    """#150/#152 — Mermaid fences in assistant messages must render as
+    inline images in the chat document via the `mchat-mermaid://`
+    resource scheme. SVG output is rasterized to QImage via
+    QSvgRenderer for Qt's document model."""
 
     def test_chat_widget_markdown_instance_has_mermaid_extension(self, chat):
         html = chat._md.convert("```mermaid\ngraph TD\n  A --> B\n```")
@@ -494,7 +490,7 @@ class TestMermaidGraphRendering:
 
         monkeypatch.setattr(
             mermaid_renderer, "render_mermaid",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         source = "graph TD\n  A --> B"
@@ -506,12 +502,12 @@ class TestMermaidGraphRendering:
         chat.add_message(msg)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-mermaid://{digest}.png")
+        url = QUrl(f"mchat-mermaid://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
         assert isinstance(resource, QImage), (
-            f"expected QImage at mchat-mermaid://<hash>.png, "
+            f"expected QImage at mchat-mermaid://<hash>.svg, "
             f"got {type(resource).__name__}"
         )
         assert not resource.isNull()
@@ -539,7 +535,7 @@ class TestMermaidGraphRendering:
         chat.add_message(msg)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-mermaid://{digest}.png")
+        url = QUrl(f"mchat-mermaid://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )
@@ -560,7 +556,7 @@ class TestMermaidGraphRendering:
         from mchat import mermaid_renderer
 
         monkeypatch.setattr(
-            mermaid_renderer, "render_mermaid", lambda source, **kw: _MINI_PNG,
+            mermaid_renderer, "render_mermaid", lambda source, **kw: _MINI_SVG,
         )
 
         source = "graph TD\n  X --> Y"
@@ -575,7 +571,7 @@ class TestMermaidGraphRendering:
         chat.load_messages(msgs)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-mermaid://{digest}.png")
+        url = QUrl(f"mchat-mermaid://{digest}.svg")
         resource = chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )

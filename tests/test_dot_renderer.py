@@ -14,8 +14,7 @@ import pytest
 
 from mchat import dot_renderer
 
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-DUMMY_PNG = PNG_MAGIC + b"fake-png-payload"
+DUMMY_SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><text>dot</text></svg>'
 
 VALID_DOT = "digraph { a -> b }"
 
@@ -44,14 +43,14 @@ def _fake_dot_present(monkeypatch):
 
 
 def _fake_subprocess_success(monkeypatch):
-    """Replace subprocess.run with a stub that returns DUMMY_PNG.
+    """Replace subprocess.run with a stub that returns DUMMY_SVG.
     Returns a dict with 'n' — the number of times run() was called."""
     counter = {"n": 0}
 
     def fake_run(cmd, **kwargs):
         counter["n"] += 1
         return subprocess.CompletedProcess(
-            cmd, returncode=0, stdout=DUMMY_PNG, stderr=b""
+            cmd, returncode=0, stdout=DUMMY_SVG, stderr=b""
         )
 
     monkeypatch.setattr(dot_renderer.subprocess, "run", fake_run)
@@ -59,12 +58,12 @@ def _fake_subprocess_success(monkeypatch):
 
 
 class TestRenderDotHappyPath:
-    def test_returns_png_bytes(self, monkeypatch):
+    def test_returns_svg_bytes(self, monkeypatch):
         _fake_dot_present(monkeypatch)
         _fake_subprocess_success(monkeypatch)
         result = dot_renderer.render_dot(VALID_DOT)
         assert result is not None
-        assert result.startswith(PNG_MAGIC)
+        assert b"<svg" in result
 
 
 class TestInputGuards:
@@ -204,12 +203,12 @@ class TestCaching:
         dot_renderer.render_dot(VALID_DOT)
         assert counter["n"] == 1
         assert dot_renderer._MEMORY_CACHE  # something in-memory
-        cache_files = list((tmp_path / "graph_cache").glob("*.png"))
+        cache_files = list((tmp_path / "graph_cache").glob("*.svg"))
         assert len(cache_files) == 1  # something on disk
 
         dot_renderer.clear_cache()
         assert dot_renderer._MEMORY_CACHE == {}
-        assert list((tmp_path / "graph_cache").glob("*.png")) == []
+        assert list((tmp_path / "graph_cache").glob("*.svg")) == []
         # Next render re-runs the subprocess.
         dot_renderer.render_dot(VALID_DOT)
         assert counter["n"] == 2
@@ -221,4 +220,4 @@ class TestCaching:
         _fake_subprocess_success(monkeypatch)
         dot_renderer.render_dot(VALID_DOT)
         expected = hashlib.sha256(VALID_DOT.encode("utf-8")).hexdigest()
-        assert (tmp_path / "graph_cache" / f"{expected}.png").exists()
+        assert (tmp_path / "graph_cache" / f"{expected}.svg").exists()

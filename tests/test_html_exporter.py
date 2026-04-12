@@ -345,10 +345,7 @@ class TestHtmlExporterPersonaColorOverride:
 # test environment.
 import base64 as _b64
 
-_MINI_PNG = _b64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9hAAAP"
-    "YQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
-)
+_MINI_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>'
 
 
 class TestHtmlExporterDotGraphs:
@@ -361,7 +358,7 @@ class TestHtmlExporterDotGraphs:
 
         monkeypatch.setattr(
             dot_renderer, "render_dot",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -372,19 +369,19 @@ class TestHtmlExporterDotGraphs:
             )
         ]
         html = exporter.export(msgs)
-        assert "data:image/png;base64," in html
+        assert "data:image/svg+xml;base64," in html
         # The mchat-graph:// URL should have been replaced, not left
         # in place alongside the data URI.
         assert "mchat-graph://" not in html
 
-    def test_data_uri_decodes_to_valid_png(self, exporter, monkeypatch):
+    def test_data_uri_decodes_to_valid_svg(self, exporter, monkeypatch):
         import re as _re
 
         from mchat import dot_renderer
 
         monkeypatch.setattr(
             dot_renderer, "render_dot",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -395,11 +392,11 @@ class TestHtmlExporterDotGraphs:
             )
         ]
         html = exporter.export(msgs)
-        m = _re.search(r'data:image/png;base64,([A-Za-z0-9+/=]+)', html)
+        m = _re.search(r'data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)', html)
         assert m is not None
         decoded = _b64.b64decode(m.group(1))
-        assert decoded.startswith(b"\x89PNG\r\n\x1a\n")
-        assert decoded == _MINI_PNG
+        assert b"<svg" in decoded
+        assert decoded == _MINI_SVG
 
     def test_details_source_fallback_preserved(self, exporter, monkeypatch):
         """The <details> source block must survive into the export
@@ -409,7 +406,7 @@ class TestHtmlExporterDotGraphs:
 
         monkeypatch.setattr(
             dot_renderer, "render_dot",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -442,7 +439,7 @@ class TestHtmlExporterDotGraphs:
             )
         ]
         html = exporter.export(msgs)
-        assert "data:image/png" not in html
+        assert "data:image/svg+xml" not in html
         assert "mchat-graph://" not in html
         assert "<strong>bold</strong>" in html
 
@@ -468,7 +465,7 @@ class TestHtmlExporterDotGraphs:
         ]
         html = exporter.export(msgs)
         assert "mchat-graph://" not in html  # no broken img remains
-        assert "data:image/png" not in html
+        assert "data:image/svg+xml" not in html
         # Source fallback is still in the output.
         assert "digraph" in html
 
@@ -506,7 +503,7 @@ class TestHtmlExporterDotGraphs:
 
         monkeypatch.setattr(
             dot_renderer, "render_dot",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -571,7 +568,7 @@ class TestHtmlExporterDotGraphs:
         def fake_run(cmd, **kw):
             counter["n"] += 1
             return _sp.CompletedProcess(
-                cmd, returncode=0, stdout=_MINI_PNG, stderr=b""
+                cmd, returncode=0, stdout=_MINI_SVG, stderr=b""
             )
 
         monkeypatch.setattr(dot_renderer.subprocess, "run", fake_run)
@@ -603,16 +600,19 @@ class TestHtmlExporterDotGraphs:
         assert counter["n"] == 1  # still 1 — disk served it
 
 
-class TestHtmlExporterMermaidGraphs:
-    """#150 — HTML export must inline Mermaid graph PNGs as base64 data
-    URIs, parallel to DOT graph handling."""
+_MINI_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>'
 
-    def test_mermaid_block_becomes_base64_data_uri(self, exporter, monkeypatch):
+
+class TestHtmlExporterMermaidGraphs:
+    """#150/#152 — HTML export must inline Mermaid SVGs as base64 data
+    URIs so the exported .html file is self-contained and scalable."""
+
+    def test_mermaid_block_becomes_base64_svg_data_uri(self, exporter, monkeypatch):
         from mchat import mermaid_renderer
 
         monkeypatch.setattr(
             mermaid_renderer, "render_mermaid",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -623,7 +623,7 @@ class TestHtmlExporterMermaidGraphs:
             )
         ]
         html = exporter.export(msgs)
-        assert "data:image/png;base64," in html
+        assert "data:image/svg+xml;base64," in html
         assert "mchat-mermaid://" not in html
 
     def test_mermaid_details_source_fallback_preserved(self, exporter, monkeypatch):
@@ -631,7 +631,7 @@ class TestHtmlExporterMermaidGraphs:
 
         monkeypatch.setattr(
             mermaid_renderer, "render_mermaid",
-            lambda source, **kw: _MINI_PNG,
+            lambda source, **kw: _MINI_SVG,
         )
 
         msgs = [
@@ -663,7 +663,6 @@ class TestHtmlExporterMermaidGraphs:
         ]
         html = exporter.export(msgs)
         assert "mchat-mermaid://" not in html
-        assert "data:image/png" not in html
         assert "graph TD" in html
 
     def test_mermaid_degradation_warning(self, exporter, monkeypatch):
