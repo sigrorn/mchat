@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from mchat.config import PROVIDER_META, Config
 from mchat.db import Database
+from mchat.diagram_prompt import diagram_instruction
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
 from mchat.models.persona import Persona
@@ -97,6 +98,13 @@ def build_context(
         )
     elif conv.system_prompt:
         parts.append(conv.system_prompt)
+    # #151: inject diagram instruction based on tool availability
+    # and user preference — appended after all other system prompt
+    # parts so it doesn't interfere with persona identity lines.
+    diag = diagram_instruction(config)
+    if diag:
+        parts.append(diag)
+
     if parts:
         context.append(Message(role=Role.SYSTEM, content="\n\n".join(parts)))
 
