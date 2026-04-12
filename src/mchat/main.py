@@ -91,18 +91,19 @@ def main() -> None:
             "mchat.mchat.app.1"
         )
 
-    # #146: log graphviz availability once at startup so a missing
-    # `dot` binary shows up in crash.log rather than failing silently
-    # the first time a model emits a DOT block.
+    # #146/#150: log diagram tool availability once at startup so a
+    # missing binary shows up in crash.log rather than failing silently.
     try:
-        from mchat import dot_renderer
-        _available = dot_renderer.is_graphviz_available()
+        from mchat import dot_renderer, mermaid_renderer
+        _graphviz = dot_renderer.is_graphviz_available()
+        _mmdc = mermaid_renderer.is_mmdc_available()
         crash_log = DEFAULT_CONFIG_DIR / "crash.log"
         crash_log.parent.mkdir(parents=True, exist_ok=True)
         with open(crash_log, "a", encoding="utf-8") as _f:
             _f.write(
                 f"\n===== {datetime.now().isoformat()} startup =====\n"
-                f"graphviz available: {_available}\n"
+                f"graphviz available: {_graphviz}\n"
+                f"mmdc available: {_mmdc}\n"
             )
     except Exception:
         # Best-effort logging — never let it crash startup.

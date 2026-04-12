@@ -28,6 +28,7 @@ A multi-provider LLM chat application with a desktop UI. Chat with Claude, GPT, 
 - **Customisable colours** — per-persona and per-provider background colours
 - **Message numbers** — user messages show their position for easy reference
 - **DOT graphs** — models can emit ```` ```dot ... ``` ```` fenced blocks that render inline as PNG (requires Graphviz; falls back to a collapsible source view when unavailable)
+- **Mermaid diagrams** — models can emit ```` ```mermaid ... ``` ```` fenced blocks that render inline as PNG (requires mermaid-cli; falls back to source view when unavailable)
 - **Debug mode** — `mchat -debug` dumps per-persona provider I/O to timestamped text files
 
 ## Setup
@@ -54,6 +55,23 @@ Graphviz and make sure the `dot` binary is on your `PATH`:
 
 When Graphviz isn't installed, DOT blocks fall back to a collapsible
 source-only view — the app stays fully usable.
+
+### Mermaid CLI (optional)
+
+If you want inline Mermaid diagrams (flowcharts, sequence diagrams,
+class diagrams, etc.) in model responses, install the mermaid CLI:
+
+```bash
+npm install -g @mermaid-js/mermaid-cli
+```
+
+This requires Node.js. The first run downloads a bundled Chromium
+(~150-200 MB). When `mmdc` isn't installed, mermaid blocks fall back
+to a collapsible source-only view.
+
+Rendered mermaid diagrams are cached at `~/.mchat/mermaid_cache/`
+keyed by the sha256 of the source. Delete the directory at any time
+to reclaim disk space.
 
 ## API Keys
 
@@ -206,6 +224,20 @@ HTML export inlines every graph as a base64 `data:` URI so exported
 files are fully self-contained. If you export while Graphviz isn't
 installed, the exported file carries a visible "Graphviz not
 available" warning banner so nothing degrades silently.
+
+### Mermaid diagrams
+
+Models can also embed Mermaid diagrams in fenced code blocks. If
+`mmdc` (mermaid-cli) is installed the diagram renders inline as a PNG;
+otherwise you see the source in a collapsible `<details>` block.
+
+Mermaid supports flowcharts, sequence diagrams, class diagrams, Gantt
+charts, ER diagrams, state machines, pie charts, and more.
+
+Example prompt:
+> Draw me a sequence diagram showing a REST API request/response cycle.
+
+Rendered mermaid diagrams are cached at `~/.mchat/mermaid_cache/`.
 
 ### Database maintenance
 
