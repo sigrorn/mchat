@@ -486,8 +486,9 @@ New instructions
     ):
         """#140: import pre-flight must validate every parsed persona
         name BEFORE tombstoning existing rows or creating new ones.
-        If any name is invalid, the import is a no-op — the DB state
-        is unchanged."""
+        Structural errors (whitespace, @, etc.) cause a full abort.
+        #155: reserved names (provider names) are accepted with a
+        warning but don't abort the import."""
         dialog.create_persona(provider=Provider.CLAUDE, name="Original")
         md = """# Personas
 
@@ -510,25 +511,12 @@ first
 - Prompt:
 
 second
-
----
-
-## claude
-- Provider: gemini
-- Mode: inherit
-- Model override: (none)
-- Color override: (none)
-- Prompt:
-
-third
 """
         from mchat.ui.persona_dialog import PersonaImportError
         with pytest.raises(PersonaImportError) as exc:
             dialog.import_personas_md(md)
-        # The error lists ALL offending rows at once, not just the first
         msg = str(exc.value)
         assert "Bad Name" in msg
-        assert "claude" in msg
         # DB is unchanged: the original persona is still active, no
         # new personas, no tombstones beyond what was already there.
         active = db.list_personas(conv.id)
@@ -584,6 +572,141 @@ second
 - Prompt:
 
 translate
+"""
+        from mchat.ui.persona_dialog import PersonaImportError
+        with pytest.raises(PersonaImportError):
+            dialog.import_personas_md(md)
+        assert len(db.list_personas(conv.id)) == 0
+
+
+class TestImportReservedNames:
+    """#155 — importing personas with reserved names (provider names
+    like 'claude', 'gpt') should succeed but flag them for rename."""
+
+    def test_import_with_reserved_name_loads_personas(self, dialog, db, conv):
+        """A file with a reserved name should import successfully,
+        creating the persona in the DB (so the user can rename it)."""
+        md = """# Personas
+
+## claude
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+Be helpful
+"""
+        dialog.import_personas_md(md)
+        personas = db.list_personas(conv.id)
+        assert len(personas) == 1
+        assert personas[0].name == "claude"
+
+    def test_import_with_mixed_valid_and_reserved_loads_all(
+        self, dialog, db, conv
+    ):
+        md = """# Personas
+
+## Partner
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+first
+
+---
+
+## gpt
+- Provider: openai
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+second
+"""
+        dialog.import_personas_md(md)
+        personas = db.list_personas(conv.id)
+        assert len(personas) == 2
+        names = {p.name for p in personas}
+        assert "Partner" in names
+        assert "gpt" in names
+
+    def test_reserved_name_persona_highlighted_red(self, qtbot, dialog, db, conv):
+        """After importing a reserved name, _refresh_list should mark
+        the row with red text and block the Close button."""
+        md = """# Personas
+
+## claude
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+Be helpful
+"""
+        dialog.import_personas_md(md)
+        # Check the list item is highlighted
+        assert dialog._list.count() == 1
+        item = dialog._list.item(0)
+        assert item.foreground().color().red() > 200  # red-ish
+
+    def test_close_button_disabled_with_reserved_name(self, qtbot, dialog, db, conv):
+        md = """# Personas
+
+## claude
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+Be helpful
+"""
+        dialog.import_personas_md(md)
+        assert not dialog._close_btn.isEnabled()
+
+    def test_close_button_enabled_after_rename(self, qtbot, dialog, db, conv):
+        """After renaming the reserved-name persona to a valid name,
+        the Close button should be re-enabled."""
+        md = """# Personas
+
+## claude
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+Be helpful
+"""
+        dialog.import_personas_md(md)
+        assert not dialog._close_btn.isEnabled()
+
+        # Simulate renaming: update via DB and refresh
+        persona = db.list_personas(conv.id)[0]
+        persona.name = "assistant"
+        persona.name_slug = "assistant"
+        db.update_persona(persona)
+        dialog._refresh_list()
+        assert dialog._close_btn.isEnabled()
+
+    def test_structural_errors_still_reject(self, dialog, db, conv):
+        """Whitespace names and other structural issues should still
+        cause PersonaImportError — only reserved names are lenient."""
+        md = """# Personas
+
+## Bad Name
+- Provider: claude
+- Mode: inherit
+- Model override: (none)
+- Color override: (none)
+- Prompt:
+
+test
 """
         from mchat.ui.persona_dialog import PersonaImportError
         with pytest.raises(PersonaImportError):
