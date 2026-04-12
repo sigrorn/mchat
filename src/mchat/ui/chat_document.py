@@ -34,7 +34,7 @@ from mchat.ui.mermaid_markdown_ext import MERMAID_SOURCE_MAP
 # <img> tags. The hash is a 64-char hex sha256; we accept the full
 # hex alphabet here for defensive pattern matching.
 _DOT_URL_RE = re.compile(r'mchat-graph://([0-9a-f]+)\.svg')
-_MERMAID_URL_RE = re.compile(r'mchat-mermaid://([0-9a-f]+)\.svg')
+_MERMAID_URL_RE = re.compile(r'mchat-mermaid://([0-9a-f]+)\.png')
 
 # Maximum rasterization width for SVG → QImage conversion.
 # Large enough for legible text in complex diagrams, small enough
@@ -327,10 +327,12 @@ class ChatDocumentMixin:
     # ------------------------------------------------------------------
 
     def _wire_mermaid_resources(self, html: str) -> None:
-        """Scan rendered HTML for mchat-mermaid://<hash>.svg URLs and
+        """Scan rendered HTML for mchat-mermaid://<hash>.png URLs and
         pre-register matching QImage resources on the document.
 
-        Same pattern as _wire_dot_resources but uses mermaid_renderer."""
+        #153: mermaid renders to PNG (not SVG) because Qt's
+        QSvgRenderer can't handle <foreignObject> text nodes that
+        mermaid uses. DOT stays SVG since graphviz uses native <text>."""
         if "mchat-mermaid://" not in html:
             return
         doc = self.document()
@@ -340,11 +342,11 @@ class ChatDocumentMixin:
             source = MERMAID_SOURCE_MAP.get(digest)
             if source is None:
                 continue
-            svg_bytes = mermaid_renderer.render_mermaid(source)
-            if not svg_bytes:
+            png = mermaid_renderer.render_mermaid(source)
+            if not png:
                 continue
-            img = _svg_to_qimage(svg_bytes)
-            if img is None or img.isNull():
+            img = QImage.fromData(png, "PNG")
+            if img.isNull():
                 continue
             doc.addResource(
                 QTextDocument.ResourceType.ImageResource,

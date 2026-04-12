@@ -70,8 +70,8 @@ class TestSourceMap:
         mermaid_markdown_ext.MERMAID_SOURCE_MAP.clear()
         html_b = _convert(SIMPLE_MD)
         digest = hashlib.sha256(SIMPLE_MERMAID.encode("utf-8")).hexdigest()
-        assert f"mchat-mermaid://{digest}.svg" in html_a
-        assert f"mchat-mermaid://{digest}.svg" in html_b
+        assert f"mchat-mermaid://{digest}.png" in html_a
+        assert f"mchat-mermaid://{digest}.png" in html_b
 
     def test_different_sources_produce_different_urls(self):
         html_a = _convert("```mermaid\ngraph TD\n  A --> B\n```")

@@ -600,19 +600,23 @@ class TestHtmlExporterDotGraphs:
         assert counter["n"] == 1  # still 1 — disk served it
 
 
-_MINI_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>'
+_MINI_PNG = _b64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9hAAAP"
+    "YQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+)
 
 
 class TestHtmlExporterMermaidGraphs:
-    """#150/#152 — HTML export must inline Mermaid SVGs as base64 data
-    URIs so the exported .html file is self-contained and scalable."""
+    """#150/#153 — HTML export must inline Mermaid PNGs as base64 data
+    URIs. Mermaid uses PNG (not SVG) because mermaid's SVG relies on
+    <foreignObject> which QSvgRenderer can't handle."""
 
-    def test_mermaid_block_becomes_base64_svg_data_uri(self, exporter, monkeypatch):
+    def test_mermaid_block_becomes_base64_png_data_uri(self, exporter, monkeypatch):
         from mchat import mermaid_renderer
 
         monkeypatch.setattr(
             mermaid_renderer, "render_mermaid",
-            lambda source, **kw: _MINI_SVG,
+            lambda source, **kw: _MINI_PNG,
         )
 
         msgs = [
@@ -623,7 +627,7 @@ class TestHtmlExporterMermaidGraphs:
             )
         ]
         html = exporter.export(msgs)
-        assert "data:image/svg+xml;base64," in html
+        assert "data:image/png;base64," in html
         assert "mchat-mermaid://" not in html
 
     def test_mermaid_details_source_fallback_preserved(self, exporter, monkeypatch):
@@ -631,7 +635,7 @@ class TestHtmlExporterMermaidGraphs:
 
         monkeypatch.setattr(
             mermaid_renderer, "render_mermaid",
-            lambda source, **kw: _MINI_SVG,
+            lambda source, **kw: _MINI_PNG,
         )
 
         msgs = [

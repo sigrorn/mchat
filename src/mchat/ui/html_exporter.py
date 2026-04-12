@@ -31,7 +31,7 @@ _DOT_IMG_RE = re.compile(
     r'<img([^>]*?)src="mchat-graph://([0-9a-f]+)\.svg"([^>]*)/?>'
 )
 _MERMAID_IMG_RE = re.compile(
-    r'<img([^>]*?)src="mchat-mermaid://([0-9a-f]+)\.svg"([^>]*)/?>'
+    r'<img([^>]*?)src="mchat-mermaid://([0-9a-f]+)\.png"([^>]*)/?>'
 )
 
 
@@ -229,8 +229,11 @@ class HtmlExporter:
     # ------------------------------------------------------------------
 
     def _inline_mermaid_images(self, html: str) -> str:
-        """Rewrite every <img src="mchat-mermaid://<hash>.svg"> to a
-        self-contained data:image/svg+xml;base64 URI."""
+        """Rewrite every <img src="mchat-mermaid://<hash>.png"> to a
+        self-contained data:image/png;base64 URI.
+
+        #153: mermaid stays PNG (not SVG) because mermaid's SVG uses
+        <foreignObject> which many viewers can't handle inline."""
 
         def repl(match: re.Match[str]) -> str:
             digest = match.group(2)
@@ -238,15 +241,15 @@ class HtmlExporter:
             if source is None:
                 self._mermaid_render_failures += 1
                 return ""
-            svg = mermaid_renderer.render_mermaid(source)
-            if not svg:
+            png = mermaid_renderer.render_mermaid(source)
+            if not png:
                 self._mermaid_render_failures += 1
                 return ""
-            b64 = _base64.b64encode(svg).decode("ascii")
+            b64 = _base64.b64encode(png).decode("ascii")
             pre_attrs = match.group(1) or ""
             post_attrs = match.group(3) or ""
             return (
-                f'<img{pre_attrs}src="data:image/svg+xml;base64,{b64}"'
+                f'<img{pre_attrs}src="data:image/png;base64,{b64}"'
                 f'{post_attrs}/>'
             )
 

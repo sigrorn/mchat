@@ -49,12 +49,16 @@ def is_mmdc_available() -> bool:
 # -- Public renderer ----------------------------------------------
 
 def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
-    """Turn Mermaid source into SVG bytes. Returns None on any failure.
+    """Turn Mermaid source into PNG bytes. Returns None on any failure.
 
     Lookup order: in-memory cache -> on-disk cache -> shell out to
     `mmdc`. Uses temp files for I/O because mmdc doesn't reliably
-    support stdin/stdout pipes. SVG output is scalable, so complex
-    diagrams stay legible at any zoom level (#152).
+    support stdin/stdout pipes.
+
+    #153: mermaid must render to PNG (not SVG) because Qt's
+    QSvgRenderer doesn't support <foreignObject>, which mermaid uses
+    for all node text. Rendered at 2400px wide so complex diagrams
+    stay legible. DOT/graphviz stays SVG since it uses native <text>.
 
     Timeout is 15s (vs 5s for dot) because mmdc spins up headless
     Chromium on each invocation.
@@ -73,7 +77,7 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
         return cached
 
     # 2) disk cache
-    disk_path = cache_dir() / f"{digest}.svg"
+    disk_path = cache_dir() / f"{digest}.png"
     if disk_path.exists():
         try:
             data = disk_path.read_bytes()
@@ -95,7 +99,7 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             input_file = td_path / "input.mmd"
-            output_file = td_path / "output.svg"
+            output_file = td_path / "output.png"
             input_file.write_text(source, encoding="utf-8")
 
             result = subprocess.run(
@@ -103,6 +107,7 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
                     mmdc_path,
                     "-i", str(input_file),
                     "-o", str(output_file),
+                    "-w", "2400",
                     "--quiet",
                 ],
                 capture_output=True,
@@ -136,7 +141,7 @@ def clear_cache() -> None:
     """Wipe both cache tiers."""
     _MEMORY_CACHE.clear()
     try:
-        for p in cache_dir().glob("*.svg"):
+        for p in cache_dir().glob("*.png"):
             try:
                 p.unlink()
             except OSError:
