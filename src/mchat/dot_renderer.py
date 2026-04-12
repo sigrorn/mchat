@@ -59,11 +59,12 @@ def is_graphviz_available() -> bool:
 # -- Public renderer ----------------------------------------------
 
 def render_dot(source: str, *, timeout_s: float = 5.0) -> bytes | None:
-    """Turn DOT source into PNG bytes. Returns None on any failure.
+    """Turn DOT source into SVG bytes. Returns None on any failure.
 
     Lookup order: in-memory cache → on-disk cache → shell out to
-    `dot -Tpng`. Successful renders are written to disk first (so a
-    crash doesn't lose the work) and then to the in-memory LRU.
+    `dot -Tsvg`. SVG output is scalable, so complex graphs stay
+    legible at any zoom level (#152). Successful renders are written
+    to disk first (crash safety) and then to the in-memory LRU.
 
     Failure modes that return None:
       * empty or whitespace-only source
@@ -86,7 +87,7 @@ def render_dot(source: str, *, timeout_s: float = 5.0) -> bytes | None:
         return cached
 
     # 2) disk cache
-    disk_path = cache_dir() / f"{digest}.png"
+    disk_path = cache_dir() / f"{digest}.svg"
     if disk_path.exists():
         try:
             data = disk_path.read_bytes()
@@ -107,12 +108,7 @@ def render_dot(source: str, *, timeout_s: float = 5.0) -> bytes | None:
         result = subprocess.run(
             [
                 dot_path,
-                "-Tpng",
-                "-Gdpi=72",
-                # -Gsize caps the rendered dimensions at 12" x 12"
-                # at 72 DPI (~864 x 864 px), so a runaway graph
-                # can't produce a 50-megapixel image.
-                "-Gsize=12,12",
+                "-Tsvg",
             ],
             input=encoded,
             capture_output=True,
@@ -126,16 +122,16 @@ def render_dot(source: str, *, timeout_s: float = 5.0) -> bytes | None:
     if result.returncode != 0 or not result.stdout:
         return None
 
-    png = result.stdout
+    svg = result.stdout
     # Disk first, memory second — so a crash between the two still
     # leaves the render recoverable next session.
     try:
         cache_dir().mkdir(parents=True, exist_ok=True)
-        disk_path.write_bytes(png)
+        disk_path.write_bytes(svg)
     except OSError:
         pass
-    _memory_put(digest, png)
-    return png
+    _memory_put(digest, svg)
+    return svg
 
 
 def clear_cache() -> None:
@@ -143,7 +139,7 @@ def clear_cache() -> None:
     //vacuum-style maintenance path."""
     _MEMORY_CACHE.clear()
     try:
-        for p in cache_dir().glob("*.png"):
+        for p in cache_dir().glob("*.svg"):
             try:
                 p.unlink()
             except OSError:

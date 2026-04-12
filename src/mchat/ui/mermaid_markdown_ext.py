@@ -39,7 +39,7 @@ def _build_placeholder_html(source: str, digest: str) -> str:
     escaped = _html.escape(source)
     return (
         f'<div class="mchat-mermaid">'
-        f'<img src="mchat-mermaid://{digest}.png" alt="mermaid diagram"/>'
+        f'<img src="mchat-mermaid://{digest}.svg" alt="mermaid diagram"/>'
         f'<details><summary>mermaid source</summary>'
         f'<pre><code class="language-mermaid">{escaped}</code></pre>'
         f'</details>'

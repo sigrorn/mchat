@@ -49,11 +49,12 @@ def is_mmdc_available() -> bool:
 # -- Public renderer ----------------------------------------------
 
 def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
-    """Turn Mermaid source into PNG bytes. Returns None on any failure.
+    """Turn Mermaid source into SVG bytes. Returns None on any failure.
 
     Lookup order: in-memory cache -> on-disk cache -> shell out to
     `mmdc`. Uses temp files for I/O because mmdc doesn't reliably
-    support stdin/stdout pipes.
+    support stdin/stdout pipes. SVG output is scalable, so complex
+    diagrams stay legible at any zoom level (#152).
 
     Timeout is 15s (vs 5s for dot) because mmdc spins up headless
     Chromium on each invocation.
@@ -72,7 +73,7 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
         return cached
 
     # 2) disk cache
-    disk_path = cache_dir() / f"{digest}.png"
+    disk_path = cache_dir() / f"{digest}.svg"
     if disk_path.exists():
         try:
             data = disk_path.read_bytes()
@@ -94,7 +95,7 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             input_file = td_path / "input.mmd"
-            output_file = td_path / "output.png"
+            output_file = td_path / "output.svg"
             input_file.write_text(source, encoding="utf-8")
 
             result = subprocess.run(
@@ -102,7 +103,6 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
                     mmdc_path,
                     "-i", str(input_file),
                     "-o", str(output_file),
-                    "-w", "800",
                     "--quiet",
                 ],
                 capture_output=True,
@@ -113,30 +113,30 @@ def render_mermaid(source: str, *, timeout_s: float = 15.0) -> bytes | None:
                 return None
             if not output_file.exists():
                 return None
-            png = output_file.read_bytes()
+            svg = output_file.read_bytes()
     except subprocess.TimeoutExpired:
         return None
     except (OSError, subprocess.SubprocessError):
         return None
 
-    if not png:
+    if not svg:
         return None
 
     # Disk first, memory second
     try:
         cache_dir().mkdir(parents=True, exist_ok=True)
-        disk_path.write_bytes(png)
+        disk_path.write_bytes(svg)
     except OSError:
         pass
-    _memory_put(digest, png)
-    return png
+    _memory_put(digest, svg)
+    return svg
 
 
 def clear_cache() -> None:
     """Wipe both cache tiers."""
     _MEMORY_CACHE.clear()
     try:
-        for p in cache_dir().glob("*.png"):
+        for p in cache_dir().glob("*.svg"):
             try:
                 p.unlink()
             except OSError:

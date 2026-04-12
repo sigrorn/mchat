@@ -28,10 +28,10 @@ from mchat.ui.mermaid_markdown_ext import MERMAID_SOURCE_MAP, MermaidExtension
 # Match the mchat-graph://<hash>.png URL scheme the DOT markdown
 # extension stashes in <img> tags.
 _DOT_IMG_RE = re.compile(
-    r'<img([^>]*?)src="mchat-graph://([0-9a-f]+)\.png"([^>]*)/?>'
+    r'<img([^>]*?)src="mchat-graph://([0-9a-f]+)\.svg"([^>]*)/?>'
 )
 _MERMAID_IMG_RE = re.compile(
-    r'<img([^>]*?)src="mchat-mermaid://([0-9a-f]+)\.png"([^>]*)/?>'
+    r'<img([^>]*?)src="mchat-mermaid://([0-9a-f]+)\.svg"([^>]*)/?>'
 )
 
 
@@ -196,14 +196,13 @@ class HtmlExporter:
     # ------------------------------------------------------------------
 
     def _inline_dot_images(self, html: str) -> str:
-        """Rewrite every <img src="mchat-graph://<hash>.png"> in
-        ``html`` to a self-contained data:image/png;base64 URI so
+        """Rewrite every <img src="mchat-graph://<hash>.svg"> in
+        ``html`` to a self-contained data:image/svg+xml;base64 URI so
         the exported file has no app-internal URLs left.
 
-        On render failure (graphviz missing, bad DOT, etc.) the
-        whole <img> tag is dropped, ``_dot_render_failures`` is
-        bumped, and the <details> source fallback emitted by
-        dot_markdown_ext carries the graph."""
+        SVG output means the browser can scale diagrams losslessly
+        (#152). On render failure the <img> tag is dropped and the
+        <details> source fallback carries the graph."""
 
         def repl(match: re.Match[str]) -> str:
             digest = match.group(2)
@@ -211,15 +210,15 @@ class HtmlExporter:
             if source is None:
                 self._dot_render_failures += 1
                 return ""
-            png = dot_renderer.render_dot(source)
-            if not png:
+            svg = dot_renderer.render_dot(source)
+            if not svg:
                 self._dot_render_failures += 1
                 return ""
-            b64 = _base64.b64encode(png).decode("ascii")
+            b64 = _base64.b64encode(svg).decode("ascii")
             pre_attrs = match.group(1) or ""
             post_attrs = match.group(3) or ""
             return (
-                f'<img{pre_attrs}src="data:image/png;base64,{b64}"'
+                f'<img{pre_attrs}src="data:image/svg+xml;base64,{b64}"'
                 f'{post_attrs}/>'
             )
 
@@ -230,8 +229,8 @@ class HtmlExporter:
     # ------------------------------------------------------------------
 
     def _inline_mermaid_images(self, html: str) -> str:
-        """Rewrite every <img src="mchat-mermaid://<hash>.png"> to a
-        self-contained data:image/png;base64 URI."""
+        """Rewrite every <img src="mchat-mermaid://<hash>.svg"> to a
+        self-contained data:image/svg+xml;base64 URI."""
 
         def repl(match: re.Match[str]) -> str:
             digest = match.group(2)
@@ -239,15 +238,15 @@ class HtmlExporter:
             if source is None:
                 self._mermaid_render_failures += 1
                 return ""
-            png = mermaid_renderer.render_mermaid(source)
-            if not png:
+            svg = mermaid_renderer.render_mermaid(source)
+            if not svg:
                 self._mermaid_render_failures += 1
                 return ""
-            b64 = _base64.b64encode(png).decode("ascii")
+            b64 = _base64.b64encode(svg).decode("ascii")
             pre_attrs = match.group(1) or ""
             post_attrs = match.group(3) or ""
             return (
-                f'<img{pre_attrs}src="data:image/png;base64,{b64}"'
+                f'<img{pre_attrs}src="data:image/svg+xml;base64,{b64}"'
                 f'{post_attrs}/>'
             )
 

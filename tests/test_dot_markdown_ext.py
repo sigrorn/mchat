@@ -76,8 +76,8 @@ class TestSourceMap:
         html_b = _convert(SIMPLE_MD)
         # Same hash → same URL substring in both renders.
         digest = hashlib.sha256(SIMPLE_DOT.encode("utf-8")).hexdigest()
-        assert f"mchat-graph://{digest}.png" in html_a
-        assert f"mchat-graph://{digest}.png" in html_b
+        assert f"mchat-graph://{digest}.svg" in html_a
+        assert f"mchat-graph://{digest}.svg" in html_b
 
     def test_different_sources_produce_different_urls(self):
         html_a = _convert("```dot\ndigraph { a -> b }\n```")

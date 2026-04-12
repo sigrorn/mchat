@@ -57,7 +57,7 @@ def _build_placeholder_html(source: str, digest: str) -> str:
     escaped = _html.escape(source)
     return (
         f'<div class="mchat-dot">'
-        f'<img src="mchat-graph://{digest}.png" alt="dot graph"/>'
+        f'<img src="mchat-graph://{digest}.svg" alt="dot graph"/>'
         f'<details><summary>dot source</summary>'
         f'<pre><code class="language-dot">{escaped}</code></pre>'
         f'</details>'

@@ -16,12 +16,14 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import (
     QColor,
     QImage,
+    QPainter,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextLength,
 )
+from PySide6.QtSvg import QSvgRenderer
 
 from mchat import dot_renderer, mermaid_renderer
 from mchat.models.message import Message, Provider, Role
@@ -31,8 +33,36 @@ from mchat.ui.mermaid_markdown_ext import MERMAID_SOURCE_MAP
 # Match the mchat-graph://<hash>.png URL scheme we stash in DOT
 # <img> tags. The hash is a 64-char hex sha256; we accept the full
 # hex alphabet here for defensive pattern matching.
-_DOT_URL_RE = re.compile(r'mchat-graph://([0-9a-f]+)\.png')
-_MERMAID_URL_RE = re.compile(r'mchat-mermaid://([0-9a-f]+)\.png')
+_DOT_URL_RE = re.compile(r'mchat-graph://([0-9a-f]+)\.svg')
+_MERMAID_URL_RE = re.compile(r'mchat-mermaid://([0-9a-f]+)\.svg')
+
+# Maximum rasterization width for SVG → QImage conversion.
+# Large enough for legible text in complex diagrams, small enough
+# to avoid excessive memory use.
+_SVG_RASTER_MAX_WIDTH = 1600
+
+
+def _svg_to_qimage(svg_bytes: bytes) -> QImage | None:
+    """Rasterize SVG bytes to a QImage via QSvgRenderer.
+
+    Scales the SVG proportionally to _SVG_RASTER_MAX_WIDTH pixels wide
+    (or its natural size if smaller). Returns None on any failure."""
+    renderer = QSvgRenderer(svg_bytes)
+    if not renderer.isValid():
+        return None
+    size = renderer.defaultSize()
+    if size.width() <= 0 or size.height() <= 0:
+        return None
+    if size.width() > _SVG_RASTER_MAX_WIDTH:
+        scale = _SVG_RASTER_MAX_WIDTH / size.width()
+        size = size * scale
+    img = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(0)
+    painter = QPainter(img)
+    renderer.render(painter)
+    painter.end()
+    return img
+
 
 # Role info stored per text-block: (role, provider, model)
 _RoleInfo = tuple[Role, Provider | None, str | None]
@@ -258,9 +288,12 @@ class ChatDocumentMixin:
     # ------------------------------------------------------------------
 
     def _wire_dot_resources(self, html: str) -> None:
-        """Scan rendered HTML for mchat-graph://<hash>.png URLs and
+        """Scan rendered HTML for mchat-graph://<hash>.svg URLs and
         pre-register matching QImage resources on the document, so
         Qt's layout engine finds them when it lays out the <img> tag.
+
+        #152: renderers now output SVG. We rasterize via QSvgRenderer
+        at a high resolution so text stays legible in the app.
 
         Renders are served from dot_renderer's two-tier cache, so
         this is cheap on re-insertion of the same chat. When
@@ -277,11 +310,11 @@ class ChatDocumentMixin:
             source = DOT_SOURCE_MAP.get(digest)
             if source is None:
                 continue
-            png = dot_renderer.render_dot(source)
-            if not png:
+            svg_bytes = dot_renderer.render_dot(source)
+            if not svg_bytes:
                 continue
-            img = QImage.fromData(png, "PNG")
-            if img.isNull():
+            img = _svg_to_qimage(svg_bytes)
+            if img is None or img.isNull():
                 continue
             doc.addResource(
                 QTextDocument.ResourceType.ImageResource,
@@ -294,7 +327,7 @@ class ChatDocumentMixin:
     # ------------------------------------------------------------------
 
     def _wire_mermaid_resources(self, html: str) -> None:
-        """Scan rendered HTML for mchat-mermaid://<hash>.png URLs and
+        """Scan rendered HTML for mchat-mermaid://<hash>.svg URLs and
         pre-register matching QImage resources on the document.
 
         Same pattern as _wire_dot_resources but uses mermaid_renderer."""
@@ -307,11 +340,11 @@ class ChatDocumentMixin:
             source = MERMAID_SOURCE_MAP.get(digest)
             if source is None:
                 continue
-            png = mermaid_renderer.render_mermaid(source)
-            if not png:
+            svg_bytes = mermaid_renderer.render_mermaid(source)
+            if not svg_bytes:
                 continue
-            img = QImage.fromData(png, "PNG")
-            if img.isNull():
+            img = _svg_to_qimage(svg_bytes)
+            if img is None or img.isNull():
                 continue
             doc.addResource(
                 QTextDocument.ResourceType.ImageResource,
