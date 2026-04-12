@@ -24,6 +24,9 @@ def handle_pin(arg: str, host: CommandHost) -> bool:
         return True
     target_part, _, instruction = arg.partition(",")
     target_part = target_part.strip().lower()
+    # #149: accept @-prefixed targets (e.g. @all, @claude, @partner)
+    # so users can carry the targeting grammar from message input.
+    target_part = target_part.lstrip("@")
     instruction = instruction.strip()
     if not target_part or not instruction:
         host._chat.add_note(
@@ -39,7 +42,7 @@ def handle_pin(arg: str, host: CommandHost) -> bool:
         label = "all"
     else:
         # Target may be persona names or provider shorthands.
-        names = [n for n in target_part.replace(",", " ").split() if n]
+        names = [n.lstrip("@") for n in target_part.replace(",", " ").split() if n]
         resolved_providers: list[Provider] = []
         resolved_labels: list[str] = []
         unknown: list[str] = []
@@ -142,7 +145,8 @@ def handle_pins(arg: str, host: CommandHost) -> bool:
     if arg.strip():
         from mchat.models.persona import slugify_persona_name
         from mchat.router import PREFIX_TO_PROVIDER
-        name = arg.strip().lower()
+        # #149: accept @-prefixed filter names.
+        name = arg.strip().lower().lstrip("@")
         # Try persona name first
         resolved = False
         if host._current_conv:
