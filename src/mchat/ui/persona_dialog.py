@@ -744,8 +744,10 @@ class PersonaDialog(QDialog):
         self._refresh_effective_labels(persona)
 
     def _on_export_clicked(self) -> None:
+        import os
+        default_path = os.path.join(self._config.work_dir(), "personas.md")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Personas", "personas.md",
+            self, "Export Personas", default_path,
             "Markdown Files (*.md);;All Files (*)",
         )
         if not path:
@@ -756,7 +758,7 @@ class PersonaDialog(QDialog):
 
     def _on_import_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import Personas", "",
+            self, "Import Personas", self._config.work_dir(),
             "Markdown Files (*.md);;All Files (*)",
         )
         if not path:

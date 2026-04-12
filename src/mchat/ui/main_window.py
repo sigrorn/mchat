@@ -558,9 +558,11 @@ class MainWindow(QMainWindow):
     def _export_chat(self) -> None:
         if not self._current_conv or not self._current_conv.messages:
             return
+        import os
         title = self._current_conv.title.replace(" ", "_")[:40]
+        default_path = os.path.join(self._config.work_dir(), f"{title}.html")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Chat", f"{title}.html", "HTML Files (*.html)"
+            self, "Export Chat", default_path, "HTML Files (*.html)"
         )
         if path:
             from mchat.ui.html_exporter import exporter_from_config

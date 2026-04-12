@@ -14,8 +14,10 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -87,6 +89,18 @@ class SettingsDialog(QDialog):
         # key still exists as a fallback for all,/flipped, prefix
         # parsing but is no longer user-facing.
 
+        # Work directory (#154)
+        work_dir_layout = QHBoxLayout()
+        self._work_directory = QLineEdit(self._config.get("work_directory"))
+        self._work_directory.setPlaceholderText(
+            "Default directory for import/export (empty = current directory)"
+        )
+        work_dir_layout.addWidget(self._work_directory)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._browse_work_dir)
+        work_dir_layout.addWidget(browse_btn)
+        form.addRow("Work directory:", work_dir_layout)
+
         # Diagram format preference (#151)
         self._diagram_format = QComboBox()
         self._diagram_format.addItems(["auto", "mermaid", "graphviz", "none"])
@@ -141,6 +155,13 @@ class SettingsDialog(QDialog):
         )
         btn.setText(hex_color)
 
+    def _browse_work_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Work Directory", self._work_directory.text()
+        )
+        if d:
+            self._work_directory.setText(d)
+
     def _reset_user_color(self) -> None:
         default = DEFAULTS["color_user"]
         self._color_user_btn.setProperty("hex_color", default)
@@ -163,5 +184,6 @@ class SettingsDialog(QDialog):
         self._config.set("exclude_shade_mode", self._exclude_shade_mode.currentText())
         self._config.set("exclude_shade_amount", self._exclude_shade_amount.value())
         self._config.set("diagram_format", self._diagram_format.currentText())
+        self._config.set("work_directory", self._work_directory.text().strip())
         self._config.save()
         self.accept()

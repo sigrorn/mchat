@@ -328,8 +328,10 @@ class ProvidersDialog(QDialog):
         self._config.save()
 
     def _on_export_clicked(self) -> None:
+        import os
+        default_path = os.path.join(self._config.work_dir(), "providers.md")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Provider Settings", "providers.md",
+            self, "Export Provider Settings", default_path,
             "Markdown Files (*.md);;All Files (*)",
         )
         if not path:
@@ -340,7 +342,7 @@ class ProvidersDialog(QDialog):
 
     def _on_import_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import Provider Settings", "",
+            self, "Import Provider Settings", self._config.work_dir(),
             "Markdown Files (*.md);;All Files (*)",
         )
         if not path:

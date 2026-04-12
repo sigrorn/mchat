@@ -211,8 +211,12 @@ class ConversationManager:
             messages, personas=personas,
         )
 
+        import os
+        default_path = os.path.join(
+            self._services.config.work_dir(), f"{title}.html"
+        )
         path, _ = QFileDialog.getSaveFileName(
-            host, "Export Chat", f"{title}.html", "HTML Files (*.html)"
+            host, "Export Chat", default_path, "HTML Files (*.html)"
         )
         if path:
             with open(path, "w", encoding="utf-8") as f:
