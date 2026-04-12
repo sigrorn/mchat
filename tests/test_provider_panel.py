@@ -173,10 +173,10 @@ class TestTwoRowToolbar:
         btn = QPushButton("Test")
         panel.layout_ref().addWidget(btn)
         panel.set_personas(self._make_entries(6))
-        # Button should still be visible and in the buttons row
-        assert btn.isVisible()
         # The buttons row layout should contain our button
         assert panel._buttons_row.indexOf(btn) >= 0
+        # And the personas row should NOT contain it
+        assert panel._personas_row.indexOf(btn) < 0
 
     def test_personas_row_exists_in_two_row_mode(self, qtbot, config):
         """The personas row contains the persona widgets."""

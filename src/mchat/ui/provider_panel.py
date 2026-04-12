@@ -5,6 +5,8 @@
 #                 (model combo + include checkbox + spend label),
 #                 keyed by persona_id. Owns styling (provider colours,
 #                 waiting/retrying states) and model list population.
+#                 #157: splits into two rows when >4 personas —
+#                 persona widgets on top, action buttons on bottom.
 # Collaborators: config, PySide6, pricing (format_cost)
 # ------------------------------------------------------------------
 from __future__ import annotations
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -29,6 +32,9 @@ from mchat.pricing import format_cost
 
 # Each entry is (persona_id, display_label, provider).
 PersonaEntry = tuple[str, str, Provider]
+
+# Threshold: more than this many personas triggers two-row layout.
+_TWO_ROW_THRESHOLD = 4
 
 
 class ProviderPanel(QFrame):
@@ -58,6 +64,7 @@ class ProviderPanel(QFrame):
         self._model_fetcher: QThread | None = None
         self._empty_hint: QLabel | None = None
         self._personas_btn: QPushButton | None = None
+        self._two_row_mode: bool = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -68,12 +75,31 @@ class ProviderPanel(QFrame):
         self.setStyleSheet(
             "ProviderPanel { background-color: #f5f5f5; border-top: 1px solid #ddd; }"
         )
-        self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(16, 8, 16, 8)
-        self._layout.setSpacing(8)
-        self._layout.addStretch()
+        # Top-level: vertical layout holding up to two horizontal rows.
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setSpacing(0)
 
-        # Empty-state widgets (hidden by default)
+        # Personas row — only visible in two-row mode.
+        self._personas_row_widget = QWidget()
+        self._personas_row = QHBoxLayout(self._personas_row_widget)
+        self._personas_row.setContentsMargins(16, 8, 16, 2)
+        self._personas_row.setSpacing(8)
+        self._personas_row.addStretch()
+        self._personas_row_widget.setVisible(False)
+        self._outer.addWidget(self._personas_row_widget)
+
+        # Buttons row — always visible. In single-row mode it also
+        # holds the persona widgets; in two-row mode it holds only
+        # the action buttons (right-aligned).
+        self._buttons_row_widget = QWidget()
+        self._buttons_row = QHBoxLayout(self._buttons_row_widget)
+        self._buttons_row.setContentsMargins(16, 8, 16, 8)
+        self._buttons_row.setSpacing(8)
+        self._buttons_row.addStretch()
+        self._outer.addWidget(self._buttons_row_widget)
+
+        # Empty-state widgets (hidden by default) — live in buttons row.
         self._empty_hint = QLabel(
             'No personas yet \u2014 use <code>//addpersona &lt;provider&gt; as "&lt;name&gt;" ...'
             "</code> or click below"
@@ -82,7 +108,7 @@ class ProviderPanel(QFrame):
             f"color: #888; font-size: {self._font_size - 1}px; padding: 4px 8px;"
         )
         self._empty_hint.setVisible(False)
-        self._layout.insertWidget(0, self._empty_hint)
+        self._buttons_row.insertWidget(0, self._empty_hint)
 
         self._personas_btn = QPushButton("Personas\u2026")
         self._personas_btn.setStyleSheet(
@@ -92,7 +118,7 @@ class ProviderPanel(QFrame):
         )
         self._personas_btn.setVisible(False)
         self._personas_btn.clicked.connect(self.personas_requested.emit)
-        self._layout.insertWidget(1, self._personas_btn)
+        self._buttons_row.insertWidget(1, self._personas_btn)
 
     # ------------------------------------------------------------------
     # Persona rows
@@ -103,9 +129,9 @@ class ProviderPanel(QFrame):
 
         Each entry is ``(persona_id, display_label, provider)``.
         """
-        # Clear existing rows
+        # Clear existing persona widgets from whichever row they're in.
         for w in self._row_widgets:
-            self._layout.removeWidget(w)
+            w.setParent(None)
             w.deleteLater()
         self._row_widgets.clear()
         self._combos.clear()
@@ -115,6 +141,10 @@ class ProviderPanel(QFrame):
         self._personas = list(entries)
 
         if not entries:
+            self._two_row_mode = False
+            self._personas_row_widget.setVisible(False)
+            # In single-row mode, reduce top margin since no persona row.
+            self._buttons_row.setContentsMargins(16, 8, 16, 8)
             self.show_empty_state()
             return
 
@@ -124,6 +154,20 @@ class ProviderPanel(QFrame):
         if self._personas_btn:
             self._personas_btn.setVisible(False)
 
+        # Decide layout mode.
+        self._two_row_mode = len(entries) > _TWO_ROW_THRESHOLD
+
+        if self._two_row_mode:
+            # Personas go in the top row, buttons stay in the bottom row.
+            self._personas_row_widget.setVisible(True)
+            self._buttons_row.setContentsMargins(16, 2, 16, 8)
+            target_layout = self._personas_row
+        else:
+            # Single row: personas go in the buttons row (before the stretch).
+            self._personas_row_widget.setVisible(False)
+            self._buttons_row.setContentsMargins(16, 8, 16, 8)
+            target_layout = self._buttons_row
+
         insert_pos = 0
         for i, (pid, label, provider) in enumerate(entries):
             self._persona_providers[pid] = provider
@@ -131,14 +175,14 @@ class ProviderPanel(QFrame):
             if i > 0:
                 spacer = QWidget()
                 spacer.setFixedWidth(12)
-                self._layout.insertWidget(insert_pos, spacer)
+                target_layout.insertWidget(insert_pos, spacer)
                 self._row_widgets.append(spacer)
                 insert_pos += 1
 
             # Persona label
             name_lbl = QLabel(label)
             name_lbl.setStyleSheet(f"color: #444; font-size: {self._font_size - 1}px; font-weight: bold;")
-            self._layout.insertWidget(insert_pos, name_lbl)
+            target_layout.insertWidget(insert_pos, name_lbl)
             self._row_widgets.append(name_lbl)
             insert_pos += 1
 
@@ -146,7 +190,7 @@ class ProviderPanel(QFrame):
             combo.setMinimumWidth(140)
             combo.activated.connect(lambda _, c=combo: c.hidePopup())
             combo.currentTextChanged.connect(lambda _, p=pid: self.combo_changed.emit(p))
-            self._layout.insertWidget(insert_pos, combo)
+            target_layout.insertWidget(insert_pos, combo)
             self._row_widgets.append(combo)
             self._combos[pid] = combo
             insert_pos += 1
@@ -154,14 +198,14 @@ class ProviderPanel(QFrame):
             cb = QCheckBox()
             cb.setToolTip(f"Include {label} in selection")
             cb.stateChanged.connect(lambda _, p=pid: self.selection_changed.emit(p))
-            self._layout.insertWidget(insert_pos, cb)
+            target_layout.insertWidget(insert_pos, cb)
             self._row_widgets.append(cb)
             self._checkboxes[pid] = cb
             insert_pos += 1
 
             spend_lbl = QLabel("$0.00000")
             self._apply_spend_label_style(spend_lbl)
-            self._layout.insertWidget(insert_pos, spend_lbl)
+            target_layout.insertWidget(insert_pos, spend_lbl)
             self._row_widgets.append(spend_lbl)
             self._spend_labels[pid] = spend_lbl
             insert_pos += 1
@@ -212,7 +256,9 @@ class ProviderPanel(QFrame):
         return self._combos[persona_id].currentText()
 
     def layout_ref(self) -> QHBoxLayout:
-        return self._layout
+        """Return the buttons row layout. MainWindow adds action buttons
+        (Cols, Personas, Providers, Settings) here."""
+        return self._buttons_row
 
     # ------------------------------------------------------------------
     # Selection sync
