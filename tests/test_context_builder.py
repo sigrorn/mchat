@@ -362,3 +362,87 @@ class TestCrossPersonaLabelUsesName:
         assert not any(p_claude.id in c for c in labels), (
             f"opaque persona_id leaked into context: {labels}"
         )
+
+
+class TestDiagramInstructionInjection:
+    """#151 — build_context must inject a diagram instruction into the
+    system prompt when diagram tools are available."""
+
+    def test_diagram_instruction_present_when_tools_available(
+        self, db, config, conv_with_history, monkeypatch,
+    ):
+        from mchat import dot_renderer, mermaid_renderer
+
+        dot_renderer.is_graphviz_available.cache_clear()
+        mermaid_renderer.is_mmdc_available.cache_clear()
+        monkeypatch.setattr(dot_renderer, "is_graphviz_available", lambda: True)
+        monkeypatch.setattr(mermaid_renderer, "is_mmdc_available", lambda: False)
+
+        # Ensure there's a system prompt so build_context creates a
+        # SYSTEM message we can inspect for the diagram fragment.
+        conv_with_history.system_prompt = "Be helpful."
+
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        sys_msgs = [m for m in ctx if m.role == Role.SYSTEM]
+        assert sys_msgs
+        sys_text = sys_msgs[0].content
+        assert "dot" in sys_text.lower()
+
+    def test_no_diagram_instruction_when_nothing_installed(
+        self, db, config, conv_with_history, monkeypatch,
+    ):
+        from mchat import dot_renderer, mermaid_renderer
+
+        dot_renderer.is_graphviz_available.cache_clear()
+        mermaid_renderer.is_mmdc_available.cache_clear()
+        monkeypatch.setattr(dot_renderer, "is_graphviz_available", lambda: False)
+        monkeypatch.setattr(mermaid_renderer, "is_mmdc_available", lambda: False)
+
+        conv_with_history.system_prompt = "Be helpful."
+
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        sys_msgs = [m for m in ctx if m.role == Role.SYSTEM]
+        assert sys_msgs
+        sys_text = sys_msgs[0].content.lower()
+        # Should not contain diagram instructions
+        assert "fenced code block" not in sys_text
+
+    def test_diagram_format_none_suppresses_injection(
+        self, db, config, conv_with_history, monkeypatch,
+    ):
+        from mchat import dot_renderer, mermaid_renderer
+
+        dot_renderer.is_graphviz_available.cache_clear()
+        mermaid_renderer.is_mmdc_available.cache_clear()
+        monkeypatch.setattr(dot_renderer, "is_graphviz_available", lambda: True)
+        monkeypatch.setattr(mermaid_renderer, "is_mmdc_available", lambda: True)
+        config.set("diagram_format", "none")
+
+        conv_with_history.system_prompt = "Be helpful."
+
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        sys_msgs = [m for m in ctx if m.role == Role.SYSTEM]
+        assert sys_msgs
+        sys_text = sys_msgs[0].content.lower()
+        assert "fenced code block" not in sys_text
+
+    def test_diagram_instruction_injected_even_without_system_prompt(
+        self, db, config, conv_with_history, monkeypatch,
+    ):
+        """When no system prompt is set but diagram tools are available,
+        build_context should still create a SYSTEM message with just
+        the diagram instruction."""
+        from mchat import dot_renderer, mermaid_renderer
+
+        dot_renderer.is_graphviz_available.cache_clear()
+        mermaid_renderer.is_mmdc_available.cache_clear()
+        monkeypatch.setattr(dot_renderer, "is_graphviz_available", lambda: True)
+        monkeypatch.setattr(mermaid_renderer, "is_mmdc_available", lambda: False)
+
+        conv_with_history.system_prompt = None
+
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config)
+        sys_msgs = [m for m in ctx if m.role == Role.SYSTEM]
+        assert sys_msgs
+        sys_text = sys_msgs[0].content
+        assert "dot" in sys_text.lower()
