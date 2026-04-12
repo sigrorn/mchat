@@ -74,6 +74,7 @@ HELP_PROVIDERS = [
     ("@gemini <message>", "send to Gemini (synthetic default)", Provider.GEMINI),
     ("@perplexity <message>", "send to Perplexity (also: @pplx)", Provider.PERPLEXITY),
     ("@mistral <message>", "send to Mistral (synthetic default)", Provider.MISTRAL),
+    ("@apertus <message>", "send to Apertus (synthetic default)", Provider.APERTUS),
     ("@all <message>", "send to all personas in the chat", None),
     ("@others <message>", "send to non-selected personas", None),
     ("(no prefix)", "send to current selection", None),

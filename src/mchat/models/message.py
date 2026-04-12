@@ -22,6 +22,7 @@ class Provider(Enum):
     GEMINI = "gemini"
     PERPLEXITY = "perplexity"
     MISTRAL = "mistral"
+    APERTUS = "apertus"
 
 
 @dataclass

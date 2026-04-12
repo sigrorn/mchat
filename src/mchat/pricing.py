@@ -36,6 +36,9 @@ _PRICES: dict[str, tuple[float, float]] = {
     "mistral-medium": (0.40, 1.20),
     "codestral":      (0.30, 0.90),
     "pixtral-large":  (2.00, 6.00),
+    # Apertus (swiss-ai) via Infomaniak — CHF rates ≈ USD at 1.13x
+    # CHF 0.007/10k in = $0.79/1M, CHF 0.025/10k out = $2.83/1M
+    "swiss-ai/Apertus": (0.79, 2.83),
     # Perplexity Sonar
     "sonar-deep-research": (2.00, 8.00),
     "sonar-reasoning-pro": (2.00, 8.00),

@@ -22,7 +22,7 @@ def make_fake_provider_class(pid: Provider):
     """Return a concrete BaseProvider subclass hardwired to the given Provider."""
 
     class _Fake(BaseProvider):
-        def __init__(self, api_key: str = "fake", default_model: str = "fake-model"):
+        def __init__(self, api_key: str = "fake", default_model: str = "fake-model", **kwargs):
             super().__init__()
             self._default_model = default_model
 
@@ -60,11 +60,13 @@ def main_window(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(mw_mod, "GeminiProvider", make_fake_provider_class(Provider.GEMINI))
     monkeypatch.setattr(mw_mod, "PerplexityProvider", make_fake_provider_class(Provider.PERPLEXITY))
     monkeypatch.setattr(mw_mod, "MistralProvider", make_fake_provider_class(Provider.MISTRAL))
+    monkeypatch.setattr(mw_mod, "ApertusProvider", make_fake_provider_class(Provider.APERTUS))
 
     cfg = Config(config_path=tmp_path / "cfg.json")
     # Populate fake keys so every provider is "configured"
-    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "perplexity_api_key", "mistral_api_key"):
+    for k in ("anthropic_api_key", "openai_api_key", "gemini_api_key", "perplexity_api_key", "mistral_api_key", "apertus_api_key"):
         cfg.set(k, "fake-key")
+    cfg.set("apertus_product_id", "12345")
     cfg.save()
 
     db = Database(db_path=tmp_path / "test.db")

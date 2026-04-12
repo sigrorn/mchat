@@ -22,6 +22,7 @@ _COPY_PREFIX = {
     Provider.GEMINI: "gemini",
     Provider.PERPLEXITY: "perplexity",
     Provider.MISTRAL: "mistral",
+    Provider.APERTUS: "apertus",
 }
 
 

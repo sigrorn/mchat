@@ -33,6 +33,7 @@ PROVIDER_ORDER: list[Provider] = [
     Provider.GEMINI,
     Provider.PERPLEXITY,
     Provider.MISTRAL,
+    Provider.APERTUS,
 ]
 
 PROVIDER_DISPLAY: dict[Provider, str] = {

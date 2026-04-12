@@ -31,6 +31,7 @@ from mchat.providers.base import BaseProvider
 from mchat.providers.claude import ClaudeProvider
 from mchat.providers.gemini_provider import GeminiProvider
 from mchat.providers.openai_provider import OpenAIProvider
+from mchat.providers.apertus_provider import ApertusProvider
 from mchat.providers.mistral_provider import MistralProvider
 from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
@@ -224,6 +225,15 @@ class MainWindow(QMainWindow):
             providers[Provider.MISTRAL] = MistralProvider(
                 api_key=mistral_key,
                 default_model=self._config.get("mistral_model"),
+            )
+
+        apertus_key = self._config.get("apertus_api_key")
+        apertus_pid = self._config.get("apertus_product_id")
+        if apertus_key and apertus_pid:
+            providers[Provider.APERTUS] = ApertusProvider(
+                api_key=apertus_key,
+                product_id=apertus_pid,
+                default_model=self._config.get("apertus_model"),
             )
 
         try:

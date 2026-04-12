@@ -57,6 +57,7 @@ class ProvidersDialog(QDialog):
 
         # Widgets keyed by provider value string
         self._api_key_edits: dict[str, QLineEdit] = {}
+        self._product_id_edits: dict[str, QLineEdit] = {}
         self._model_combos: dict[str, QComboBox] = {}
         self._color_btns: dict[str, QPushButton] = {}
         self._system_prompt_edits: dict[str, QPlainTextEdit] = {}
@@ -86,7 +87,7 @@ class ProvidersDialog(QDialog):
 
         export_btn = QPushButton("Export…")
         export_btn.clicked.connect(self._on_export_clicked)
-        footer.addWidget(import_btn)
+        footer.addWidget(export_btn)
 
         reset_btn = QPushButton("Reset colours to defaults")
         reset_btn.setStyleSheet(
@@ -130,6 +131,14 @@ class ProvidersDialog(QDialog):
         key_edit.textChanged.connect(lambda _, p=pv: self._update_tab_color(p))
         form.addRow("API key:", key_edit)
         self._api_key_edits[pv] = key_edit
+
+        # Product ID (only for providers that need it, e.g. Apertus/Infomaniak)
+        pid_key = meta.get("product_id_key")
+        if pid_key:
+            pid_edit = QLineEdit(self._config.get(pid_key))
+            pid_edit.setPlaceholderText(f"{display} product ID")
+            form.addRow("Product ID:", pid_edit)
+            self._product_id_edits[pv] = pid_edit
 
         # Model combo — populated from cache or provider.list_models()
         model_combo = QComboBox()
@@ -259,6 +268,8 @@ class ProvidersDialog(QDialog):
             first = False
             lines.append(f"## {meta['display']}")
             lines.append(f"- API key: {self._api_key_edits[pv].text().strip()}")
+            if pv in self._product_id_edits:
+                lines.append(f"- Product ID: {self._product_id_edits[pv].text().strip()}")
             lines.append(f"- Model: {self._model_combos[pv].currentText()}")
             lines.append(f"- Color: {self._color_btns[pv].property('hex_color')}")
             lines.append("- System prompt:")
@@ -307,8 +318,13 @@ class ProvidersDialog(QDialog):
                 return None
 
             api_key = _field("API key") or ""
+            product_id = _field("Product ID") or ""
             model = _field("Model") or ""
             color = _field("Color") or DEFAULTS.get(meta["color_key"], "")
+
+            pid_key = meta.get("product_id_key")
+            if pid_key:
+                self._config.set(pid_key, product_id)
 
             prompt_match = re.search(
                 r"^- System prompt:\s*\n\n(.*)",
@@ -353,6 +369,9 @@ class ProvidersDialog(QDialog):
         # Refresh the dialog widgets from the updated config
         for pv, meta in PROVIDER_META.items():
             self._api_key_edits[pv].setText(self._config.get(meta["api_key"]))
+            pid_key = meta.get("product_id_key")
+            if pid_key and pv in self._product_id_edits:
+                self._product_id_edits[pv].setText(self._config.get(pid_key))
             color = self._config.get(meta["color_key"])
             self._color_btns[pv].setProperty("hex_color", color)
             self._apply_color_btn_style(self._color_btns[pv], color)
@@ -373,6 +392,12 @@ class ProvidersDialog(QDialog):
                 meta["api_key"],
                 self._api_key_edits[pv].text().strip(),
             )
+            pid_key = meta.get("product_id_key")
+            if pid_key and pv in self._product_id_edits:
+                self._config.set(
+                    pid_key,
+                    self._product_id_edits[pv].text().strip(),
+                )
             self._config.set(
                 meta["model_key"],
                 self._model_combos[pv].currentText(),
