@@ -23,14 +23,16 @@ from PySide6.QtGui import (
     QTextLength,
 )
 
-from mchat import dot_renderer
+from mchat import dot_renderer, mermaid_renderer
 from mchat.models.message import Message, Provider, Role
 from mchat.ui.dot_markdown_ext import DOT_SOURCE_MAP
+from mchat.ui.mermaid_markdown_ext import MERMAID_SOURCE_MAP
 
 # Match the mchat-graph://<hash>.png URL scheme we stash in DOT
 # <img> tags. The hash is a 64-char hex sha256; we accept the full
 # hex alphabet here for defensive pattern matching.
 _DOT_URL_RE = re.compile(r'mchat-graph://([0-9a-f]+)\.png')
+_MERMAID_URL_RE = re.compile(r'mchat-mermaid://([0-9a-f]+)\.png')
 
 # Role info stored per text-block: (role, provider, model)
 _RoleInfo = tuple[Role, Provider | None, str | None]
@@ -288,6 +290,36 @@ class ChatDocumentMixin:
             )
 
     # ------------------------------------------------------------------
+    # Mermaid graphics resource wiring (#150)
+    # ------------------------------------------------------------------
+
+    def _wire_mermaid_resources(self, html: str) -> None:
+        """Scan rendered HTML for mchat-mermaid://<hash>.png URLs and
+        pre-register matching QImage resources on the document.
+
+        Same pattern as _wire_dot_resources but uses mermaid_renderer."""
+        if "mchat-mermaid://" not in html:
+            return
+        doc = self.document()
+        for match in _MERMAID_URL_RE.finditer(html):
+            digest = match.group(1)
+            url = match.group(0)
+            source = MERMAID_SOURCE_MAP.get(digest)
+            if source is None:
+                continue
+            png = mermaid_renderer.render_mermaid(source)
+            if not png:
+                continue
+            img = QImage.fromData(png, "PNG")
+            if img.isNull():
+                continue
+            doc.addResource(
+                QTextDocument.ResourceType.ImageResource,
+                QUrl(url),
+                img,
+            )
+
+    # ------------------------------------------------------------------
     # Background application
     # ------------------------------------------------------------------
 
@@ -378,6 +410,7 @@ class ChatDocumentMixin:
 
         rendered = self._render(message)
         self._wire_dot_resources(rendered)
+        self._wire_mermaid_resources(rendered)
         cursor.insertHtml(rendered)
 
         end_block = cursor.block().blockNumber()
@@ -427,6 +460,7 @@ class ChatDocumentMixin:
 
         start_block = cursor.block().blockNumber()
         self._wire_dot_resources(table_html)
+        self._wire_mermaid_resources(table_html)
         cursor.insertHtml(table_html)
         end_block = cursor.block().blockNumber()
 

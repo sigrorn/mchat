@@ -27,6 +27,7 @@ from mchat.models.message import Message
 from mchat.ui.chat_document import ChatDocumentMixin
 from mchat.ui.chat_export import ChatExportMixin
 from mchat.ui.dot_markdown_ext import DotExtension
+from mchat.ui.mermaid_markdown_ext import MermaidExtension
 
 # Default background colours per participant
 COLOR_USER = "#d4d4d4"
@@ -104,7 +105,7 @@ class ChatWidget(ChatDocumentMixin, ChatExportMixin, QTextEdit):
         self._is_empty = True
         self._md = markdown.Markdown(
             extensions=[
-                "tables", "fenced_code", "sane_lists", DotExtension(),
+                "tables", "fenced_code", "sane_lists", DotExtension(), MermaidExtension(),
             ]
         )
         self._build_ui()

@@ -24,6 +24,7 @@ from mchat.models.persona import Persona
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.context_builder import compute_excluded_indices
 from mchat.ui.dot_markdown_ext import DotExtension
+from mchat.ui.mermaid_markdown_ext import MermaidExtension
 
 # Stable display order for multi-provider responses
 PROVIDER_ORDER: list[Provider] = [
@@ -345,7 +346,7 @@ class MessageRenderer:
         personas_by_id = personas_by_id or {}
         md = md_lib.Markdown(
             extensions=[
-                "tables", "fenced_code", "sane_lists", DotExtension(),
+                "tables", "fenced_code", "sane_lists", DotExtension(), MermaidExtension(),
             ]
         )
         header_cells: list[str] = []
