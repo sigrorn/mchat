@@ -78,6 +78,38 @@ class TestSettingsDialogGeneralOnly:
         assert config.get("system_prompt") == "updated prompt"
         assert int(config.get("exclude_shade_amount")) == 42
 
+    def test_diagram_format_combo_exists(self, qtbot, config):
+        """#151 — SettingsDialog exposes diagram_format as a combo box."""
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        assert hasattr(d, "_diagram_format")
+        items = [
+            d._diagram_format.itemText(i)
+            for i in range(d._diagram_format.count())
+        ]
+        assert "auto" in items
+        assert "mermaid" in items
+        assert "graphviz" in items
+        assert "none" in items
+
+    def test_diagram_format_loads_from_config(self, qtbot, config):
+        config.set("diagram_format", "graphviz")
+        config.save()
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        assert d._diagram_format.currentText() == "graphviz"
+
+    def test_diagram_format_saved_to_config(self, qtbot, config):
+        from mchat.ui.settings_dialog import SettingsDialog
+        d = SettingsDialog(config)
+        qtbot.addWidget(d)
+        idx = d._diagram_format.findText("mermaid")
+        d._diagram_format.setCurrentIndex(idx)
+        d._save()
+        assert config.get("diagram_format") == "mermaid"
+
     def test_save_does_not_touch_provider_fields(self, qtbot, config):
         """The dialog must not clobber provider-specific config values
         (empty API key fields would wipe the real ones)."""
