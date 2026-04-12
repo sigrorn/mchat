@@ -105,6 +105,7 @@ class PersonaDialog(QDialog):
         model_override: str | None = None,
         color_override: str | None = None,
         created_at_message_index: int | None = None,
+        _validate: bool = True,
     ) -> Persona:
         """Insert a new persona row for this conversation.
 
@@ -112,8 +113,12 @@ class PersonaDialog(QDialog):
         reserved-token rules before touching the DB. Raises
         ``ValueError`` on any violation and ``sqlite3.IntegrityError``
         if the name_slug collides with an active persona.
+
+        #155: pass ``_validate=False`` for import paths that accept
+        reserved names so the user can rename them in the dialog.
         """
-        validate_persona_name(name)
+        if _validate:
+            validate_persona_name(name)
         p = Persona(
             conversation_id=self._conv_id,
             id=generate_persona_id(),
@@ -210,15 +215,15 @@ class PersonaDialog(QDialog):
         imported ones. Existing personas are tombstoned (not deleted).
 
         #140: two-pass import. The first pass parses every section
-        and validates every name against ``validate_persona_name``
-        plus a case-insensitive duplicate check within the file.
-        If anything fails, raises ``PersonaImportError`` with a
-        consolidated message listing every offending row — and the
-        DB is untouched. Only when the whole file passes does the
-        destructive second pass (tombstone existing + create new)
-        run.
+        and validates every name. Structural errors (whitespace, @,
+        disallowed chars) abort the import entirely. #155: reserved
+        names (provider names like 'claude', 'gpt') are accepted
+        into the dialog so the user can rename them — the dialog
+        highlights them red and blocks Close until resolved.
         """
         import re
+
+        from mchat.ui.persona_resolver import RESERVED_NAMES
 
         # --- Pass 1: parse + validate. Nothing written yet. ---
         parsed: list[dict] = []
@@ -246,12 +251,17 @@ class PersonaDialog(QDialog):
                     return None if val == "(none)" else val
                 return None
 
-            # Validate the name against the new rules.
+            # Validate the name against the rules — but treat reserved
+            # names as non-fatal so the user can rename them in the UI.
             try:
                 validate_persona_name(name)
             except ValueError as e:
-                errors.append(f"{name!r}: {e}")
-                continue
+                is_reserved = name.lower() in RESERVED_NAMES
+                if not is_reserved:
+                    # Structural error — abort the whole import
+                    errors.append(f"{name!r}: {e}")
+                    continue
+                # Reserved name: accept it — _refresh_list will flag it
 
             provider_str = _field("Provider") or "claude"
             try:
@@ -315,6 +325,7 @@ class PersonaDialog(QDialog):
                 model_override=row["model_override"],
                 color_override=row["color_override"],
                 created_at_message_index=row["cutoff"],
+                _validate=False,
             )
             persona.sort_order = import_idx
             self._db.update_persona(persona)
@@ -470,28 +481,46 @@ class PersonaDialog(QDialog):
     def _refresh_list(self) -> None:
         """Reload the persona list from the DB, preserving the
         currently selected persona id where possible. Highlights
-        personas with unconfigured providers in red and blocks
-        the Close button until resolved."""
+        personas with unconfigured providers or invalid names in red
+        and blocks the Close button until resolved."""
         current_id = self._selected_persona_id()
         self._list.clear()
         configured = self._configured_providers()
         unconfigured_names: list[str] = []
+        invalid_names: list[str] = []
         for p in self.list_items():
             item = QListWidgetItem(f"{p.name}  ({p.provider.value})")
             item.setData(Qt.ItemDataRole.UserRole, p.id)
+            # Check for invalid persona name (#155)
+            has_bad_name = False
+            try:
+                validate_persona_name(p.name)
+            except ValueError:
+                has_bad_name = True
+                invalid_names.append(p.name)
             if p.provider not in configured:
-                item.setForeground(QColor("#cc0000"))
                 unconfigured_names.append(
                     f"{p.name} ({p.provider.value})"
                 )
+            if has_bad_name or p.provider not in configured:
+                item.setForeground(QColor("#cc0000"))
             self._list.addItem(item)
 
-        # Block close if any persona uses an unconfigured provider
+        # Block close if any persona has issues
+        warnings: list[str] = []
+        if invalid_names:
+            warnings.append(
+                f"Invalid name{'s' if len(invalid_names) > 1 else ''}: "
+                f"{', '.join(invalid_names)} "
+                f"— rename before closing"
+            )
         if unconfigured_names:
-            self._warning_label.setText(
+            warnings.append(
                 f"Unconfigured: {', '.join(unconfigured_names)} "
                 f"— configure API key in Providers or change/remove the persona"
             )
+        if warnings:
+            self._warning_label.setText(" | ".join(warnings))
             self._warning_label.setVisible(True)
             self._close_btn.setEnabled(False)
         else:
