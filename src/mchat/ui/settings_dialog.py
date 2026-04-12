@@ -87,6 +87,15 @@ class SettingsDialog(QDialog):
         # key still exists as a fallback for all,/flipped, prefix
         # parsing but is no longer user-facing.
 
+        # Diagram format preference (#151)
+        self._diagram_format = QComboBox()
+        self._diagram_format.addItems(["auto", "mermaid", "graphviz", "none"])
+        current_df = str(self._config.get("diagram_format") or "auto")
+        df_idx = self._diagram_format.findText(current_df)
+        if df_idx >= 0:
+            self._diagram_format.setCurrentIndex(df_idx)
+        form.addRow("Diagram format:", self._diagram_format)
+
         # Global system prompt
         self._system_prompt = QPlainTextEdit(self._config.get("system_prompt"))
         self._system_prompt.setMinimumHeight(120)
@@ -153,5 +162,6 @@ class SettingsDialog(QDialog):
         self._config.set("font_size", self._font_size.value())
         self._config.set("exclude_shade_mode", self._exclude_shade_mode.currentText())
         self._config.set("exclude_shade_amount", self._exclude_shade_amount.value())
+        self._config.set("diagram_format", self._diagram_format.currentText())
         self._config.save()
         self.accept()
