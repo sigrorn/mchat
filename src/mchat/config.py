@@ -43,6 +43,7 @@ DEFAULTS = {
         "So, when I ask whether something is agreeable to all of you, only answer whether it's agreeable "
         "from your own perspective."
     ),
+    "diagram_format": "auto",  # "auto", "mermaid", "graphviz", "none"
     "system_prompt_claude": "",
     "system_prompt_openai": "",
     "system_prompt_gemini": "",
