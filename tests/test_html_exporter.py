@@ -603,6 +603,106 @@ class TestHtmlExporterDotGraphs:
         assert counter["n"] == 1  # still 1 — disk served it
 
 
+class TestHtmlExporterMermaidGraphs:
+    """#150 — HTML export must inline Mermaid graph PNGs as base64 data
+    URIs, parallel to DOT graph handling."""
+
+    def test_mermaid_block_becomes_base64_data_uri(self, exporter, monkeypatch):
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```mermaid\ngraph TD\n  A --> B\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "data:image/png;base64," in html
+        assert "mchat-mermaid://" not in html
+
+    def test_mermaid_details_source_fallback_preserved(self, exporter, monkeypatch):
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid",
+            lambda source, **kw: _MINI_PNG,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```mermaid\ngraph TD\n  A --> B\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "<details" in html
+        assert "mermaid source" in html
+
+    def test_mermaid_render_failure_shows_source_only(
+        self, exporter, monkeypatch
+    ):
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid", lambda source, **kw: None,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```mermaid\ngraph TD\n  A --> B\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "mchat-mermaid://" not in html
+        assert "data:image/png" not in html
+        assert "graph TD" in html
+
+    def test_mermaid_degradation_warning(self, exporter, monkeypatch):
+        from mchat import mermaid_renderer
+
+        monkeypatch.setattr(
+            mermaid_renderer, "render_mermaid", lambda source, **kw: None,
+        )
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="```mermaid\ngraph TD\n  A --> B\n```",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "mermaid" in html.lower() or "mmdc" in html.lower()
+        assert "source only" in html
+
+    def test_no_mermaid_block_unchanged(self, exporter, monkeypatch):
+        from mchat import mermaid_renderer
+
+        def boom(*a, **kw):
+            raise AssertionError("render_mermaid should not be called")
+
+        monkeypatch.setattr(mermaid_renderer, "render_mermaid", boom)
+
+        msgs = [
+            Message(
+                role=Role.ASSISTANT,
+                content="Just **bold** text.",
+                provider=Provider.CLAUDE,
+            )
+        ]
+        html = exporter.export(msgs)
+        assert "mchat-mermaid://" not in html
+
+
 class TestHelpTextMentionsGraphviz:
     """#146 — //help must tell the user that DOT graphs require
     graphviz, so they know why their graphs aren't rendering."""
