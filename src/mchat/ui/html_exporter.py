@@ -17,17 +17,21 @@ from dataclasses import dataclass
 
 import markdown as _md
 
-from mchat import dot_renderer
+from mchat import dot_renderer, mermaid_renderer
 from mchat.config import PROVIDER_META
 from mchat.models.message import Message, Provider, Role
 from mchat.models.persona import Persona
 from mchat.ui.chat_export import short_model
 from mchat.ui.dot_markdown_ext import DOT_SOURCE_MAP, DotExtension
+from mchat.ui.mermaid_markdown_ext import MERMAID_SOURCE_MAP, MermaidExtension
 
 # Match the mchat-graph://<hash>.png URL scheme the DOT markdown
 # extension stashes in <img> tags.
 _DOT_IMG_RE = re.compile(
     r'<img([^>]*?)src="mchat-graph://([0-9a-f]+)\.png"([^>]*)/?>'
+)
+_MERMAID_IMG_RE = re.compile(
+    r'<img([^>]*?)src="mchat-mermaid://([0-9a-f]+)\.png"([^>]*)/?>'
 )
 
 
@@ -80,13 +84,15 @@ class HtmlExporter:
         self._font_size = font_size
         self._md = _md.Markdown(
             extensions=[
-                "tables", "fenced_code", "sane_lists", DotExtension(),
+                "tables", "fenced_code", "sane_lists",
+                DotExtension(), MermaidExtension(),
             ]
         )
-        # #146: bumped by _inline_dot_images every time a DOT block
-        # can't be rendered. Consumed by export() to decide whether
-        # to prepend a degradation banner above the messages.
+        # #146: bumped by _inline_dot_images / _inline_mermaid_images
+        # every time a block can't be rendered. Consumed by export()
+        # to decide whether to prepend a degradation banner.
         self._dot_render_failures: int = 0
+        self._mermaid_render_failures: int = 0
 
     def export(
         self,
@@ -104,9 +110,10 @@ class HtmlExporter:
         back to the provider display name.
         """
         personas_by_id = {p.id: p for p in (personas or [])}
-        # #146: reset per-export so each export counts only its own
+        # #146/#150: reset per-export so each export counts only its own
         # render failures.
         self._dot_render_failures = 0
+        self._mermaid_render_failures = 0
         parts: list[str] = []
         for msg in messages:
             colour = self._colors.color_for(msg, personas_by_id)
@@ -121,19 +128,30 @@ class HtmlExporter:
                 f"</div>"
             )
 
-        # #146: if any DOT block failed to render, prepend a visible
-        # warning so the file's reader knows the graphics are missing.
+        # #146/#150: if any diagram blocks failed to render, prepend a
+        # visible warning so the reader knows graphics are missing.
+        banners: list[str] = []
         if self._dot_render_failures > 0:
             n = self._dot_render_failures
-            banner = (
+            banners.append(
+                f'\u26a0 Graphviz not available at export time; {n} '
+                f'DOT diagram{"s" if n != 1 else ""} shown as source only.'
+            )
+        if self._mermaid_render_failures > 0:
+            n = self._mermaid_render_failures
+            banners.append(
+                f'\u26a0 Mermaid CLI (mmdc) not available at export time; {n} '
+                f'mermaid diagram{"s" if n != 1 else ""} shown as source only.'
+            )
+        if banners:
+            banner_html = (
                 f'<div style="background-color:#fff3cd; color:#664d03; '
                 f'padding:12px 16px; border-bottom:2px solid #ffc107; '
                 f'font-weight:bold;">'
-                f'\u26a0 Graphviz not available at export time; {n} '
-                f'diagram{"s" if n != 1 else ""} shown as source only.'
-                f'</div>'
+                + "<br>".join(banners)
+                + '</div>'
             )
-            parts.insert(0, banner)
+            parts.insert(0, banner_html)
 
         body = "\n".join(parts)
         return (
@@ -167,6 +185,8 @@ class HtmlExporter:
             rendered = self._md.convert(msg.content)
             if "mchat-graph://" in rendered:
                 rendered = self._inline_dot_images(rendered)
+            if "mchat-mermaid://" in rendered:
+                rendered = self._inline_mermaid_images(rendered)
             return rendered
         text = html_mod.escape(msg.content) if msg.content else ""
         return text.replace("\n", "<br>")
@@ -204,6 +224,34 @@ class HtmlExporter:
             )
 
         return _DOT_IMG_RE.sub(repl, html)
+
+    # ------------------------------------------------------------------
+    # Mermaid graphics inlining (#150)
+    # ------------------------------------------------------------------
+
+    def _inline_mermaid_images(self, html: str) -> str:
+        """Rewrite every <img src="mchat-mermaid://<hash>.png"> to a
+        self-contained data:image/png;base64 URI."""
+
+        def repl(match: re.Match[str]) -> str:
+            digest = match.group(2)
+            source = MERMAID_SOURCE_MAP.get(digest)
+            if source is None:
+                self._mermaid_render_failures += 1
+                return ""
+            png = mermaid_renderer.render_mermaid(source)
+            if not png:
+                self._mermaid_render_failures += 1
+                return ""
+            b64 = _base64.b64encode(png).decode("ascii")
+            pre_attrs = match.group(1) or ""
+            post_attrs = match.group(3) or ""
+            return (
+                f'<img{pre_attrs}src="data:image/png;base64,{b64}"'
+                f'{post_attrs}/>'
+            )
+
+        return _MERMAID_IMG_RE.sub(repl, html)
 
     @staticmethod
     def _label_for(
