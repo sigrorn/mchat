@@ -111,3 +111,78 @@ class TestProviderPanelEmptyState:
         assert panel._personas_btn.isHidden()
         for combo in panel._combos.values():
             assert not combo.isHidden()
+
+
+class TestTwoRowToolbar:
+    """#157 — toolbar splits into two rows when >4 personas."""
+
+    def _make_entries(self, n):
+        from mchat.models.message import Provider
+        providers = list(Provider)
+        return [
+            (f"p_{i}", f"Persona{i}", providers[i % len(providers)])
+            for i in range(n)
+        ]
+
+    def test_single_row_with_4_personas(self, qtbot, config):
+        """With exactly 4 personas, the panel uses a single row."""
+        from mchat.ui.provider_panel import ProviderPanel
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas(self._make_entries(4))
+        # Single-row mode: _personas_row and _buttons_row are the same layout
+        assert not panel._two_row_mode
+
+    def test_two_rows_with_5_personas(self, qtbot, config):
+        """With 5 personas, the panel switches to two-row mode."""
+        from mchat.ui.provider_panel import ProviderPanel
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas(self._make_entries(5))
+        assert panel._two_row_mode
+
+    def test_two_rows_with_6_personas(self, qtbot, config):
+        """With 6 personas, the panel is in two-row mode."""
+        from mchat.ui.provider_panel import ProviderPanel
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas(self._make_entries(6))
+        assert panel._two_row_mode
+        # All personas are still present
+        assert len(panel._checkboxes) == 6
+        assert len(panel._combos) == 6
+
+    def test_back_to_single_row_when_personas_removed(self, qtbot, config):
+        """Switching from >4 to <=4 personas reverts to single row."""
+        from mchat.ui.provider_panel import ProviderPanel
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas(self._make_entries(6))
+        assert panel._two_row_mode
+        panel.set_personas(self._make_entries(3))
+        assert not panel._two_row_mode
+
+    def test_action_buttons_in_bottom_row(self, qtbot, config):
+        """In two-row mode, action buttons added via layout_ref() go
+        into the bottom row, not the personas row."""
+        from mchat.ui.provider_panel import ProviderPanel
+        from PySide6.QtWidgets import QPushButton
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        # Add a button to layout_ref() BEFORE set_personas (like main_window does)
+        btn = QPushButton("Test")
+        panel.layout_ref().addWidget(btn)
+        panel.set_personas(self._make_entries(6))
+        # Button should still be visible and in the buttons row
+        assert btn.isVisible()
+        # The buttons row layout should contain our button
+        assert panel._buttons_row.indexOf(btn) >= 0
+
+    def test_personas_row_exists_in_two_row_mode(self, qtbot, config):
+        """The personas row contains the persona widgets."""
+        from mchat.ui.provider_panel import ProviderPanel
+        panel = ProviderPanel(config, font_size=14)
+        qtbot.addWidget(panel)
+        panel.set_personas(self._make_entries(5))
+        # Personas row should have persona widgets
+        assert panel._personas_row.count() > 0
