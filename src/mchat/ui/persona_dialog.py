@@ -216,6 +216,10 @@ class PersonaDialog(QDialog):
         self._color_effective.setStyleSheet("color: #888; font-style: italic;")
         form.addRow("", self._color_effective)
 
+        # Runs after combo — dependency ordering (#168)
+        self._runs_after_combo = QComboBox()
+        form.addRow("Runs after:", self._runs_after_combo)
+
         # Save button
         save_row = QHBoxLayout()
         save_row.addStretch()
@@ -345,6 +349,7 @@ class PersonaDialog(QDialog):
             self._prompt_edit.clear()
             self._model_combo.clear()
             self._color_edit.clear()
+            self._runs_after_combo.clear()
             self._prompt_effective.clear()
             self._model_effective.clear()
             self._color_effective.clear()
@@ -371,6 +376,25 @@ class PersonaDialog(QDialog):
         else:
             self._model_combo.setCurrentIndex(0)
         self._model_combo.blockSignals(False)
+
+    def _populate_runs_after_combo(self, persona: Persona) -> None:
+        """Fill the 'Runs after' combo with <prompt> + other personas."""
+        self._runs_after_combo.blockSignals(True)
+        self._runs_after_combo.clear()
+        self._runs_after_combo.addItem("<prompt>", None)
+        for p in self.list_items():
+            if p.id != persona.id:
+                self._runs_after_combo.addItem(p.name, p.id)
+        # Set current value
+        if persona.runs_after:
+            idx = self._runs_after_combo.findData(persona.runs_after)
+            if idx >= 0:
+                self._runs_after_combo.setCurrentIndex(idx)
+            else:
+                self._runs_after_combo.setCurrentIndex(0)
+        else:
+            self._runs_after_combo.setCurrentIndex(0)
+        self._runs_after_combo.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -407,6 +431,7 @@ class PersonaDialog(QDialog):
         self._prompt_edit.setPlainText(persona.system_prompt_override or "")
         self._populate_model_combo(persona.provider, persona.model_override)
         self._color_edit.setText(persona.color_override or "")
+        self._populate_runs_after_combo(persona)
         self._refresh_effective_labels(persona)
 
     def _refresh_effective_labels(self, persona: Persona) -> None:
@@ -546,6 +571,7 @@ class PersonaDialog(QDialog):
         persona.system_prompt_override = prompt_override
         persona.model_override = model_override
         persona.color_override = color_override
+        persona.runs_after = self._runs_after_combo.currentData()
         try:
             self._db.update_persona(persona)
         except sqlite3.IntegrityError as e:
