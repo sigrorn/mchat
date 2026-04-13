@@ -369,3 +369,137 @@ When changing one feature, start from the runtime path instead of the directory
 tree. For example, a routing change starts at `persona_resolver.py` / `router.py`;
 a rendering change starts at `message_renderer.py`; a conversation-list change
 starts at `conversation_manager.py` and `sidebar.py`.
+
+## Testing
+
+### Running
+
+```bash
+.venv-win/Scripts/pytest          # full suite (Windows)
+.venv/bin/pytest                  # full suite (WSL/Linux)
+```
+
+There is no separate integration vs unit split. The entire suite runs as one
+pass (~750 tests, ~90 seconds).
+
+### Structure
+
+Each test file is self-contained: fixtures are defined locally, not in a shared
+`conftest.py`. There is no cross-module fixture import.
+
+Every test file starts with the standard CRC header comment (`Component`,
+`Responsibility`, `Collaborators`) matching the production code convention.
+
+### Naming
+
+- **Classes**: `Test<Feature>` — e.g. `TestComposition`,
+  `TestSelectionSync`, `TestMoveUpDown`.
+- **Methods**: `test_<action>_<expected_result>` — e.g.
+  `test_checkbox_toggle_updates_selection`,
+  `test_rename_updates_identity_pin_content`.
+- **Docstrings** reference issue numbers when the test was written for a
+  specific bug or feature: `"""#130 — retry in place ..."""`
+
+### Fixtures
+
+**Database isolation** — every DB test creates a fresh SQLite file in
+`tmp_path`:
+
+```python
+@pytest.fixture
+def db(tmp_path):
+    database = Database(db_path=tmp_path / "test.db")
+    yield database
+    database.close()
+```
+
+**Config isolation** — same pattern, with pre-set keys as needed:
+
+```python
+@pytest.fixture
+def config(tmp_path):
+    cfg = Config(config_path=tmp_path / "cfg.json")
+    cfg.set("anthropic_api_key", "test-key")
+    cfg.save()
+    return cfg
+```
+
+**Qt widgets** — `pytest-qt`'s `qtbot` fixture manages the event loop.
+Widgets are registered for cleanup with `qtbot.addWidget()`:
+
+```python
+@pytest.fixture
+def dialog(qtbot, db, config, conv):
+    d = PersonaDialog(db, config, conv.id)
+    qtbot.addWidget(d)
+    return d
+```
+
+### Fake Providers
+
+`test_main_window.py` defines `make_fake_provider_class(pid)` which returns a
+concrete `BaseProvider` subclass hardwired to a `Provider` enum value. It
+yields `"ok"` on `stream()`, returns `["fake-model-1", "fake-model-2"]` from
+`list_models()`, and accepts `**kwargs` so provider-specific constructor
+arguments (like Apertus `product_id`) don't break it.
+
+The `main_window` fixture patches `build_providers` to return fake instances
+for every provider, so no test hits the network:
+
+```python
+def _fake_build(config):
+    return {p: make_fake_provider_class(p)(api_key="fake") for p in Provider}
+monkeypatch.setattr(mw_mod, "build_providers", _fake_build)
+```
+
+### Dialog Mocking
+
+Tests that open modal dialogs (PersonaDialog, settings) must prevent the Qt
+event loop from blocking. The standard pattern patches `exec` to return
+immediately:
+
+```python
+monkeypatch.setattr(pd_mod.PersonaDialog, "exec", lambda self: 0)
+```
+
+Variations exist for testing specific dialog behaviour:
+
+- **SpyDialog** — records constructor args for assertion, then returns 0.
+- **AutoCreateDialog** — creates a persona inside `exec()` before returning,
+  so the test can verify post-dialog sync behaviour.
+- **NoOpDialog** — closes without action, for testing the "cancel" path.
+
+### Async Waiting
+
+For tests that trigger background work (streaming, model fetching),
+`qtbot.waitUntil` polls a condition with a timeout:
+
+```python
+qtbot.waitUntil(
+    lambda: len(main_window._send._multi_workers) == 0,
+    timeout=5000,
+)
+```
+
+### Service-Level Testing
+
+Many tests exercise service methods directly on dialog or controller
+instances rather than simulating UI clicks. For example,
+`test_persona_dialog.py` calls `dialog.create_persona(...)` and checks DB
+state — this is fast and stable because it skips the Qt event loop. The
+same pattern applies to `PersonaService` tests, which don't need `qtbot`
+at all.
+
+### Test-First Workflow
+
+The project follows a strict test-first workflow (documented in
+`~/.claude/CLAUDE.md`):
+
+1. Write or update tests for the desired outcome.
+2. Run them to confirm they **fail**.
+3. Commit the tests alone.
+4. Implement to make them pass.
+5. Commit the implementation separately.
+
+This means every feature or bug fix has at least two commits: one for the
+failing tests and one for the implementation that makes them green.
