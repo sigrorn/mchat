@@ -446,3 +446,111 @@ class TestDiagramInstructionInjection:
         assert sys_msgs
         sys_text = sys_msgs[0].content
         assert "dot" in sys_text.lower()
+
+
+class TestVisiblePersonaIdsFilter:
+    """#169 — visible_persona_ids filters assistant messages to ancestor chain."""
+
+    def test_filter_keeps_only_listed_personas(self, db, config):
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        pa = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.CLAUDE, name="A", name_slug="a")
+        pb = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.OPENAI, name="B", name_slug="b")
+        pc = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.GEMINI, name="C", name_slug="c",
+                     runs_after=pa.id)
+        db.create_persona(pa)
+        db.create_persona(pb)
+        db.create_persona(pc)
+
+        db.add_message(Message(role=Role.USER, content="hello",
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="from A",
+                               provider=Provider.CLAUDE, persona_id=pa.id,
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="from B",
+                               provider=Provider.OPENAI, persona_id=pb.id,
+                               conversation_id=conv.id))
+        conv.messages = db.get_messages(conv.id)
+
+        target_c = PersonaTarget(persona_id=pc.id, provider=Provider.GEMINI)
+        ctx = build_context(conv, target_c, db, config,
+                            visible_persona_ids={pa.id, pc.id})
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert "hello" in contents
+        assert "from A" in contents
+        assert "from B" not in contents
+
+    def test_filter_preserves_own_history(self, db, config):
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        pa = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.CLAUDE, name="A", name_slug="a")
+        db.create_persona(pa)
+        db.add_message(Message(role=Role.USER, content="q1",
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="a1",
+                               provider=Provider.CLAUDE, persona_id=pa.id,
+                               conversation_id=conv.id))
+        conv.messages = db.get_messages(conv.id)
+
+        target_a = PersonaTarget(persona_id=pa.id, provider=Provider.CLAUDE)
+        ctx = build_context(conv, target_a, db, config,
+                            visible_persona_ids={pa.id})
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert "a1" in contents
+
+    def test_legacy_persona_id_none_matched_by_provider(self, db, config):
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        db.add_message(Message(role=Role.USER, content="q1",
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="legacy",
+                               provider=Provider.CLAUDE, persona_id=None,
+                               conversation_id=conv.id))
+        conv.messages = db.get_messages(conv.id)
+
+        target = PersonaTarget(persona_id="claude", provider=Provider.CLAUDE)
+        ctx = build_context(conv, target, db, config,
+                            visible_persona_ids={"claude"})
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert "legacy" in contents
+
+    def test_none_visible_ids_means_no_filter(self, db, config, conv_with_history):
+        ctx = build_context(conv_with_history, Provider.CLAUDE, db, config,
+                            visible_persona_ids=None)
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert len(contents) == 6
+
+    def test_pinned_assistant_from_excluded_persona_filtered(self, db, config):
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        pa = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.CLAUDE, name="A", name_slug="a")
+        pb = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.OPENAI, name="B", name_slug="b")
+        db.create_persona(pa)
+        db.create_persona(pb)
+
+        db.add_message(Message(role=Role.ASSISTANT, content="pinned from B",
+                               provider=Provider.OPENAI, persona_id=pb.id,
+                               conversation_id=conv.id, pinned=True,
+                               pin_target="all"))
+        db.add_message(Message(role=Role.USER, content="hello",
+                               conversation_id=conv.id))
+        conv.messages = db.get_messages(conv.id)
+
+        target_a = PersonaTarget(persona_id=pa.id, provider=Provider.CLAUDE)
+        ctx = build_context(conv, target_a, db, config,
+                            visible_persona_ids={pa.id})
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert "pinned from B" not in contents
