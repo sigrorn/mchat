@@ -49,23 +49,55 @@ def ensure_persona_pins(
     if len(pruned) != len(current_sel):
         selection.set(pruned)
 
-    # Scan existing pinned messages to avoid duplicates.
-    existing_pins = {m.content for m in messages if m.pinned}
+    # Index existing pinned messages by pin_target for identity detection.
+    # Each persona gets two pins: an identity instruction ("use X as your
+    # name") and a setup note ("Added persona X"). We key by pin_target
+    # so renames update in-place instead of creating duplicates (#163).
+    identity_pins_by_target: dict[str, Message] = {}
+    note_pins_by_target: dict[str, Message] = {}
+    for m in messages:
+        if not m.pinned or not m.pin_target:
+            continue
+        if "as your name" in m.content:
+            identity_pins_by_target[m.pin_target] = m
+        elif m.content.startswith("Added persona "):
+            note_pins_by_target[m.pin_target] = m
 
     for persona in personas:
-        name_marker = f"use {persona.name} as your name"
-        has_name_pin = any(name_marker in pin for pin in existing_pins)
+        expected_identity = (
+            f"Unless I say otherwise, for the scope of our chat, "
+            f"if my inputs refer to your name, use {persona.name} "
+            f"as your name. I might refer to it in order to use it "
+            f"as a placeholder, and I want you to refer to yourself "
+            f"as {persona.name}."
+        )
+        mode_label = (
+            "inherit" if persona.created_at_message_index is None
+            else "new"
+        )
+        prompt_text = persona.system_prompt_override or ""
+        expected_note = (
+            f'Added persona "{persona.name}" '
+            f"({persona.provider.value}, {mode_label})"
+            + (f": {prompt_text}" if prompt_text else "")
+        )
 
-        if not has_name_pin:
+        existing_identity = identity_pins_by_target.get(persona.id)
+        existing_note = note_pins_by_target.get(persona.id)
+
+        if existing_identity is not None:
+            # Pin exists — update content if stale (rename case).
+            if existing_identity.content != expected_identity:
+                db.update_message_content(existing_identity.id, expected_identity)
+                existing_identity.content = expected_identity
+            if existing_note is not None and existing_note.content != expected_note:
+                db.update_message_content(existing_note.id, expected_note)
+                existing_note.content = expected_note
+        else:
+            # No pin yet — create both.
             name_instruction = Message(
                 role=Role.USER,
-                content=(
-                    f"Unless I say otherwise, for the scope of our chat, "
-                    f"if my inputs refer to your name, use {persona.name} "
-                    f"as your name. I might refer to it in order to use it "
-                    f"as a placeholder, and I want you to refer to yourself "
-                    f"as {persona.name}."
-                ),
+                content=expected_identity,
                 conversation_id=conv.id,
                 pinned=True,
                 pin_target=persona.id,
@@ -73,19 +105,9 @@ def ensure_persona_pins(
             db.add_message(name_instruction)
             messages.append(name_instruction)
 
-            mode_label = (
-                "inherit" if persona.created_at_message_index is None
-                else "new"
-            )
-            prompt_text = persona.system_prompt_override or ""
-            note_text = (
-                f'Added persona "{persona.name}" '
-                f"({persona.provider.value}, {mode_label})"
-                + (f": {prompt_text}" if prompt_text else "")
-            )
             note_msg = Message(
                 role=Role.USER,
-                content=note_text,
+                content=expected_note,
                 conversation_id=conv.id,
                 pinned=True,
                 pin_target=persona.id,
