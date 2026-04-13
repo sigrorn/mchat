@@ -481,9 +481,9 @@ class TestVisiblePersonaIdsFilter:
         ctx = build_context(conv, target_c, db, config,
                             visible_persona_ids={pa.id, pc.id})
         contents = [m.content for m in ctx if m.role != Role.SYSTEM]
-        assert "hello" in contents
-        assert "from A" in contents
-        assert "from B" not in contents
+        assert any("hello" in c for c in contents)
+        assert any("from A" in c for c in contents)  # may be relabeled as "[A responded]: from A"
+        assert not any("from B" in c for c in contents)
 
     def test_filter_preserves_own_history(self, db, config):
         from mchat.models.persona import Persona, generate_persona_id

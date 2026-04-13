@@ -673,7 +673,7 @@ class MainWindow(QMainWindow):
         combo = self._combos.get(key)
         return combo.currentText() if combo else ""
 
-    def _build_context(self, target) -> list[Message]:
+    def _build_context(self, target, visible_persona_ids=None) -> list[Message]:
         """Delegate to ui.context_builder — MainWindow is just the host.
 
         ``target`` may be either a Provider (legacy callers) or a
@@ -681,7 +681,8 @@ class MainWindow(QMainWindow):
         the synthetic-default wrap.
         """
         return build_context(
-            self._current_conv, target, self._db, self._config
+            self._current_conv, target, self._db, self._config,
+            visible_persona_ids=visible_persona_ids,
         )
 
     # ------------------------------------------------------------------

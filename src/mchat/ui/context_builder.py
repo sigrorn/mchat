@@ -41,11 +41,17 @@ def pin_matches(
     return provider_id.value in targets
 
 
+def _effective_persona_key(m: Message) -> str | None:
+    """Return the persona key for filtering, handling legacy persona_id=None."""
+    return m.persona_id or (m.provider.value if m.provider else None)
+
+
 def build_context(
     conv: Conversation,
     target: Provider | PersonaTarget,
     db: Database,
     config: Config,
+    visible_persona_ids: set[str] | None = None,
 ) -> list[Message]:
     """Build the message list that will be sent to ``target`` for a new
     request on ``conv``.
@@ -147,6 +153,22 @@ def build_context(
         pinned_prefix = [
             m for m in pinned_prefix
             if original_indices.get(id(m), -1) >= cutoff
+        ]
+
+    # --- 4b. DAG ancestor-chain filter (#169) ---
+    # When visible_persona_ids is set, only ASSISTANT messages from
+    # listed personas pass through. USER/SYSTEM messages are unfiltered.
+    # Applied to both the main message slice and pinned_prefix.
+    if visible_persona_ids is not None:
+        messages = [
+            m for m in messages
+            if m.role != Role.ASSISTANT
+            or _effective_persona_key(m) in visible_persona_ids
+        ]
+        pinned_prefix = [
+            m for m in pinned_prefix
+            if m.role != Role.ASSISTANT
+            or _effective_persona_key(m) in visible_persona_ids
         ]
 
     # --- 5. Visibility filter (pins bypass) ---
