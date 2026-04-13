@@ -941,3 +941,81 @@ class TestProviderModelSwitch:
         p = db.list_personas(conv.id)[0]
         assert p.id == original_id
         assert p.provider == Provider.OPENAI
+
+
+class TestRunsAfterCombo:
+    """#168 — 'Runs after' combo box in PersonaDialog."""
+
+    def test_runs_after_combo_exists(self, dialog):
+        assert hasattr(dialog, "_runs_after_combo")
+
+    def test_combo_has_prompt_option(self, dialog, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="A")
+        dialog.create_persona(provider=Provider.OPENAI, name="B")
+        dialog._refresh_list()
+        dialog._list.setCurrentRow(0)
+        # First item should be <prompt>
+        assert dialog._runs_after_combo.itemText(0) == "<prompt>"
+        assert dialog._runs_after_combo.itemData(0) is None
+
+    def test_combo_lists_other_personas(self, dialog, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Alpha")
+        dialog.create_persona(provider=Provider.OPENAI, name="Beta")
+        dialog._refresh_list()
+        dialog._list.setCurrentRow(0)  # select Alpha
+        # Combo should have <prompt> + Beta (not Alpha itself)
+        texts = [
+            dialog._runs_after_combo.itemText(i)
+            for i in range(dialog._runs_after_combo.count())
+        ]
+        assert "<prompt>" in texts
+        assert "Beta" in texts
+        assert "Alpha" not in texts
+
+    def test_combo_excludes_self(self, dialog, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Only")
+        dialog._refresh_list()
+        dialog._list.setCurrentRow(0)
+        # Only <prompt> — can't depend on yourself
+        assert dialog._runs_after_combo.count() == 1
+        assert dialog._runs_after_combo.itemText(0) == "<prompt>"
+
+    def test_save_persists_runs_after(self, dialog, db, conv):
+        a = dialog.create_persona(provider=Provider.CLAUDE, name="Critic")
+        b = dialog.create_persona(provider=Provider.OPENAI, name="Partner")
+        dialog._refresh_list()
+        # Select Partner
+        dialog._list.setCurrentRow(1)
+        # Set runs_after to Critic
+        for i in range(dialog._runs_after_combo.count()):
+            if dialog._runs_after_combo.itemData(i) == a.id:
+                dialog._runs_after_combo.setCurrentIndex(i)
+                break
+        dialog._on_save_clicked()
+        personas = db.list_personas(conv.id)
+        partner = next(p for p in personas if p.name == "Partner")
+        assert partner.runs_after == a.id
+
+    def test_save_clears_runs_after(self, dialog, db, conv):
+        a = dialog.create_persona(provider=Provider.CLAUDE, name="Critic")
+        dialog.create_persona(
+            provider=Provider.OPENAI, name="Partner", runs_after=a.id,
+        )
+        dialog._refresh_list()
+        dialog._list.setCurrentRow(1)  # Partner
+        # Set back to <prompt>
+        dialog._runs_after_combo.setCurrentIndex(0)
+        dialog._on_save_clicked()
+        personas = db.list_personas(conv.id)
+        partner = next(p for p in personas if p.name == "Partner")
+        assert partner.runs_after is None
+
+    def test_combo_shows_current_value(self, dialog, db, conv):
+        a = dialog.create_persona(provider=Provider.CLAUDE, name="Critic")
+        dialog.create_persona(
+            provider=Provider.OPENAI, name="Partner", runs_after=a.id,
+        )
+        dialog._refresh_list()
+        dialog._list.setCurrentRow(1)  # Partner
+        # Combo should show Critic as selected
+        assert dialog._runs_after_combo.currentData() == a.id
