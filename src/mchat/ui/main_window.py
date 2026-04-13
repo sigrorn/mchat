@@ -672,101 +672,15 @@ class MainWindow(QMainWindow):
             self._sync_toolbar_personas()
 
     def _ensure_persona_pins(self, conv_id: int) -> None:
-        """For every active persona in the conversation, create pinned
-        instruction messages if they don't already exist. Also ensures
-        each persona is in the current selection."""
-        from mchat.ui.persona_target import PersonaTarget
+        """Delegate to the extracted ensure_persona_pins function."""
+        from mchat.ui.persona_pins import ensure_persona_pins
 
         conv = self._current_conv
         if conv is None or conv.id != conv_id:
             return
-
-        personas = self._db.list_personas(conv_id)
-        if not personas:
-            return
-
-        # #121/#121b: Prune the selection to remove:
-        # 1. Synthetic defaults (persona_id == provider.value) for
-        #    providers that now have explicit personas — prevents
-        #    double-run where both route to the same provider.
-        # 2. Stale explicit persona_ids that are no longer in this
-        #    conversation's persona set — prevents phantom targets
-        #    leaking from a previous import or conversation.
-        valid_ids = {p.id for p in personas}
-        explicit_providers = {p.provider.value for p in personas}
-        current_sel = list(self._selection_state.selection)
-        pruned = [
-            t for t in current_sel
-            if t.persona_id in valid_ids  # active persona — keep
-            or (
-                # synthetic default — keep only if no explicit persona
-                # for this provider exists
-                t.persona_id == t.provider.value
-                and t.persona_id not in explicit_providers
-            )
-        ]
-        if len(pruned) != len(current_sel):
-            self._selection_state.set(pruned)
-
-        # Scan existing pinned messages to see which personas already
-        # have their pins. We check for the name instruction pattern.
-        existing_pins = {
-            m.content
-            for m in conv.messages
-            if m.pinned
-        }
-
-        for persona in personas:
-            name_marker = f"use {persona.name} as your name"
-            has_name_pin = any(name_marker in pin for pin in existing_pins)
-
-            if not has_name_pin:
-                # Create pinned name instruction
-                name_instruction = Message(
-                    role=Role.USER,
-                    content=(
-                        f"Unless I say otherwise, for the scope of our chat, "
-                        f"if my inputs refer to your name, use {persona.name} "
-                        f"as your name. I might refer to it in order to use it "
-                        f"as a placeholder, and I want you to refer to yourself "
-                        f"as {persona.name}."
-                    ),
-                    conversation_id=conv_id,
-                    pinned=True,
-                    pin_target=persona.id,
-                )
-                self._db.add_message(name_instruction)
-                conv.messages.append(name_instruction)
-
-                # Create pinned setup note
-                mode_label = (
-                    "inherit" if persona.created_at_message_index is None
-                    else "new"
-                )
-                prompt_text = persona.system_prompt_override or ""
-                note_text = (
-                    f'Added persona "{persona.name}" '
-                    f"({persona.provider.value}, {mode_label})"
-                    + (f": {prompt_text}" if prompt_text else "")
-                )
-                note_msg = Message(
-                    role=Role.USER,
-                    content=note_text,
-                    conversation_id=conv_id,
-                    pinned=True,
-                    pin_target=persona.id,
-                )
-                self._db.add_message(note_msg)
-                conv.messages.append(note_msg)
-
-            # Ensure persona is in the selection
-            target = PersonaTarget(
-                persona_id=persona.id, provider=persona.provider,
-            )
-            current = list(self._selection_state.selection)
-            if target not in current:
-                current.append(target)
-                self._selection_state.set(current)
+        ensure_persona_pins(
+            self._db, conv, conv.messages, self._selection_state,
+        )
 
     # ------------------------------------------------------------------
     # Messaging
