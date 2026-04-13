@@ -132,6 +132,178 @@ class TestMistralProvider:
         assert "[MISTRAL responded]" in result[0]["content"]
 
 
+class TestMistralSDKRuntime:
+    """#166 — Mock the Mistral SDK to exercise _get_client, stream, list_models."""
+
+    def _make_provider(self, monkeypatch):
+        """Build a MistralProvider with a mocked SDK client."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        mock_client = MagicMock()
+        mock_mistral_class = MagicMock(return_value=mock_client)
+
+        # Patch the lazy import inside _get_client
+        import mchat.providers.mistral_provider as mp_mod
+        monkeypatch.setattr(
+            mp_mod, "MistralProvider",
+            type(mp_mod.MistralProvider.__name__, (mp_mod.MistralProvider,), {}),
+        )
+        provider = MistralProvider(api_key="test-key", default_model="mistral-large-latest")
+        # Inject mock client directly (bypass lazy import)
+        provider._client = mock_client
+        return provider, mock_client
+
+    def test_get_client_creates_sdk_instance(self, monkeypatch):
+        """_get_client should create a Mistral SDK client with the API key."""
+        from unittest.mock import MagicMock, patch
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="sk-test-123", default_model="m")
+        assert provider._client is None  # lazy, not yet created
+
+        mock_class = MagicMock()
+        with patch("mchat.providers.mistral_provider.Mistral", mock_class, create=True):
+            # Patch the import path used by _get_client
+            import mchat.providers.mistral_provider as mp_mod
+            original_get = mp_mod.MistralProvider._get_client
+
+            def patched_get(self):
+                if self._client is None:
+                    self._client = mock_class(api_key=self._api_key)
+                return self._client
+
+            monkeypatch.setattr(mp_mod.MistralProvider, "_get_client", patched_get)
+            client = provider._get_client()
+            mock_class.assert_called_once_with(api_key="sk-test-123")
+
+    def test_stream_yields_tokens(self, monkeypatch):
+        """stream() should yield delta content tokens from the SDK response."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="fake", default_model="mistral-large-latest")
+        mock_client = MagicMock()
+        provider._client = mock_client
+
+        # Build mock streaming response
+        def make_chunk(content=None, usage=None):
+            chunk = MagicMock()
+            chunk.data = MagicMock()
+            if content is not None:
+                choice = MagicMock()
+                choice.delta.content = content
+                chunk.data.choices = [choice]
+            else:
+                chunk.data.choices = []
+            chunk.data.usage = usage
+            return chunk
+
+        usage = MagicMock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 20
+
+        mock_client.chat.stream.return_value = [
+            make_chunk("Hello"),
+            make_chunk(" world"),
+            make_chunk(None, usage=usage),
+        ]
+
+        msgs = [Message(role=Role.USER, content="hi")]
+        tokens = list(provider.stream(msgs))
+        assert tokens == ["Hello", " world"]
+        assert provider.last_usage == (10, 20)
+
+    def test_stream_with_no_usage(self, monkeypatch):
+        """stream() should handle responses without usage data."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="fake", default_model="m")
+        mock_client = MagicMock()
+        provider._client = mock_client
+
+        chunk = MagicMock()
+        choice = MagicMock()
+        choice.delta.content = "ok"
+        chunk.data.choices = [choice]
+        chunk.data.usage = None
+
+        mock_client.chat.stream.return_value = [chunk]
+
+        msgs = [Message(role=Role.USER, content="hi")]
+        tokens = list(provider.stream(msgs))
+        assert tokens == ["ok"]
+        assert provider.last_usage is None
+
+    def test_list_models_returns_sorted(self, monkeypatch):
+        """list_models() should return sorted model IDs from SDK."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="fake", default_model="m")
+        mock_client = MagicMock()
+        provider._client = mock_client
+
+        model_a = MagicMock()
+        model_a.id = "mistral-small-latest"
+        model_b = MagicMock()
+        model_b.id = "mistral-large-latest"
+        mock_client.models.list.return_value.data = [model_a, model_b]
+
+        models = provider.list_models()
+        assert "mistral-large-latest" in models
+        assert "mistral-small-latest" in models
+        # Should be sorted reverse
+        assert models == sorted(models, reverse=True)
+
+    def test_list_models_fallback_on_error(self, monkeypatch):
+        """list_models() should return FALLBACK_MODELS on SDK error."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider, FALLBACK_MODELS
+
+        provider = MistralProvider(api_key="fake", default_model="m")
+        mock_client = MagicMock()
+        provider._client = mock_client
+
+        mock_client.models.list.side_effect = Exception("API error")
+
+        models = provider.list_models()
+        assert models == list(FALLBACK_MODELS)
+
+    def test_stream_passes_correct_model(self, monkeypatch):
+        """stream() should pass the model argument to the SDK."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="fake", default_model="default-model")
+        mock_client = MagicMock()
+        provider._client = mock_client
+        mock_client.chat.stream.return_value = []
+
+        msgs = [Message(role=Role.USER, content="hi")]
+        list(provider.stream(msgs, model="override-model"))
+
+        call_kwargs = mock_client.chat.stream.call_args
+        assert call_kwargs[1]["model"] == "override-model"
+
+    def test_stream_uses_default_model_when_none(self, monkeypatch):
+        """stream() should use default_model when model arg is None."""
+        from unittest.mock import MagicMock
+        from mchat.providers.mistral_provider import MistralProvider
+
+        provider = MistralProvider(api_key="fake", default_model="my-default")
+        mock_client = MagicMock()
+        provider._client = mock_client
+        mock_client.chat.stream.return_value = []
+
+        msgs = [Message(role=Role.USER, content="hi")]
+        list(provider.stream(msgs))
+
+        call_kwargs = mock_client.chat.stream.call_args
+        assert call_kwargs[1]["model"] == "my-default"
+
+
 class TestApertusProvider:
     """#156 — ApertusProvider via Infomaniak's OpenAI-compatible API."""
 
