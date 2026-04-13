@@ -338,6 +338,38 @@ class TestUnconfiguredProviderHighlight:
         assert d._close_btn.isEnabled()
 
 
+class TestSortOrderAssignment:
+    """#158 — new personas must get sequential sort_order values."""
+
+    def test_creation_assigns_sequential_sort_order(self, dialog, db, conv):
+        dialog.create_persona(provider=Provider.CLAUDE, name="Alpha")
+        dialog.create_persona(provider=Provider.OPENAI, name="Beta")
+        dialog.create_persona(provider=Provider.GEMINI, name="Gamma")
+        personas = dialog.list_items()
+        orders = [p.sort_order for p in personas]
+        assert orders == [0, 1, 2]
+
+    def test_creation_after_tombstone_does_not_collide(self, dialog, db, conv):
+        """After removing a persona, the next creation gets a higher
+        sort_order than any existing (including tombstoned)."""
+        dialog.create_persona(provider=Provider.CLAUDE, name="Alpha")
+        dialog.create_persona(provider=Provider.OPENAI, name="Beta")
+        personas = dialog.list_items()
+        dialog.remove_persona(personas[1].id)
+        dialog.create_persona(provider=Provider.GEMINI, name="Gamma")
+        active = dialog.list_items()
+        assert active[0].name == "Alpha"
+        assert active[1].name == "Gamma"
+        assert active[1].sort_order > active[0].sort_order
+
+    def test_creation_order_matches_list_order(self, dialog, db, conv):
+        """Personas listed in creation order regardless of random id."""
+        for i in range(5):
+            dialog.create_persona(provider=Provider.CLAUDE, name=f"P{i}")
+        names = [p.name for p in dialog.list_items()]
+        assert names == ["P0", "P1", "P2", "P3", "P4"]
+
+
 class TestMoveUpDown:
     """#105 — Move Up/Down reorders personas by sort_order."""
 

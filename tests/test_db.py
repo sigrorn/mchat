@@ -857,6 +857,34 @@ class TestPersonas:
         assert len(active) == 1
         assert active[0].id == second.id
 
+    def test_next_persona_sort_order_empty(self, db):
+        """#158 — next_persona_sort_order returns 0 for a chat with no personas."""
+        conv = db.create_conversation()
+        assert db.next_persona_sort_order(conv.id) == 0
+
+    def test_next_persona_sort_order_increments(self, db):
+        """#158 — next_persona_sort_order returns max + 1."""
+        conv = db.create_conversation()
+        db.create_persona(self._make_persona(
+            conv.id, name="A", name_slug="a", sort_order=0,
+        ))
+        assert db.next_persona_sort_order(conv.id) == 1
+        db.create_persona(self._make_persona(
+            conv.id, name="B", name_slug="b", sort_order=1,
+        ))
+        assert db.next_persona_sort_order(conv.id) == 2
+
+    def test_next_persona_sort_order_ignores_tombstoned(self, db):
+        """#158 — tombstoned personas don't affect next sort_order."""
+        conv = db.create_conversation()
+        p = db.create_persona(self._make_persona(
+            conv.id, name="A", name_slug="a", sort_order=5,
+        ))
+        db.tombstone_persona(conv.id, p.id)
+        # After tombstoning, next should still count from the max
+        # of all rows (including tombstoned) to avoid collisions
+        assert db.next_persona_sort_order(conv.id) == 6
+
     def test_slug_collision_across_conversations_is_allowed(self, db):
         """The unique index is scoped to conversation_id, so two chats
         can each have a persona named 'partner'."""
