@@ -27,6 +27,25 @@ RESERVED_NAMES: frozenset[str] = frozenset(
 )
 
 
+from dataclasses import dataclass
+from enum import Enum
+
+
+class ResolveMode(Enum):
+    EXPLICIT = "explicit"           # @name or @provider prefix(es)
+    ALL = "all"                     # @all
+    OTHERS = "others"              # @others
+    IMPLICIT_SELECTION = "implicit" # no @ prefix, uses checkbox selection
+    RETRY = "retry"                # //retry — parallel, no DAG, no run_id change
+
+
+@dataclass
+class ResolveResult:
+    targets: list
+    cleaned_text: str
+    mode: ResolveMode
+
+
 class ResolveError(ValueError):
     """Raised when the resolver cannot resolve an @-prefix token —
     either the token is unknown (not a persona name, not a reserved
@@ -52,6 +71,7 @@ class PersonaResolver:
 
     def __init__(self, router: Router) -> None:
         self._router = router
+        self.last_resolve_mode: ResolveMode = ResolveMode.IMPLICIT_SELECTION
 
     def resolve(
         self,
@@ -198,10 +218,14 @@ class PersonaResolver:
         if seen_special is not None:
             targets = self._expand_special(seen_special, conv_id, db)
             self._write_selection(targets)
+            self.last_resolve_mode = (
+                ResolveMode.ALL if seen_special == ALL else ResolveMode.OTHERS
+            )
             return targets, remaining
 
         if collected:
             self._write_selection(collected)
+            self.last_resolve_mode = ResolveMode.EXPLICIT
             return collected, remaining
 
         # No @-prefix at all — use current selection directly. The
@@ -211,6 +235,7 @@ class PersonaResolver:
             targets = list(self._router._selection_state.selection)
         else:
             targets = [synthetic_default(p) for p in self._router.selection]
+        self.last_resolve_mode = ResolveMode.IMPLICIT_SELECTION
         return targets, text
 
     def _expand_special(

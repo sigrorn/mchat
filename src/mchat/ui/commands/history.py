@@ -221,7 +221,8 @@ def handle_retry(host: CommandHost) -> bool:
     send.retry_error_msg_ids.clear()
 
     host._input.set_enabled(False)
-    send.send_multi(failed_targets, context_override=context_override)
+    from mchat.ui.persona_resolver import ResolveMode
+    send.send_multi(failed_targets, context_override=context_override, resolve_mode=ResolveMode.RETRY)
     host._chat.add_note(
         f"retrying {', '.join(labels_copy.get(pid, pid) for pid in failed_persona_ids)}..."
     )
