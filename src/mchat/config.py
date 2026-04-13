@@ -101,6 +101,7 @@ PROVIDER_META: dict[str, dict] = {
         "color_key": "color_apertus",
         "system_prompt_key": "system_prompt_apertus",
         "product_id_key": "apertus_product_id",
+        "extra_config_keys": {"product_id": "apertus_product_id"},
         "display": "Apertus",
     },
 }

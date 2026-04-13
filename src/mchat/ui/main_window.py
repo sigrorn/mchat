@@ -27,13 +27,8 @@ from mchat.config import Config, PROVIDER_META
 from mchat.db import Database
 from mchat.models.conversation import Conversation
 from mchat.models.message import Message, Provider, Role
+from mchat.provider_factory import build_providers
 from mchat.providers.base import BaseProvider
-from mchat.providers.claude import ClaudeProvider
-from mchat.providers.gemini_provider import GeminiProvider
-from mchat.providers.openai_provider import OpenAIProvider
-from mchat.providers.apertus_provider import ApertusProvider
-from mchat.providers.mistral_provider import MistralProvider
-from mchat.providers.perplexity_provider import PerplexityProvider
 from mchat.router import Router
 from mchat.ui.chat_widget import ChatWidget
 from mchat.ui.find_bar import FindBar
@@ -190,51 +185,7 @@ class MainWindow(QMainWindow):
         self._services.set_router(self._router)
 
     def _init_providers(self) -> None:
-        providers: dict[Provider, BaseProvider] = {}
-
-        anthropic_key = self._config.get("anthropic_api_key")
-        if anthropic_key:
-            providers[Provider.CLAUDE] = ClaudeProvider(
-                api_key=anthropic_key,
-                default_model=self._config.get("claude_model"),
-            )
-
-        openai_key = self._config.get("openai_api_key")
-        if openai_key:
-            providers[Provider.OPENAI] = OpenAIProvider(
-                api_key=openai_key,
-                default_model=self._config.get("openai_model"),
-            )
-
-        gemini_key = self._config.get("gemini_api_key")
-        if gemini_key:
-            providers[Provider.GEMINI] = GeminiProvider(
-                api_key=gemini_key,
-                default_model=self._config.get("gemini_model"),
-            )
-
-        perplexity_key = self._config.get("perplexity_api_key")
-        if perplexity_key:
-            providers[Provider.PERPLEXITY] = PerplexityProvider(
-                api_key=perplexity_key,
-                default_model=self._config.get("perplexity_model"),
-            )
-
-        mistral_key = self._config.get("mistral_api_key")
-        if mistral_key:
-            providers[Provider.MISTRAL] = MistralProvider(
-                api_key=mistral_key,
-                default_model=self._config.get("mistral_model"),
-            )
-
-        apertus_key = self._config.get("apertus_api_key")
-        apertus_pid = self._config.get("apertus_product_id")
-        if apertus_key and apertus_pid:
-            providers[Provider.APERTUS] = ApertusProvider(
-                api_key=apertus_key,
-                product_id=apertus_pid,
-                default_model=self._config.get("apertus_model"),
-            )
+        providers = build_providers(self._config)
 
         try:
             default = Provider(self._config.get("default_provider"))

@@ -52,15 +52,11 @@ def main_window(qtbot, tmp_path, monkeypatch):
     # Point Config + Database at tmp paths before importing main_window
     from mchat.ui import main_window as mw_mod
 
-    # Patch every provider class used by _init_providers so nothing hits
-    # a real API. Each fake is pre-bound to the Provider enum member it
-    # stands in for so provider_id is correct.
-    monkeypatch.setattr(mw_mod, "ClaudeProvider", make_fake_provider_class(Provider.CLAUDE))
-    monkeypatch.setattr(mw_mod, "OpenAIProvider", make_fake_provider_class(Provider.OPENAI))
-    monkeypatch.setattr(mw_mod, "GeminiProvider", make_fake_provider_class(Provider.GEMINI))
-    monkeypatch.setattr(mw_mod, "PerplexityProvider", make_fake_provider_class(Provider.PERPLEXITY))
-    monkeypatch.setattr(mw_mod, "MistralProvider", make_fake_provider_class(Provider.MISTRAL))
-    monkeypatch.setattr(mw_mod, "ApertusProvider", make_fake_provider_class(Provider.APERTUS))
+    # Patch build_providers so nothing hits a real API. Each fake
+    # provider is pre-bound to the correct Provider enum member.
+    def _fake_build(config):
+        return {p: make_fake_provider_class(p)(api_key="fake") for p in Provider}
+    monkeypatch.setattr(mw_mod, "build_providers", _fake_build)
 
     cfg = Config(config_path=tmp_path / "cfg.json")
     # Populate fake keys so every provider is "configured"
