@@ -52,10 +52,6 @@ class TestInfomanikPricing:
         assert cost is not None
         assert cost > 0
 
-    def test_kimi_pricing(self):
-        cost = estimate_cost("moonshotai/Kimi-K2.5", 1000, 500)
-        assert cost is not None
-
     def test_gpt_oss_pricing(self):
         cost = estimate_cost("openai/gpt-oss-120b", 1000, 500)
         assert cost is not None
@@ -70,10 +66,6 @@ class TestInfomanikPricing:
 
     def test_mistral_small_infomaniak_pricing(self):
         cost = estimate_cost("Mistral-Small-3.2-24B-Instruct-2506", 1000, 500)
-        assert cost is not None
-
-    def test_qwen_pricing(self):
-        cost = estimate_cost("Qwen/Qwen3-VL-235B-A22B-Instruct", 1000, 500)
         assert cost is not None
 
     def test_llama_pricing(self):

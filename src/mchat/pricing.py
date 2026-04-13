@@ -40,11 +40,9 @@ _PRICES: dict[str, tuple[float, float]] = {
     "gemma-3n-E4B":                (0.11, 0.34),   # CHF 0.10/0.30 per 1M
     "granite-3.1-8b":              (0.11, 0.34),   # CHF 0.10/0.30 per 1M
     "Mistral-Small-3.2-24B":       (0.11, 0.34),   # CHF 0.10/0.30 per 1M
-    "Qwen/Qwen3-VL-235B":         (0.79, 2.26),   # CHF 0.70/2.00 per 1M
     "Llama-3.3":                   (1.13, 3.39),   # CHF 1.00/3.00 per 1M
     "swiss-ai/Apertus":            (0.79, 2.83),   # CHF 0.70/2.50 per 1M
     "openai/gpt-oss-120b":        (0.34, 1.02),   # CHF 0.30/0.90 per 1M
-    "moonshotai/Kimi-K2.5":       (0.68, 3.39),   # CHF 0.60/3.00 per 1M
     # Perplexity Sonar
     "sonar-deep-research": (2.00, 8.00),
     "sonar-reasoning-pro": (2.00, 8.00),

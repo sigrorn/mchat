@@ -350,3 +350,23 @@ class TestApertusProvider:
         from mchat.providers.apertus_provider import ApertusProvider
         p = ApertusProvider(api_key="fake", product_id="12345")
         assert "swiss-ai/Apertus-70B-Instruct-2509" in p._fallback_models
+
+    def test_blocked_models_not_in_fallback(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        p = ApertusProvider(api_key="fake", product_id="12345")
+        for model in p._fallback_models:
+            lower = model.lower()
+            assert not lower.startswith("qwen"), f"blocked model in fallback: {model}"
+            assert not lower.startswith("moonshotai"), f"blocked model in fallback: {model}"
+            assert not lower.startswith("kimi"), f"blocked model in fallback: {model}"
+
+    def test_filter_model_blocks_chinese_models(self):
+        from mchat.providers.apertus_provider import ApertusProvider
+        p = ApertusProvider(api_key="fake", product_id="12345")
+        assert not p._filter_model("Qwen/Qwen3-VL-235B-A22B-Instruct")
+        assert not p._filter_model("moonshotai/Kimi-K2.5")
+        assert not p._filter_model("kimi-something")
+        # Allowed models pass through
+        assert p._filter_model("swiss-ai/Apertus-70B-Instruct-2509")
+        assert p._filter_model("Llama-3.3-70B-Instruct")
+        assert p._filter_model("openai/gpt-oss-120b")
