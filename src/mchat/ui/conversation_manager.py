@@ -154,8 +154,6 @@ class ConversationManager:
         host._sync_toolbar_personas()
         host._update_spend_labels()
         host._sync_matrix_panel()
-        # #124: restore per-conversation send mode (parallel/sequential)
-        host._send._sequential_mode = (conv.send_mode == "sequential")
         # #128: restore the incoming conversation's input draft (or clear)
         self._restore_draft(conv_id)
         host._display_messages(messages)
@@ -178,10 +176,6 @@ class ConversationManager:
         host._sync_toolbar_personas()
         host._update_spend_labels()
         host._sync_matrix_panel()
-        # #124: new chats always start in parallel mode (the DB default).
-        # The DB column is already 'parallel' from the migration, but we
-        # also reset the in-memory flag so it doesn't carry over.
-        host._send._sequential_mode = False
         self.load_conversations()
         host._sidebar.select_conversation(conv.id)
 

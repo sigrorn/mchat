@@ -39,7 +39,7 @@ HELP_COMMANDS = (
     '  //removepersona "<n>"         — tombstone a persona\n'
     "  //personas                    — list personas in this chat\n"
     "  //rename <text>               — rename the current chat\n"
-    "  //mode parallel|sequential     — parallel (default) or one-at-a-time send\n"
+    "  //mode                         — (deprecated: use Runs after in Personas)\n"
     "  //visibility separated|joined  — quick visibility presets\n"
     "  //columns (//cols) / //lines  — column vs list layout\n"
     "  //help                        — show this help\n"

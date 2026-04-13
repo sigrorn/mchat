@@ -96,25 +96,23 @@ class TestVisibilitySeparatedPersonaFree:
 
 
 class TestModeCommand:
-    """#117 — //mode should persist a note in the transcript."""
+    """#171 — //mode is now a deprecation stub showing a note."""
 
-    def test_mode_sequential_persists_note(self, db):
+    def test_mode_shows_deprecation_note(self, db):
         host = _build_host(db)
         host._send = MagicMock()
-        host._send._sequential_mode = False
         from mchat.ui.commands.selection import handle_mode
         handle_mode("sequential", host)
-        messages = db.get_messages(host._current_conv.id)
-        assert any("sequential" in m.content.lower() for m in messages)
+        assert any("replaced" in n.lower() or "runs after" in n.lower()
+                    for n in host._chat.notes)
 
-    def test_mode_parallel_persists_note(self, db):
+    def test_mode_any_arg_shows_deprecation(self, db):
         host = _build_host(db)
         host._send = MagicMock()
-        host._send._sequential_mode = True
         from mchat.ui.commands.selection import handle_mode
         handle_mode("parallel", host)
-        messages = db.get_messages(host._current_conv.id)
-        assert any("parallel" in m.content.lower() for m in messages)
+        assert any("replaced" in n.lower() or "runs after" in n.lower()
+                    for n in host._chat.notes)
 
 
 class TestVisibilityNoArg:

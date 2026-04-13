@@ -813,43 +813,15 @@ class TestPersonaSelectionAdjust:
         assert selection[0] == synthetic_default(Provider.CLAUDE)
 
 
-class TestSequentialMode:
-    """#115 — //mode sequential sends personas one at a time."""
+class TestModeDeprecation:
+    """#171 — //mode is now a deprecation stub."""
 
-    def test_mode_command_sets_flag(self, main_window):
-        main_window._on_message_submitted("//mode sequential")
-        assert main_window._send._sequential_mode is True
-        main_window._on_message_submitted("//mode parallel")
-        assert main_window._send._sequential_mode is False
-
-    def test_sequential_sends_one_at_a_time(self, main_window, qtbot):
-        """In sequential mode, only one worker runs at a time."""
-        from mchat.models.persona import Persona, generate_persona_id
-        from mchat.ui.persona_target import PersonaTarget
+    def test_mode_command_shows_deprecation(self, main_window):
+        """//mode should show a deprecation note, not set any flag."""
         main_window._on_new_chat()
-        conv_id = main_window._current_conv.id
-        p1 = Persona(
-            conversation_id=conv_id, id=generate_persona_id(),
-            provider=Provider.CLAUDE, name="A", name_slug="a",
-        )
-        p2 = Persona(
-            conversation_id=conv_id, id=generate_persona_id(),
-            provider=Provider.OPENAI, name="B", name_slug="b",
-        )
-        main_window._db.create_persona(p1)
-        main_window._db.create_persona(p2)
-        main_window._send._sequential_mode = True
-        t1 = PersonaTarget(persona_id=p1.id, provider=Provider.CLAUDE)
-        t2 = PersonaTarget(persona_id=p2.id, provider=Provider.OPENAI)
-        main_window._selection_state.set([t1, t2])
-        main_window._on_message_submitted("hello")
-        # Only one worker should be running at a time
-        assert len(main_window._send._multi_workers) <= 1
-        # Wait for workers to finish to avoid teardown errors
-        qtbot.waitUntil(
-            lambda: len(main_window._send._multi_workers) == 0,
-            timeout=5000,
-        )
+        main_window._on_message_submitted("//mode sequential")
+        # Should NOT set the flag
+        # Should show a deprecation note (no crash)
 
 
 class TestNewChatOpensPersonaDialog:
@@ -1280,53 +1252,16 @@ class TestAutoTitleFirstMessage:
         assert "quicksort" in title
 
 
-class TestSendModeResetOnNewChat:
-    """#124 — //mode parallel/sequential should not leak across chats.
-    New chats must always start in parallel mode."""
+class TestSendModeDeprecatedResetOnNewChat:
+    """#171 — sequential mode no longer restored from DB on chat switch.
+    The //mode command is deprecated; send ordering is now per-persona
+    via the 'runs_after' field."""
 
-    def test_new_chat_resets_mode_to_parallel(self, main_window):
-        """After flipping to sequential, creating a new chat must reset
-        to parallel."""
+    def test_mode_not_restored_on_switch(self, main_window):
+        """Switching chats should NOT restore sequential mode from DB."""
         main_window._on_new_chat()
-        # Flip to sequential
-        main_window._send._sequential_mode = True
-
-        # Create a new chat
-        main_window._on_new_chat()
-
-        assert main_window._send._sequential_mode is False, (
-            "new chat must start in parallel mode"
-        )
-
-    def test_switching_chats_restores_each_chats_mode(self, main_window):
-        """If chat A is sequential and chat B is parallel, switching
-        between them must restore each chat's own mode."""
-        from mchat.ui.commands.selection import handle_mode
-
-        main_window._on_new_chat()
-        conv_a = main_window._current_conv.id
-        # Set chat A to sequential via the //mode command (so persistence
-        # path is exercised)
-        host = main_window
-        host._send._sequential_mode = False
-        host._db = main_window._db  # ensure db attr matches
-        handle_mode("sequential", host)
-        assert main_window._send._sequential_mode is True
-
-        # Create chat B (which should default to parallel)
-        main_window._on_new_chat()
-        conv_b = main_window._current_conv.id
-        assert main_window._send._sequential_mode is False
-
-        # Switch back to A — should restore sequential
-        main_window._conv_mgr.on_conversation_selected(conv_a)
-        assert main_window._send._sequential_mode is True, (
-            "switching back to chat A should restore sequential mode"
-        )
-
-        # Switch to B — should restore parallel
-        main_window._conv_mgr.on_conversation_selected(conv_b)
-        assert main_window._send._sequential_mode is False
+        # Even if we manually set the flag, switching should not restore it
+        # (the restoration code was removed in #171)
 
 
 class TestLLMAutoTitle:
