@@ -41,8 +41,8 @@ from mchat.ui.persona_resolution import resolve_persona_model
 from mchat.ui.persona_resolver import PersonaResolver, ResolveError
 from mchat.ui.persona_target import PersonaTarget, synthetic_default
 from mchat.ui.services import ServicesContext
+from mchat.ui.title_generator import TitleGenerator
 from mchat.workers.stream_worker import StreamWorker
-from mchat.workers.title_worker import TitleWorker, clean_title
 
 if TYPE_CHECKING:
     from mchat.ui.main_window import MainWindow  # noqa: F401
@@ -94,19 +94,12 @@ class SendController:
 
         # Send mode: parallel (default) or sequential
         self._sequential_mode: bool = False
-        # #125: LLM auto-titling — once-per-conversation gate so we
-        # never re-trigger title generation after the first attempt.
-        # Holds conv_id ints. Includes both successes and failures.
-        self._title_generation_attempted: set[int] = set()
-        # Conversations whose current title was set by the synchronous
-        # first-50-char fallback. If the current title still matches
-        # the fallback we recorded, an LLM auto-title is allowed to
-        # overwrite it. If the user has renamed since, the recorded
-        # value won't match and we leave it alone.
-        self._fallback_title_by_conv: dict[int, str] = {}
-        # Active TitleWorker references keyed by conv_id, kept alive
-        # so the QThread isn't garbage-collected mid-run.
-        self._title_workers: dict[int, TitleWorker] = {}
+        # #159: auto-title logic extracted to TitleGenerator.
+        self._title_gen = TitleGenerator(
+            db=services.db,
+            session=services.session,
+            sidebar=host._sidebar,
+        )
         # Sequential chain state
         self._seq_queue: list[PersonaTarget] = []
         self._seq_context_override: dict[str, list[Message]] | None = None
@@ -349,7 +342,7 @@ class SendController:
                 # #125: record the fallback so the LLM auto-title is
                 # allowed to overwrite it later (but a user rename
                 # in the meantime will not be overwritten).
-                self._fallback_title_by_conv[conv.id] = title
+                self._title_gen.set_fallback_title(conv.id, title)
 
         host._input.set_enabled(False)
         host._save_selection()
@@ -726,10 +719,10 @@ class SendController:
             if (
                 self._seq_conv_id is not None
                 and not self._conv_switched
-                and self._should_generate_title(self._seq_conv_id)
+                and self._title_gen.should_generate_title(self._seq_conv_id)
             ):
-                self._maybe_start_title_generation(
-                    self._seq_conv_id, persisted, target,
+                self._title_gen.maybe_start(
+                    self._seq_conv_id, persisted, target, svc.router,
                 )
             # If in edit mode, advance the replay queue
             self._advance_edit_replay()
@@ -844,166 +837,35 @@ class SendController:
                 host._update_input_color()
 
     # ------------------------------------------------------------------
-    # #125: LLM-based auto-titling
+    # #125/#159: LLM-based auto-titling — delegated to TitleGenerator
     # ------------------------------------------------------------------
 
     def _should_generate_title(self, conv_id: int) -> bool:
-        """Return True if this conversation should get an LLM auto-title.
-
-        Eligible when:
-          * we haven't already attempted it for this conv, AND
-          * the current title is either the still-default 'New Chat'
-            or matches the fallback we set on the first user message
-            (i.e. the user hasn't manually renamed yet)
-        """
-        if conv_id in self._title_generation_attempted:
-            return False
-        conv = self._services.db.get_conversation(conv_id)
-        if conv is None:
-            return False
-        if conv.title == "New Chat":
-            return True
-        return conv.title == self._fallback_title_by_conv.get(conv_id)
-
-    def _maybe_start_title_generation(
-        self,
-        conv_id: int,
-        persisted: list[Message],
-        last_target: PersonaTarget,
-    ) -> None:
-        """Kick off a background TitleWorker for this conversation.
-
-        Picks the first persisted assistant response (or the last target
-        as a fallback) as the persona to ask. Captures the first user
-        message and that persona's response as context. Mark as attempted
-        immediately so a second send can't double-fire.
-        """
-        host = self._host
-        svc = self._services
-        # Only attempt once per conversation, regardless of outcome.
-        self._title_generation_attempted.add(conv_id)
-
-        # Find the first non-pinned user message in this conversation.
-        # We need the actual first prompt, not whatever was just sent
-        # (in theory the same thing on first exchange, but be defensive).
-        all_msgs = svc.db.get_messages(conv_id)
-        first_user_text = next(
-            (
-                m.content for m in all_msgs
-                if m.role == Role.USER and not m.pinned
-            ),
-            None,
-        )
-        if not first_user_text or not persisted:
-            return
-        first_assistant_text = persisted[0].content
-
-        # Pick the provider for the first persisted response. Resolve
-        # via router so we get the same provider instance the send used.
-        if svc.router is None:
-            return
-        target_for_title = last_target
-        # Prefer the first persisted message's persona/provider if we
-        # can find a matching target.
-        first_msg = persisted[0]
-        provider = svc.router._providers.get(first_msg.provider) if first_msg.provider else None
-        if provider is None:
-            return
-        # Determine the model — match what the message used if we know it.
-        model = first_msg.model
-
-        worker = TitleWorker(
-            conv_id=conv_id,
-            provider=provider,
-            first_user_text=first_user_text,
-            first_assistant_text=first_assistant_text,
-            model=model,
-        )
-        worker.title_ready.connect(self._on_title_ready)
-        worker.title_failed.connect(self._on_title_failed)
-        # Show transient indicator in sidebar
-        if hasattr(host._sidebar, "set_conversation_title_pending"):
-            host._sidebar.set_conversation_title_pending(conv_id, True)
-        self._title_workers[conv_id] = worker
-        worker.start()
-
-    def _on_title_ready(self, conv_id: int, raw_text: str) -> None:
-        """Handle a successful TitleWorker completion (main thread).
-
-        Title generation is a background nicety — any exception here
-        (closed DB, gone widget, teardown race) must be swallowed
-        silently. Never crash the app over a cosmetic feature (#129).
-        """
-        try:
-            host = self._host
-            self._title_workers.pop(conv_id, None)
-            if hasattr(host._sidebar, "set_conversation_title_pending"):
-                host._sidebar.set_conversation_title_pending(conv_id, False)
-            cleaned = clean_title(raw_text)
-            if cleaned:
-                self._apply_auto_title(conv_id, cleaned)
-        except Exception:
-            pass
-
-    def _on_title_failed(self, conv_id: int) -> None:
-        """Handle a TitleWorker error — silent fallback (no-op).
-        The first-50-char fallback already happened on the user's send.
-        Wrapped in try/except for the same reason as _on_title_ready (#129).
-        """
-        try:
-            host = self._host
-            self._title_workers.pop(conv_id, None)
-            if hasattr(host._sidebar, "set_conversation_title_pending"):
-                host._sidebar.set_conversation_title_pending(conv_id, False)
-        except Exception:
-            pass
+        return self._title_gen.should_generate_title(conv_id)
 
     def _apply_auto_title(self, conv_id: int, new_title: str) -> None:
-        """Write the auto-generated title to the DB and sidebar.
+        self._title_gen.apply_auto_title(conv_id, new_title)
 
-        Allowed to overwrite the default 'New Chat' OR the fallback
-        first-50-chars title we set on the first user message. NOT
-        allowed to overwrite a title the user has manually renamed.
+    def _on_title_ready(self, conv_id: int, raw_text: str) -> None:
+        self._title_gen._on_title_ready(conv_id, raw_text)
 
-        Wrapped in try/except — background nicety, must not crash (#129).
-        """
-        try:
-            host = self._host
-            svc = self._services
-            conv = svc.db.get_conversation(conv_id)
-            if conv is None:
-                return
-            is_default = conv.title == "New Chat"
-            is_fallback = conv.title == self._fallback_title_by_conv.get(conv_id)
-            if not (is_default or is_fallback):
-                return
-            svc.db.update_conversation_title(conv_id, new_title)
-            # Forget the recorded fallback so a future rename-back-to-it
-            # wouldn't be overwritten by a stale LLM result.
-            self._fallback_title_by_conv.pop(conv_id, None)
-            current = svc.session.current
-            if current and current.id == conv_id:
-                svc.session.set_title(new_title)
-            host._sidebar.update_conversation_title(conv_id, new_title)
-        except Exception:
-            pass
+    def _on_title_failed(self, conv_id: int) -> None:
+        self._title_gen._on_title_failed(conv_id)
+
+    @property
+    def _title_generation_attempted(self) -> set[int]:
+        return self._title_gen._title_generation_attempted
+
+    @property
+    def _fallback_title_by_conv(self) -> dict[int, str]:
+        return self._title_gen._fallback_title_by_conv
+
+    @property
+    def _title_workers(self) -> dict:
+        return self._title_gen._title_workers
 
     def stop_all_title_workers(self, wait_ms: int = 2000) -> None:
-        """Request all running TitleWorkers to stop and wait briefly.
-
-        Called from MainWindow.closeEvent and test fixture teardown
-        so background title generation doesn't outlive the parent
-        (#129). Uses requestInterruption() + quit() + wait().
-        """
-        for worker in list(self._title_workers.values()):
-            try:
-                if worker.isRunning():
-                    worker.requestInterruption()
-                    worker.quit()
-                    worker.wait(wait_ms)
-            except Exception:
-                pass
-        self._title_workers.clear()
+        self._title_gen.stop_all_workers(wait_ms)
 
     # ------------------------------------------------------------------
     # Persistence of buffered responses
