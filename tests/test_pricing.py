@@ -44,13 +44,41 @@ class TestMistralPricing:
         assert cost > 0
 
 
-class TestApertusPricing:
-    """#156 — Apertus model must have a pricing entry."""
+class TestInfomanikPricing:
+    """Infomaniak-hosted models must have pricing entries."""
 
     def test_apertus_pricing(self):
         cost = estimate_cost("swiss-ai/Apertus-70B-Instruct-2509", 1000, 500)
         assert cost is not None
         assert cost > 0
+
+    def test_kimi_pricing(self):
+        cost = estimate_cost("moonshotai/Kimi-K2.5", 1000, 500)
+        assert cost is not None
+
+    def test_gpt_oss_pricing(self):
+        cost = estimate_cost("openai/gpt-oss-120b", 1000, 500)
+        assert cost is not None
+
+    def test_gemma_pricing(self):
+        cost = estimate_cost("gemma-3n-E4B-it", 1000, 500)
+        assert cost is not None
+
+    def test_granite_pricing(self):
+        cost = estimate_cost("granite-3.1-8b-instruct", 1000, 500)
+        assert cost is not None
+
+    def test_mistral_small_infomaniak_pricing(self):
+        cost = estimate_cost("Mistral-Small-3.2-24B-Instruct-2506", 1000, 500)
+        assert cost is not None
+
+    def test_qwen_pricing(self):
+        cost = estimate_cost("Qwen/Qwen3-VL-235B-A22B-Instruct", 1000, 500)
+        assert cost is not None
+
+    def test_llama_pricing(self):
+        cost = estimate_cost("Llama-3.3-70B-Instruct", 1000, 500)
+        assert cost is not None
 
 
 class TestFormatCost:

@@ -14,6 +14,13 @@ from mchat.providers.openai_compat import OpenAICompatibleProvider
 class ApertusProvider(OpenAICompatibleProvider):
     _fallback_models = [
         "swiss-ai/Apertus-70B-Instruct-2509",
+        "moonshotai/Kimi-K2.5",
+        "openai/gpt-oss-120b",
+        "Qwen/Qwen3-VL-235B-A22B-Instruct",
+        "Llama-3.3-70B-Instruct",
+        "Mistral-Small-3.2-24B-Instruct-2506",
+        "granite-3.1-8b-instruct",
+        "gemma-3n-E4B-it",
     ]
 
     def __init__(
