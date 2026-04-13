@@ -135,6 +135,7 @@ class SendController:
         self._dag_ancestors: dict[str, set[str]] = {}  # pid → ancestor pids (NOT self)
         self._dag_targets: dict[str, PersonaTarget] = {}
         self._dag_active: bool = False
+        self._dag_completed_msgs: list[Message] = []   # buffered for column rendering
         self._dag_retry_run_id: dict[str, int] = {}    # pid → dag_run_id at failure
 
     # ------------------------------------------------------------------
@@ -618,6 +619,7 @@ class SendController:
         self._dag_targets.clear()
         self._dag_active = False
         self._dag_conv_id = None
+        self._dag_completed_msgs.clear()
 
     def _send_parallel(
         self,
@@ -829,9 +831,12 @@ class SendController:
         if not conv_switched:
             svc.session.append_message(msg)
 
-        # Render immediately (lines mode)
+        # Buffer for column rendering, or render immediately in lines mode
         if not conv_switched:
-            host._renderer.render_list_responses([msg])
+            if host._column_mode:
+                self._dag_completed_msgs.append(msg)
+            else:
+                host._renderer.render_list_responses([msg])
 
         self._dag_status[target.persona_id] = "completed"
 
@@ -880,7 +885,10 @@ class SendController:
         svc.db.add_message(error_msg)
         if not conv_switched:
             svc.session.append_message(error_msg)
-            host._renderer.render_list_responses([error_msg])
+            if host._column_mode:
+                self._dag_completed_msgs.append(error_msg)
+            else:
+                host._renderer.render_list_responses([error_msg])
 
         self._dag_status[target.persona_id] = "failed"
         # Record DAG retry metadata (only for DAG failures)
@@ -920,6 +928,10 @@ class SendController:
         # Don't clear DAG structures — retry needs them
 
         if not conv_switched:
+            # Render buffered DAG messages (column mode)
+            if host._column_mode and self._dag_completed_msgs:
+                host._renderer.render_column_responses(self._dag_completed_msgs)
+                self._dag_completed_msgs.clear()
             host._input.set_enabled(True)
             host._update_input_placeholder()
             host._update_input_color()
