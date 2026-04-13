@@ -41,6 +41,7 @@ class Persona:
     color_override: str | None = None          # None = inherit provider colour
     created_at_message_index: int | None = None  # None = full history
     sort_order: int = 0
+    runs_after: str | None = None              # None = runs after prompt; persona_id = dependency
     deleted_at: datetime | None = None         # tombstone marker (D3)
 
 

@@ -334,7 +334,7 @@ class Database:
 
     def _row_to_persona(self, row) -> Persona:
         """Build a Persona from a row tuple matching the SELECT below."""
-        deleted_at = datetime.fromisoformat(row[10]) if row[10] else None
+        deleted_at = datetime.fromisoformat(row[11]) if row[11] else None
         return Persona(
             conversation_id=row[0],
             id=row[1],
@@ -346,13 +346,14 @@ class Database:
             color_override=row[7],
             created_at_message_index=row[8],
             sort_order=row[9],
+            runs_after=row[10],
             deleted_at=deleted_at,
         )
 
     _PERSONA_COLS = (
         "conversation_id, id, provider, name, name_slug, "
         "system_prompt_override, model_override, color_override, "
-        "created_at_message_index, sort_order, deleted_at"
+        "created_at_message_index, sort_order, runs_after, deleted_at"
     )
 
     def create_persona(self, persona: Persona) -> Persona:
@@ -366,7 +367,7 @@ class Database:
         )
         self._conn.execute(
             f"INSERT INTO personas ({self._PERSONA_COLS}) "
-            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 persona.conversation_id,
                 persona.id,
@@ -378,6 +379,7 @@ class Database:
                 persona.color_override,
                 persona.created_at_message_index,
                 persona.sort_order,
+                persona.runs_after,
                 deleted_at_str,
             ),
         )
@@ -430,7 +432,7 @@ class Database:
             "UPDATE personas SET "
             "provider = ?, name = ?, name_slug = ?, "
             "system_prompt_override = ?, model_override = ?, color_override = ?, "
-            "created_at_message_index = ?, sort_order = ?, deleted_at = ? "
+            "created_at_message_index = ?, sort_order = ?, runs_after = ?, deleted_at = ? "
             "WHERE conversation_id = ? AND id = ?",
             (
                 persona.provider.value,
@@ -441,6 +443,7 @@ class Database:
                 persona.color_override,
                 persona.created_at_message_index,
                 persona.sort_order,
+                persona.runs_after,
                 deleted_at_str,
                 persona.conversation_id,
                 persona.id,

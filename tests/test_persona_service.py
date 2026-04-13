@@ -229,9 +229,12 @@ class TestValidateDag:
     def test_cycle_detected(self):
         from mchat.services.persona_service import validate_dag
         from mchat.models.persona import Persona
+        # A→B→C→A with one root to isolate cycle detection from no-root check
         personas = [
-            Persona(conversation_id=1, id="a", provider=Provider.CLAUDE, name="A", name_slug="a", runs_after="b"),
+            Persona(conversation_id=1, id="r", provider=Provider.CLAUDE, name="Root", name_slug="root"),
+            Persona(conversation_id=1, id="a", provider=Provider.CLAUDE, name="A", name_slug="a", runs_after="c"),
             Persona(conversation_id=1, id="b", provider=Provider.OPENAI, name="B", name_slug="b", runs_after="a"),
+            Persona(conversation_id=1, id="c", provider=Provider.GEMINI, name="C", name_slug="c", runs_after="b"),
         ]
         errors = validate_dag(personas)
         assert len(errors) > 0

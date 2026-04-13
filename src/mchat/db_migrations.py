@@ -13,7 +13,7 @@ import sqlite3
 
 # Schema version stored in PRAGMA user_version. Bump this and append a
 # new migration function whenever the schema changes.
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -228,6 +228,13 @@ def _migration_5_rerun_rewrite_for_stragglers(conn: sqlite3.Connection) -> None:
     _migration_4_rewrite_prefixes(conn)
 
 
+def _migration_6_runs_after(conn: sqlite3.Connection) -> None:
+    """Add the personas.runs_after column for per-persona dependency DAG."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(personas)")}
+    if "runs_after" not in cols:
+        conn.execute("ALTER TABLE personas ADD COLUMN runs_after TEXT")
+
+
 # Ordered list of (version, migration_function) pairs.
 MIGRATIONS: list[tuple[int, callable]] = [
     (1, _migration_1_initial),
@@ -235,6 +242,7 @@ MIGRATIONS: list[tuple[int, callable]] = [
     (3, _migration_3_send_mode),
     (4, _migration_4_rewrite_prefixes),
     (5, _migration_5_rerun_rewrite_for_stragglers),
+    (6, _migration_6_runs_after),
 ]
 
 

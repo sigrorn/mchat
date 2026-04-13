@@ -25,6 +25,87 @@ from mchat.ui.persona_resolution import (
 )
 
 
+def validate_dag(personas: list[Persona]) -> list[str]:
+    """Validate the runs_after DAG for a list of personas.
+
+    Returns a list of error strings; empty = valid.
+
+    Checks:
+    1. No self-references
+    2. Every runs_after target exists in the active persona set
+    3. No cycles (Kahn's algorithm)
+    4. At least one root (runs_after=None) when list is non-empty
+    """
+    if not personas:
+        return []
+
+    errors: list[str] = []
+    ids = {p.id for p in personas}
+    by_id = {p.id: p for p in personas}
+
+    # Check self-references and dangling references
+    for p in personas:
+        if p.runs_after is not None:
+            if p.runs_after == p.id:
+                errors.append(f"{p.name!r} references itself")
+            elif p.runs_after not in ids:
+                errors.append(
+                    f"{p.name!r} depends on unknown persona {p.runs_after!r}"
+                )
+
+    if errors:
+        return errors
+
+    # Check at least one root
+    roots = [p for p in personas if p.runs_after is None]
+    if not roots:
+        errors.append("no root persona (at least one must have runs_after=None)")
+        return errors
+
+    # Cycle detection via Kahn's algorithm (topological sort)
+    in_degree: dict[str, int] = {p.id: 0 for p in personas}
+    children: dict[str, list[str]] = {p.id: [] for p in personas}
+    for p in personas:
+        if p.runs_after is not None and p.runs_after in ids:
+            in_degree[p.id] += 1
+            children[p.runs_after].append(p.id)
+
+    queue = [pid for pid, deg in in_degree.items() if deg == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for child in children[node]:
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                queue.append(child)
+
+    if visited < len(personas):
+        cycle_nodes = [by_id[pid].name for pid, deg in in_degree.items() if deg > 0]
+        errors.append(f"cycle detected involving: {', '.join(cycle_nodes)}")
+
+    return errors
+
+
+def get_ancestor_persona_ids(persona_id: str, personas: list[Persona]) -> set[str]:
+    """Return the set of ancestor persona_ids (NOT including self).
+
+    Walks the runs_after chain from persona_id up to a root.
+    """
+    by_id = {p.id: p for p in personas}
+    ancestors: set[str] = set()
+    current = by_id.get(persona_id)
+    if current is None:
+        return ancestors
+    parent_id = current.runs_after
+    while parent_id is not None and parent_id in by_id:
+        if parent_id in ancestors:
+            break  # cycle guard (shouldn't happen if validated)
+        ancestors.add(parent_id)
+        parent_id = by_id[parent_id].runs_after
+    return ancestors
+
+
 class PersonaImportError(ValueError):
     """Raised when a .md persona import file fails pre-flight
     validation. Message lists every offending row in one go so the
@@ -69,6 +150,7 @@ class PersonaService:
         model_override: str | None = None,
         color_override: str | None = None,
         created_at_message_index: int | None = None,
+        runs_after: str | None = None,
         _validate: bool = True,
     ) -> Persona:
         """Insert a new persona row for this conversation.
@@ -92,6 +174,7 @@ class PersonaService:
             model_override=model_override,
             color_override=color_override,
             created_at_message_index=created_at_message_index,
+            runs_after=runs_after,
             sort_order=self._db.next_persona_sort_order(self._conv_id),
         )
         self._db.create_persona(p)
@@ -103,6 +186,7 @@ class PersonaService:
         system_prompt_override: str | None = ...,
         model_override: str | None = ...,
         color_override: str | None = ...,
+        runs_after: str | None = ...,
     ) -> None:
         """Update an existing persona's override fields. A sentinel
         (...) means 'leave this field alone'; None means 'clear the
@@ -115,12 +199,21 @@ class PersonaService:
                     p.model_override = model_override
                 if color_override is not ...:
                     p.color_override = color_override
+                if runs_after is not ...:
+                    p.runs_after = runs_after
                 self._db.update_persona(p)
                 return
         raise ValueError(f"persona {persona_id!r} not found")
 
     def remove_persona(self, persona_id: str) -> None:
-        """Tombstone the persona (D3 — never hard-delete)."""
+        """Tombstone the persona (D3 — never hard-delete).
+        Clears runs_after on any active persona that depends on this one,
+        promoting them to root so they don't become pending-forever."""
+        # Clear dependents before tombstoning
+        for p in self._db.list_personas(self._conv_id):
+            if p.runs_after == persona_id:
+                p.runs_after = None
+                self._db.update_persona(p)
         self._db.tombstone_persona(self._conv_id, persona_id)
 
     # ------------------------------------------------------------------
@@ -168,6 +261,12 @@ class PersonaService:
             lines.append(f"- Provider: {p.provider.value}")
             mode = "inherit" if p.created_at_message_index is None else "new"
             lines.append(f"- Mode: {mode}")
+            # Resolve runs_after persona_id to name for human-readable export
+            runs_after_display = "(prompt)"
+            if p.runs_after:
+                parent = next((pp for pp in personas if pp.id == p.runs_after), None)
+                runs_after_display = parent.name if parent else "(prompt)"
+            lines.append(f"- Runs after: {runs_after_display}")
             lines.append(f"- Model override: {p.model_override or '(none)'}")
             lines.append(f"- Color override: {p.color_override or '(none)'}")
             lines.append("- Prompt:")
@@ -230,6 +329,9 @@ class PersonaService:
                 continue
 
             mode = _field("Mode") or "inherit"
+            runs_after_name = _field("Runs after")
+            if runs_after_name == "(prompt)":
+                runs_after_name = None
             model_override = _field("Model override")
             color_override = _field("Color override")
 
@@ -251,6 +353,7 @@ class PersonaService:
                 "model_override": model_override,
                 "color_override": color_override,
                 "cutoff": cutoff,
+                "runs_after_name": runs_after_name,
             })
 
         seen: dict[str, str] = {}
@@ -272,6 +375,8 @@ class PersonaService:
         for p in self.list_items():
             self.remove_persona(p.id)
 
+        # Pass 2a: create all personas with runs_after=None
+        created: dict[str, Persona] = {}  # name → created Persona
         for import_idx, row in enumerate(parsed):
             persona = self.create_persona(
                 provider=row["provider"],
@@ -284,6 +389,15 @@ class PersonaService:
             )
             persona.sort_order = import_idx
             self._db.update_persona(persona)
+            created[row["name"]] = persona
+
+        # Pass 2b: resolve runs_after names → newly-generated ids
+        for row in parsed:
+            if row["runs_after_name"] and row["runs_after_name"] in created:
+                persona = created[row["name"]]
+                parent = created[row["runs_after_name"]]
+                persona.runs_after = parent.id
+                self._db.update_persona(persona)
 
     # ------------------------------------------------------------------
     # Effective-value resolution
