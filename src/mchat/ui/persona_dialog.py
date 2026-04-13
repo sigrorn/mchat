@@ -40,21 +40,18 @@ from mchat.db import Database
 from mchat.models.message import Provider
 from mchat.models.persona import (
     Persona,
-    generate_persona_id,
     slugify_persona_name,
     validate_persona_name,
+)
+from mchat.services.persona_service import (
+    PersonaImportError,
+    PersonaService,
 )
 from mchat.ui.persona_resolution import (
     resolve_persona_color,
     resolve_persona_model,
     resolve_persona_prompt,
 )
-
-
-class PersonaImportError(ValueError):
-    """Raised when a .md persona import file fails pre-flight
-    validation. Message lists every offending row in one go so the
-    user can fix them all at once (#140)."""
 
 
 class PersonaDialog(QDialog):
@@ -82,6 +79,7 @@ class PersonaDialog(QDialog):
         self._db = db
         self._config = config
         self._conv_id = conversation_id
+        self._service = PersonaService(db, config, conversation_id)
         self._models_cache: dict[Provider, list[str]] = models_cache or {}
         self.setWindowTitle("Personas")
         self.setMinimumSize(700, 450)
@@ -89,257 +87,42 @@ class PersonaDialog(QDialog):
         self._refresh_list()
 
     # ------------------------------------------------------------------
-    # Service-level methods (also the public test surface)
+    # Service-level methods — delegated to PersonaService (#160)
     # ------------------------------------------------------------------
 
     def list_items(self) -> list[Persona]:
-        """Return the active personas for this conversation, in their
-        display order (sort_order, then id)."""
-        return self._db.list_personas(self._conv_id)
+        return self._service.list_items()
 
-    def create_persona(
-        self,
-        provider: Provider,
-        name: str,
-        system_prompt_override: str | None = None,
-        model_override: str | None = None,
-        color_override: str | None = None,
-        created_at_message_index: int | None = None,
-        _validate: bool = True,
-    ) -> Persona:
-        """Insert a new persona row for this conversation.
+    def create_persona(self, **kwargs) -> Persona:
+        return self._service.create_persona(**kwargs)
 
-        #140: validates the name against the new alphabet +
-        reserved-token rules before touching the DB. Raises
-        ``ValueError`` on any violation and ``sqlite3.IntegrityError``
-        if the name_slug collides with an active persona.
-
-        #155: pass ``_validate=False`` for import paths that accept
-        reserved names so the user can rename them in the dialog.
-        """
-        if _validate:
-            validate_persona_name(name)
-        p = Persona(
-            conversation_id=self._conv_id,
-            id=generate_persona_id(),
-            provider=provider,
-            name=name,
-            name_slug=slugify_persona_name(name),
-            system_prompt_override=system_prompt_override,
-            model_override=model_override,
-            color_override=color_override,
-            created_at_message_index=created_at_message_index,
-            sort_order=self._db.next_persona_sort_order(self._conv_id),
-        )
-        self._db.create_persona(p)
-        return p
-
-    def update_persona(
-        self,
-        persona_id: str,
-        system_prompt_override: str | None = ...,
-        model_override: str | None = ...,
-        color_override: str | None = ...,
-    ) -> None:
-        """Update an existing persona's override fields. A sentinel
-        (``...``) means "leave this field alone"; ``None`` means
-        "clear the override so it inherits from global"."""
-        for p in self._db.list_personas(self._conv_id):
-            if p.id == persona_id:
-                if system_prompt_override is not ...:
-                    p.system_prompt_override = system_prompt_override
-                if model_override is not ...:
-                    p.model_override = model_override
-                if color_override is not ...:
-                    p.color_override = color_override
-                self._db.update_persona(p)
-                return
-        raise ValueError(f"persona {persona_id!r} not found")
+    def update_persona(self, persona_id: str, **kwargs) -> None:
+        self._service.update_persona(persona_id, **kwargs)
 
     def remove_persona(self, persona_id: str) -> None:
-        """Tombstone the persona (D3 — never hard-delete)."""
-        self._db.tombstone_persona(self._conv_id, persona_id)
+        self._service.remove_persona(persona_id)
 
     def move_persona_up(self, persona_id: str) -> None:
-        """Swap sort_order with the persona above (lower sort_order)."""
-        self._swap_sort_order(persona_id, direction=-1)
+        self._service.move_persona_up(persona_id)
 
     def move_persona_down(self, persona_id: str) -> None:
-        """Swap sort_order with the persona below (higher sort_order)."""
-        self._swap_sort_order(persona_id, direction=1)
-
-    def _swap_sort_order(self, persona_id: str, direction: int) -> None:
-        """Swap sort_order between the target persona and its neighbor.
-        direction: -1 = up, +1 = down."""
-        personas = self.list_items()
-        idx = next((i for i, p in enumerate(personas) if p.id == persona_id), None)
-        if idx is None:
-            return
-        neighbor_idx = idx + direction
-        if neighbor_idx < 0 or neighbor_idx >= len(personas):
-            return  # already at boundary
-        a, b = personas[idx], personas[neighbor_idx]
-        a.sort_order, b.sort_order = b.sort_order, a.sort_order
-        # If both had the same sort_order (e.g. both 0), assign distinct values
-        if a.sort_order == b.sort_order:
-            a.sort_order = neighbor_idx
-            b.sort_order = idx
-        self._db.update_persona(a)
-        self._db.update_persona(b)
-
-    # ------------------------------------------------------------------
-    # Export / Import
-    # ------------------------------------------------------------------
+        self._service.move_persona_down(persona_id)
 
     def export_personas_md(self) -> str:
-        """Serialize all active personas to a human-readable .md string."""
-        personas = self.list_items()
-        lines: list[str] = ["# Personas", ""]
-        for i, p in enumerate(personas):
-            if i > 0:
-                lines.append("---")
-                lines.append("")
-            lines.append(f"## {p.name}")
-            lines.append(f"- Provider: {p.provider.value}")
-            mode = "inherit" if p.created_at_message_index is None else "new"
-            lines.append(f"- Mode: {mode}")
-            lines.append(f"- Model override: {p.model_override or '(none)'}")
-            lines.append(f"- Color override: {p.color_override or '(none)'}")
-            lines.append("- Prompt:")
-            lines.append("")
-            lines.append(p.system_prompt_override or "(none)")
-            lines.append("")
-        return "\n".join(lines)
+        return self._service.export_personas_md()
 
     def import_personas_md(self, md: str) -> None:
-        """Parse a .md string and replace all active personas with the
-        imported ones. Existing personas are tombstoned (not deleted).
-
-        #140: two-pass import. The first pass parses every section
-        and validates every name. Structural errors (whitespace, @,
-        disallowed chars) abort the import entirely. #155: reserved
-        names (provider names like 'claude', 'gpt') are accepted
-        into the dialog so the user can rename them — the dialog
-        highlights them red and blocks Close until resolved.
-        """
-        import re
-
-        from mchat.ui.persona_resolver import RESERVED_NAMES
-
-        # --- Pass 1: parse + validate. Nothing written yet. ---
-        parsed: list[dict] = []
-        errors: list[str] = []
-        sections = re.split(r"\n---\n|\n(?=## )", md)
-        for section in sections:
-            section = section.strip()
-            if not section or section.startswith("# Personas"):
-                if "## " not in section:
-                    continue
-                idx = section.index("## ")
-                section = section[idx:]
-
-            name_match = re.match(r"^## (.+)$", section, re.MULTILINE)
-            if not name_match:
-                continue
-            name = name_match.group(1).strip()
-
-            def _field(label: str) -> str | None:
-                m = re.search(
-                    rf"^- {label}:\s*(.*)$", section, re.MULTILINE,
-                )
-                if m:
-                    val = m.group(1).strip()
-                    return None if val == "(none)" else val
-                return None
-
-            # Validate the name against the rules — but treat reserved
-            # names as non-fatal so the user can rename them in the UI.
-            try:
-                validate_persona_name(name)
-            except ValueError as e:
-                is_reserved = name.lower() in RESERVED_NAMES
-                if not is_reserved:
-                    # Structural error — abort the whole import
-                    errors.append(f"{name!r}: {e}")
-                    continue
-                # Reserved name: accept it — _refresh_list will flag it
-
-            provider_str = _field("Provider") or "claude"
-            try:
-                provider = Provider(provider_str)
-            except ValueError:
-                errors.append(
-                    f"{name!r}: unknown provider {provider_str!r}"
-                )
-                continue
-
-            mode = _field("Mode") or "inherit"
-            model_override = _field("Model override")
-            color_override = _field("Color override")
-
-            prompt_match = re.search(
-                r"^- Prompt:\s*\n\n(.*)", section, re.MULTILINE | re.DOTALL,
-            )
-            prompt = None
-            if prompt_match:
-                prompt = prompt_match.group(1).strip()
-                if prompt == "(none)":
-                    prompt = None
-
-            cutoff = None if mode == "inherit" else 0
-
-            parsed.append({
-                "name": name,
-                "provider": provider,
-                "prompt": prompt,
-                "model_override": model_override,
-                "color_override": color_override,
-                "cutoff": cutoff,
-            })
-
-        # Case-insensitive duplicate check within the file.
-        seen: dict[str, str] = {}  # lowercased name → original name
-        for row in parsed:
-            lower = row["name"].lower()
-            if lower in seen:
-                errors.append(
-                    f"duplicate/case-collision: {seen[lower]!r} "
-                    f"and {row['name']!r} resolve to the same slug"
-                )
-            else:
-                seen[lower] = row["name"]
-
-        if errors:
-            raise PersonaImportError(
-                "Cannot import — " + " | ".join(errors)
-            )
-
-        # --- Pass 2: destructive. Tombstone existing, create new. ---
-        for p in self.list_items():
-            self.remove_persona(p.id)
-
-        for import_idx, row in enumerate(parsed):
-            persona = self.create_persona(
-                provider=row["provider"],
-                name=row["name"],
-                system_prompt_override=row["prompt"],
-                model_override=row["model_override"],
-                color_override=row["color_override"],
-                created_at_message_index=row["cutoff"],
-                _validate=False,
-            )
-            persona.sort_order = import_idx
-            self._db.update_persona(persona)
+        self._service.import_personas_md(md)
         self._refresh_list()
 
     def effective_prompt(self, persona: Persona) -> str:
-        return resolve_persona_prompt(persona, self._config)
+        return self._service.effective_prompt(persona)
 
     def effective_model(self, persona: Persona) -> str:
-        return resolve_persona_model(persona, self._config)
+        return self._service.effective_model(persona)
 
     def effective_color(self, persona: Persona) -> str:
-        return resolve_persona_color(persona, self._config)
+        return self._service.effective_color(persona)
 
     # ------------------------------------------------------------------
     # UI construction
