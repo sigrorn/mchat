@@ -6,7 +6,7 @@
 #                 out of the monolithic SettingsDialog so general
 #                 preferences and provider credentials each live in
 #                 their own dialog.
-# Collaborators: PySide6, config, providers
+# Collaborators: config, providers  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

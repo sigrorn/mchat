@@ -8,8 +8,7 @@
 #                 codebase is already organised around signals, so
 #                 controllers can subscribe directly instead of being
 #                 imperatively called from the window.
-# Collaborators: PySide6 (QObject/Signal), models.conversation,
-#                models.message
+# Collaborators: models.conversation, models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

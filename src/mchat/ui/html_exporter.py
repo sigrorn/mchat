@@ -6,7 +6,7 @@
 #                 size) and returns the HTML as a string. Intended for
 #                 "Save as HTML..." and any other export use case;
 #                 must not depend on QTextEdit/QTextDocument.
-# Collaborators: markdown, config, models.message, ui.chat_export
+# Collaborators: config, models.message, ui.chat_export  (external: markdown)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

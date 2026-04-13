@@ -8,8 +8,7 @@
 #                 through a narrow ConversationHost Protocol — the
 #                 concrete MainWindow type is never imported at
 #                 runtime.
-# Collaborators: services.ServicesContext, ConversationHost (Protocol),
-#                html_exporter, PySide6
+# Collaborators: services.ServicesContext, ConversationHost (Protocol), html_exporter  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

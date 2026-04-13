@@ -4,7 +4,7 @@
 #                 ChatWidget. HTML export lives in ui.html_exporter as
 #                 a pure non-Qt module; this file only keeps the copy
 #                 behaviour and the shared short_model helper.
-# Collaborators: PySide6 (QTextEdit / QMimeData), models.message
+# Collaborators: models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

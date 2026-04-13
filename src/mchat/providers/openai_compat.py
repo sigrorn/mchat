@@ -7,7 +7,7 @@
 #                 with a filter hook. Subclasses set provider_id,
 #                 display_name, fallback models, base_url, and
 #                 optionally override _filter_model or _on_stream_done.
-# Collaborators: providers.base, openai SDK
+# Collaborators: providers.base  (external: openai)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

@@ -7,8 +7,7 @@
 #                 effective-value helpers that display the currently
 #                 resolved prompt/model/colour alongside each override
 #                 input. See docs/plans/personas.md § Stage 3A.1.
-# Collaborators: db, config, models.persona, ui.persona_resolution,
-#                PySide6
+# Collaborators: db, config, models.persona, services.persona_service, ui.persona_resolution  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

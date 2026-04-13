@@ -6,8 +6,7 @@
 #                 baseline row. Consumed by the //stats command
 #                 handler; no Qt dependency so the logic is easy to
 #                 test in isolation.
-# Collaborators: models.conversation, models.persona, ui.context_builder,
-#                ui.persona_target, db, config
+# Collaborators: models.conversation, models.persona, ui.context_builder, ui.persona_target, db, config
 # ------------------------------------------------------------------
 from __future__ import annotations
 

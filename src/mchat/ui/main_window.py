@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: MainWindow
 # Responsibility: Top-level window — wires sidebar, chat, input, providers
-# Collaborators: PySide6, all ui components, router, db, config, workers
+# Collaborators: all ui components, router, db, config, workers  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

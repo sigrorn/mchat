@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: Sidebar
 # Responsibility: Conversation list with new-chat and selection
-# Collaborators: PySide6, models.conversation
+# Collaborators: models.conversation  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

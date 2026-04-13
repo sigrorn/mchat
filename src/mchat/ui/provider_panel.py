@@ -7,7 +7,7 @@
 #                 waiting/retrying states) and model list population.
 #                 #157: splits into two rows when >4 personas —
 #                 persona widgets on top, action buttons on bottom.
-# Collaborators: config, PySide6, pricing (format_cost)
+# Collaborators: config, pricing  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

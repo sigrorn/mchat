@@ -13,9 +13,7 @@
 #                 in a module-level DOT_SOURCE_MAP so consumers can
 #                 look up the original source without having to
 #                 re-parse the markdown.
-# Collaborators: markdown.Extension, markdown.preprocessors,
-#                html (for escaping the source in the <details>),
-#                hashlib.
+# Collaborators: (external: markdown, html, hashlib)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

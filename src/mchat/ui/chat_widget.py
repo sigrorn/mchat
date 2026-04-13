@@ -7,7 +7,7 @@
 #                 add_note, add_mark_list, find_text). Delegates
 #                 low-level document mutation to ChatDocumentMixin
 #                 and HTML export + copy-with-prefix to ChatExportMixin.
-# Collaborators: PySide6, markdown, chat_document, chat_export
+# Collaborators: chat_document, chat_export  (external: PySide6, markdown)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

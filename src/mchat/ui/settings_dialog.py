@@ -5,7 +5,7 @@
 #                 default provider. Provider-specific fields (API
 #                 keys, models, provider colours, per-provider system
 #                 prompts) live in ProvidersDialog.
-# Collaborators: PySide6, config
+# Collaborators: config  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

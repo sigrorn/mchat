@@ -19,9 +19,8 @@
 #                 coexist in a single send group without clobbering
 #                 each other's state. See docs/plans/personas.md
 #                 § Stage 2.6.
-# Collaborators: ServicesContext, SendHost (Protocol), workers.stream_worker,
-#                ui.message_renderer, ui.persona_resolver,
-#                ui.persona_resolution, ui.persona_target, pricing
+# Collaborators: ServicesContext, SendHost (Protocol), workers.stream_worker, ui.message_renderer,
+#                ui.persona_resolver, ui.persona_resolution, ui.persona_target, pricing
 # ------------------------------------------------------------------
 from __future__ import annotations
 

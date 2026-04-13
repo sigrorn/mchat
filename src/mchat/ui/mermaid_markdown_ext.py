@@ -12,8 +12,7 @@
 #                 The extension also records the hash->source pair
 #                 in a module-level MERMAID_SOURCE_MAP so consumers
 #                 can look up the original source without re-parsing.
-# Collaborators: markdown.Extension, markdown.preprocessors,
-#                html (for escaping), hashlib.
+# Collaborators: (external: markdown, html, hashlib)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

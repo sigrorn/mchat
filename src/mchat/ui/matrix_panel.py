@@ -6,7 +6,7 @@
 #                 Only configured providers are shown — unconfigured
 #                 providers are hidden entirely and reappear as soon as
 #                 their API key is added.
-# Collaborators: PySide6, models.message, config
+# Collaborators: models.message, config  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

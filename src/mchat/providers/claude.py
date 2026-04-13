@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: ClaudeProvider
 # Responsibility: Anthropic Claude API integration
-# Collaborators: providers.base, anthropic SDK
+# Collaborators: providers.base  (external: anthropic)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

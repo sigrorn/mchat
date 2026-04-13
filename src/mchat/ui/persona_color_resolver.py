@@ -9,8 +9,7 @@
 #                 The resolver uses list_personas_including_deleted
 #                 so tombstoned personas still paint their historical
 #                 messages in the right colour.
-# Collaborators: db, config, models.message, models.persona,
-#                ui.persona_resolution
+# Collaborators: db, config, models.message, models.persona, ui.persona_resolution
 # ------------------------------------------------------------------
 from __future__ import annotations
 

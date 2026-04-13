@@ -7,8 +7,7 @@
 #                 hands column tables to ChatWidget._insert_column_table.
 #                 Pulls its exclusion information from context_builder —
 #                 never redefines context policy inline.
-# Collaborators: ui.chat_widget, ui.context_builder, config, db,
-#                models.message, models.conversation
+# Collaborators: ui.chat_widget, ui.context_builder, config, db, models.message, models.conversation
 # ------------------------------------------------------------------
 from __future__ import annotations
 

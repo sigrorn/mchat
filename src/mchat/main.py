@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: main
 # Responsibility: Application entry point
-# Collaborators: PySide6, config, db, ui.main_window
+# Collaborators: config, db, ui.main_window  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

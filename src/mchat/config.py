@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: Config
 # Responsibility: Application configuration management (API keys, settings)
-# Collaborators: json, pathlib
+# Collaborators: (external: json, pathlib)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

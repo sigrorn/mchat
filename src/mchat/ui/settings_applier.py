@@ -8,8 +8,7 @@
 #                 PreferencesAdapter so the post-dialog fan-out is
 #                 isolated from the small preference-persistence
 #                 concerns.
-# Collaborators: services.ServicesContext, SettingsHost (Protocol),
-#                ui.settings_dialog, ui.providers_dialog
+# Collaborators: services.ServicesContext, SettingsHost (Protocol), ui.settings_dialog, ui.providers_dialog
 # ------------------------------------------------------------------
 from __future__ import annotations
 

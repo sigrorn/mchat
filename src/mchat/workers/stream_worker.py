@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: StreamWorker
 # Responsibility: Background thread for streaming LLM responses
-# Collaborators: PySide6, providers.base, models.message
+# Collaborators: providers.base, models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

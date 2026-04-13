@@ -5,7 +5,7 @@
 #                 function taking a sqlite3.Connection. The MIGRATIONS
 #                 list and run_migrations() dispatcher are the public
 #                 interface.
-# Collaborators: sqlite3
+# Collaborators: (external: sqlite3)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

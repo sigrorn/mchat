@@ -5,7 +5,7 @@
 #                 to auto-title brand-new conversations after the first
 #                 user→assistant exchange. Independent from StreamWorker
 #                 so it doesn't interact with the main send pipeline.
-# Collaborators: PySide6 (QThread/Signal), providers.base, models.message
+# Collaborators: providers.base, models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

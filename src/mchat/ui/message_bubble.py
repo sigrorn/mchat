@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: MessageBubble
 # Responsibility: Render a single chat message with provider-specific styling
-# Collaborators: PySide6, models.message
+# Collaborators: models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

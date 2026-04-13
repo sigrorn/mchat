@@ -5,7 +5,7 @@
 #                 insertion, column-table painting, and full rebuild.
 #                 Isolated from ChatWidget's widget shell so the most
 #                 bug-prone code in the UI layer has a clear home.
-# Collaborators: PySide6 (QTextEdit/QTextDocument), models.message
+# Collaborators: models.message  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

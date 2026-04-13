@@ -7,8 +7,7 @@
 #                 restarts, and safe to call on every insertHtml.
 #                 Returns None on every failure mode so callers can
 #                 fall back to a source-only display.
-# Collaborators: subprocess, shutil, hashlib, mchat.config (for the
-#                default cache directory under ~/.mchat/).
+# Collaborators: mchat.config  (external: subprocess, shutil, hashlib)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: InputWidget
 # Responsibility: Message input area with send button
-# Collaborators: PySide6
+# Collaborators: (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

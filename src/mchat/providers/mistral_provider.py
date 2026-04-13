@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: MistralProvider
 # Responsibility: Mistral AI API integration (dedicated SDK)
-# Collaborators: providers.base, mistralai SDK
+# Collaborators: providers.base  (external: mistralai)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

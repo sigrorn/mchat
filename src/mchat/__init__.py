@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------
 # Component: mchat
 # Responsibility: Multi-provider LLM chat application
-# Collaborators: PySide6, anthropic, openai
+# Collaborators: (external: PySide6, anthropic, openai)
 # ------------------------------------------------------------------
 """mchat — Multi-provider LLM chat application."""
 

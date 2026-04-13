@@ -2,7 +2,7 @@
 # Component: FindBar
 # Responsibility: Compact find-in-chat bar hosted above ChatWidget —
 #                 forwards find operations to the chat's find_text().
-# Collaborators: PySide6, ui.chat_widget
+# Collaborators: ui.chat_widget  (external: PySide6)
 # ------------------------------------------------------------------
 from __future__ import annotations
 

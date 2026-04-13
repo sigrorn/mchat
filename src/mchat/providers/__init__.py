@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------
 # Component: providers
 # Responsibility: LLM provider implementations
-# Collaborators: anthropic, openai
+# Collaborators: (external: anthropic, openai)
 # ------------------------------------------------------------------
