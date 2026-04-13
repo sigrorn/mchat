@@ -129,6 +129,7 @@ class PersonaDialog(QDialog):
             model_override=model_override,
             color_override=color_override,
             created_at_message_index=created_at_message_index,
+            sort_order=self._db.next_persona_sort_order(self._conv_id),
         )
         self._db.create_persona(p)
         return p

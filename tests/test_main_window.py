@@ -294,7 +294,6 @@ class TestDotGraphEndToEnd:
     def test_assistant_message_with_dot_block_renders_inline_image(
         self, main_window, monkeypatch,
     ):
-        import base64 as _b64
         import hashlib
 
         from PySide6.QtCore import QUrl
@@ -302,13 +301,14 @@ class TestDotGraphEndToEnd:
 
         from mchat import dot_renderer
 
-        # Real 91-byte PNG so QImage.fromData returns a non-null image.
-        mini_png = _b64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAA9h"
-            "AAAPYQGoP6dpAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+        # Minimal valid SVG — render_dot now returns SVG bytes.
+        mini_svg = (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+            b'<rect width="10" height="10" fill="red"/>'
+            b'</svg>'
         )
         monkeypatch.setattr(
-            dot_renderer, "render_dot", lambda source, **kw: mini_png,
+            dot_renderer, "render_dot", lambda source, **kw: mini_svg,
         )
 
         main_window._on_new_chat()
@@ -321,7 +321,7 @@ class TestDotGraphEndToEnd:
         main_window._chat.add_message(assistant)
 
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        url = QUrl(f"mchat-graph://{digest}.png")
+        url = QUrl(f"mchat-graph://{digest}.svg")
         resource = main_window._chat.document().resource(
             QTextDocument.ResourceType.ImageResource, url
         )

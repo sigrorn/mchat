@@ -742,6 +742,16 @@ class Database:
         self._conn.commit()
         return persona
 
+    def next_persona_sort_order(self, conv_id: int) -> int:
+        """Return the next available sort_order for a new persona.
+        Uses max of ALL rows (including tombstoned) to avoid collisions."""
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM personas "
+            "WHERE conversation_id = ?",
+            (conv_id,),
+        ).fetchone()
+        return row[0] + 1
+
     def list_personas(self, conv_id: int) -> list[Persona]:
         """Return active (non-tombstoned) personas for a conversation,
         ordered by sort_order then id for stability."""

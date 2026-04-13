@@ -119,6 +119,7 @@ def handle_addpersona(arg: str, host: CommandHost) -> bool:
         name_slug=name_slug,
         system_prompt_override=prompt_text if prompt_text else None,
         created_at_message_index=cutoff,
+        sort_order=host._db.next_persona_sort_order(host._current_conv.id),
     )
     try:
         host._db.create_persona(persona)
