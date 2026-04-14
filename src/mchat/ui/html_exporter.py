@@ -45,6 +45,7 @@ class ExportColors:
     gemini: str
     perplexity: str
     mistral: str
+    apertus: str
 
     def color_for(
         self,
@@ -287,6 +288,7 @@ def exporter_from_config(config) -> HtmlExporter:
         gemini=config.get("color_gemini"),
         perplexity=config.get("color_perplexity"),
         mistral=config.get("color_mistral"),
+        apertus=config.get("color_apertus"),
     )
     font_size = int(config.get("font_size") or 14)
     return HtmlExporter(colors, font_size)

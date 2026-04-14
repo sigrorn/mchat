@@ -22,6 +22,7 @@ def exporter():
         gemini="#c8d8e8",
         perplexity="#d8c8e8",
         mistral="#ffe0c8",
+        apertus="#a0c8e8",
     )
     return HtmlExporter(colors, font_size=14)
 
@@ -85,14 +86,14 @@ class TestHtmlExporter:
 
     def test_font_size_reflected_in_css(self):
         exporter = HtmlExporter(
-            ExportColors("#fff", "#fff", "#fff", "#fff", "#fff", "#fff"),
+            ExportColors("#fff", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff"),
             font_size=22,
         )
         html = exporter.export([Message(role=Role.USER, content="x")])
         assert "font-size: 22px" in html
 
     def test_color_for_unknown_provider_falls_back_to_user(self):
-        colors = ExportColors("#aaa", "#bbb", "#ccc", "#ddd", "#eee", "#fff")
+        colors = ExportColors("#aaa", "#bbb", "#ccc", "#ddd", "#eee", "#fff", "#a0c8e8")
         # An assistant message with no provider
         msg = Message(role=Role.ASSISTANT, content="?")
         assert colors.color_for(msg) == "#aaa"
@@ -120,6 +121,7 @@ class TestMistralExportColor:
             gemini="#c8d8e8",
             perplexity="#d8c8e8",
             mistral="#ffe0c8",
+            apertus="#a0c8e8",
         )
         msg = Message(role=Role.ASSISTANT, content="hi", provider=Provider.MISTRAL)
         assert colors.color_for(msg) == "#ffe0c8"
@@ -253,6 +255,7 @@ class TestHtmlExporterPersonaColorOverride:
             gemini="#c8d8e8",
             perplexity="#d8c8e8",
             mistral="#ffe0c8",
+            apertus="#a0c8e8",
         )
         return HtmlExporter(colors, font_size=14)
 
@@ -592,6 +595,7 @@ class TestHtmlExporterDotGraphs:
             gemini="#c8d8e8",
             perplexity="#d8c8e8",
             mistral="#ffe0c8",
+            apertus="#a0c8e8",
         )
         exporter2 = HtmlExporter(colors, font_size=14)
         # Wipe in-memory cache to force the disk cache path.
