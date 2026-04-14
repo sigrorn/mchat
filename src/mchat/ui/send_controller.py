@@ -37,6 +37,7 @@ from mchat.ui.message_renderer import (
     strip_echoed_heading,
 )
 from mchat.ui.persona_resolution import resolve_persona_model
+from mchat.ui.dag_state import DagRunState, NodeStatus
 from mchat.ui.persona_resolver import PersonaResolver, ResolveError, ResolveMode
 from mchat.ui.persona_target import PersonaTarget, synthetic_default
 from mchat.ui.services import ServicesContext
@@ -127,17 +128,11 @@ class SendController:
         # the retry command's user-facing notes, so the retry handler
         # doesn't need to re-query the DB.
         self._retry_labels: dict[str, str] = {}
-        # DAG execution state (#170)
-        self._dag_run_id: int = 0
-        self._dag_conv_id: int | None = None
-        self._dag_status: dict[str, str] = {}          # pid → pending|running|completed|failed|skipped
-        self._dag_children: dict[str, list[str]] = {}  # parent_pid → [child_pids]
-        self._dag_ancestors: dict[str, set[str]] = {}  # pid → ancestor pids (NOT self)
-        self._dag_targets: dict[str, PersonaTarget] = {}
-        self._dag_active: bool = False
+        # DAG execution state (#170/#172) — pure graph logic in DagRunState,
+        # Qt-side buffers kept here.
+        self._dag = DagRunState()
         self._dag_completed_msgs: list[Message] = []   # buffered for column rendering
         self._dag_finished_workers: list = []           # prevent GC of completed QThreads
-        self._dag_retry_run_id: dict[str, int] = {}    # pid → dag_run_id at failure
 
     # ------------------------------------------------------------------
     # Retry-stash helpers (consumed by commands.handle_retry)
@@ -190,7 +185,7 @@ class SendController:
         svc = self._services
 
         # Guard: reject if a send is already in progress
-        if self._multi_workers or self._seq_queue or self._dag_active:
+        if self._multi_workers or self._seq_queue or self._dag.active:
             host._chat.add_note("Send in progress — please wait")
             return
 
@@ -572,7 +567,7 @@ class SendController:
             return
 
         # Any non-retry user send invalidates stale DAG retry state
-        self._dag_run_id += 1
+        self._dag.run_id += 1
         self._clear_dag_state()
 
         # Targeted / @others sends: parallel, no DAG
@@ -590,7 +585,6 @@ class SendController:
 
         # @all or implicit selection: check for DAG edges
         if conv and len(targets) > 1:
-            from mchat.services.persona_service import get_ancestor_persona_ids
             personas = self._services.db.list_personas(conv.id)
             target_ids = {t.persona_id for t in targets}
             active_edges = {
@@ -614,12 +608,7 @@ class SendController:
             self._send_parallel(targets, context_override)
 
     def _clear_dag_state(self) -> None:
-        self._dag_status.clear()
-        self._dag_children.clear()
-        self._dag_ancestors.clear()
-        self._dag_targets.clear()
-        self._dag_active = False
-        self._dag_conv_id = None
+        self._dag.clear()
         self._dag_completed_msgs.clear()
         self._dag_finished_workers.clear()
 
@@ -690,41 +679,17 @@ class SendController:
         active_edges: dict[str, str],
     ) -> None:
         """Build the induced DAG over targets and launch root nodes."""
-        from mchat.services.persona_service import get_ancestor_persona_ids
-
         host = self._host
         conv = self._services.session.current
-        self._dag_conv_id = conv.id if conv else None
-        self._dag_active = True
 
-        target_ids = {t.persona_id for t in targets}
-        target_map = {t.persona_id: t for t in targets}
-        persona_map = {p.id: p for p in personas}
+        roots = self._dag.build(
+            targets, personas, active_edges,
+            conv_id=conv.id if conv else None,
+        )
 
-        # Build children map and ancestor sets over the induced subgraph
-        self._dag_children = {pid: [] for pid in target_ids}
-        self._dag_targets = dict(target_map)
-        for child_id, parent_id in active_edges.items():
-            self._dag_children.setdefault(parent_id, []).append(child_id)
-
-        # Compute ancestors for each target (only within the target set)
-        for pid in target_ids:
-            self._dag_ancestors[pid] = get_ancestor_persona_ids(
-                pid, [p for p in personas if p.id in target_ids]
-            )
-
-        # Identify roots (no active parent in target set)
-        roots = [
-            pid for pid in target_ids
-            if pid not in active_edges
-        ]
-
-        # Set initial statuses
-        for pid in target_ids:
-            if pid in roots:
-                self._dag_status[pid] = "pending"
-            else:
-                self._dag_status[pid] = "pending"
+        # Mark non-root nodes as queued in the UI
+        for pid in self._dag.status:
+            if pid not in roots:
                 host._provider_panel.set_combo_queued(pid)
 
         # Clear parallel buffers — we'll persist per-completion
@@ -733,7 +698,7 @@ class SendController:
 
         # Launch roots
         for pid in roots:
-            self._launch_target(target_map[pid])
+            self._launch_target(self._dag.targets[pid])
 
     def _launch_target(
         self,
@@ -747,7 +712,7 @@ class SendController:
         svc = self._services
         conv = svc.session.current
 
-        self._dag_status[target.persona_id] = "running"
+        self._dag.mark_running(target.persona_id)
         host._set_combo_waiting(target.persona_id, True)
 
         persona = load_persona_for_target(conv, target, svc.db)
@@ -809,15 +774,15 @@ class SendController:
         # Check conversation switch
         current_conv = svc.session.current
         conv_switched = (
-            self._dag_conv_id is not None
-            and (current_conv is None or current_conv.id != self._dag_conv_id)
+            self._dag.conv_id is not None
+            and (current_conv is None or current_conv.id != self._dag.conv_id)
         )
 
         # Per-persona spend tracking
         cost = estimate_cost(model, input_tokens, output_tokens)
-        if cost is not None and self._dag_conv_id is not None:
+        if cost is not None and self._dag.conv_id is not None:
             svc.db.add_conversation_spend(
-                self._dag_conv_id, target.persona_id, cost, estimated
+                self._dag.conv_id, target.persona_id, cost, estimated
             )
         if not conv_switched:
             host._update_spend_labels()
@@ -832,7 +797,7 @@ class SendController:
             model=model,
             display_mode=dag_display,
             persona_id=target.persona_id,
-            conversation_id=self._dag_conv_id,
+            conversation_id=self._dag.conv_id,
         )
         svc.db.add_message(msg)
         if not conv_switched:
@@ -845,26 +810,21 @@ class SendController:
             else:
                 host._renderer.render_list_responses([msg])
 
-        self._dag_status[target.persona_id] = "completed"
-
         if conv_switched:
             # Stop chain — mark remaining pending as skipped
-            for pid, status in self._dag_status.items():
-                if status == "pending":
-                    self._dag_status[pid] = "skipped"
-                    host._provider_panel.apply_combo_style(pid)
+            for pid in self._dag.mark_skipped_on_conv_switch():
+                host._provider_panel.apply_combo_style(pid)
+            self._dag.mark_completed(target.persona_id)
         else:
-            # Launch children whose parent just completed
-            for child_pid in self._dag_children.get(target.persona_id, []):
-                if self._dag_status.get(child_pid) == "pending":
-                    child_target = self._dag_targets[child_pid]
-                    visible = {child_pid} | self._dag_ancestors.get(child_pid, set())
-                    self._launch_target(child_target, visible_persona_ids=visible)
+            # Mark completed and launch children
+            launchable = self._dag.mark_completed(target.persona_id)
+            for child_pid in launchable:
+                child_target = self._dag.targets[child_pid]
+                visible = self._dag.visible_set(child_pid)
+                self._launch_target(child_target, visible_persona_ids=visible)
 
         # Check if all done
-        if not self._multi_workers and not any(
-            s == "pending" for s in self._dag_status.values()
-        ):
+        if not self._multi_workers and self._dag.is_done():
             self._finish_dag_send(conv_switched)
 
     def _on_dag_error(self, target: PersonaTarget, error: str) -> None:
@@ -878,8 +838,8 @@ class SendController:
 
         current_conv = svc.session.current
         conv_switched = (
-            self._dag_conv_id is not None
-            and (current_conv is None or current_conv.id != self._dag_conv_id)
+            self._dag.conv_id is not None
+            and (current_conv is None or current_conv.id != self._dag.conv_id)
         )
 
         # Persist error message
@@ -890,7 +850,7 @@ class SendController:
             provider=target.provider,
             display_mode=dag_display,
             persona_id=target.persona_id,
-            conversation_id=self._dag_conv_id,
+            conversation_id=self._dag.conv_id,
         )
         svc.db.add_message(error_msg)
         if not conv_switched:
@@ -900,41 +860,31 @@ class SendController:
             else:
                 host._renderer.render_list_responses([error_msg])
 
-        self._dag_status[target.persona_id] = "failed"
-        # Record DAG retry metadata (only for DAG failures)
-        self._dag_retry_run_id[target.persona_id] = self._dag_run_id
+        # Cascade-skip all descendants via DagRunState
+        skipped_pids = self._dag.mark_failed(target.persona_id)
 
         # Stash for //retry
         pid = target.persona_id
         self._retry_failed[pid] = (error, True)
         self._retry_error_msg_ids[pid] = error_msg.id
 
-        # Cascade-skip all descendants
-        def _skip_descendants(parent_pid: str) -> None:
-            for child_pid in self._dag_children.get(parent_pid, []):
-                if self._dag_status.get(child_pid) == "pending":
-                    self._dag_status[child_pid] = "skipped"
-                    if not conv_switched:
-                        parent_name = self._retry_labels.get(parent_pid, parent_pid)
-                        child_name = self._retry_labels.get(child_pid, child_pid)
-                        host._chat.add_note(
-                            f"{child_name} skipped — dependency {parent_name} failed"
-                        )
-                        host._provider_panel.apply_combo_style(child_pid)
-                    _skip_descendants(child_pid)
+        if not conv_switched:
+            parent_name = self._retry_labels.get(pid, pid)
+            for child_pid in skipped_pids:
+                child_name = self._retry_labels.get(child_pid, child_pid)
+                host._chat.add_note(
+                    f"{child_name} skipped — dependency {parent_name} failed"
+                )
+                host._provider_panel.apply_combo_style(child_pid)
 
-        _skip_descendants(target.persona_id)
-
-        if not self._multi_workers and not any(
-            s == "pending" for s in self._dag_status.values()
-        ):
+        if not self._multi_workers and self._dag.is_done():
             self._finish_dag_send(conv_switched)
 
     def _finish_dag_send(self, conv_switched: bool) -> None:
         """Clean up after all DAG nodes have resolved."""
         host = self._host
         svc = self._services
-        self._dag_active = False
+        self._dag.active = False
         # Don't clear DAG structures — retry needs them
         # Release finished worker references now that all threads are done
         self._dag_finished_workers.clear()
@@ -949,21 +899,22 @@ class SendController:
             host._update_input_color()
             # Auto-title
             if (
-                self._dag_conv_id is not None
-                and self._title_gen.should_generate_title(self._dag_conv_id)
+                self._dag.conv_id is not None
+                and self._title_gen.should_generate_title(self._dag.conv_id)
             ):
                 completed_pids = {
-                    pid for pid, s in self._dag_status.items() if s == "completed"
+                    pid for pid, s in self._dag.status.items()
+                    if s == NodeStatus.COMPLETED
                 }
                 completed_msgs = [
                     m for m in (svc.session.current.messages if svc.session.current else [])
                     if m.role == Role.ASSISTANT and m.persona_id in completed_pids
                 ]
                 if completed_msgs:
-                    last_target = self._dag_targets.get(completed_msgs[-1].persona_id)
+                    last_target = self._dag.targets.get(completed_msgs[-1].persona_id)
                     if last_target:
                         self._title_gen.maybe_start(
-                            self._dag_conv_id, completed_msgs[-1:],
+                            self._dag.conv_id, completed_msgs[-1:],
                             last_target, svc.router,
                         )
 
@@ -1123,6 +1074,17 @@ class SendController:
             # Re-render the full transcript so grouping picks up the
             # updated message alongside its siblings.
             host._display_messages(conv.messages)
+
+        # #172: DAG retry auto-resume — if this retry was for a DAG
+        # failure, mark the node completed and launch skipped children.
+        launchable = self._dag.retry_resume(target.persona_id)
+        if launchable:
+            self._dag.active = True
+            for child_pid in launchable:
+                child_target = self._dag.targets[child_pid]
+                visible = self._dag.visible_set(child_pid)
+                self._launch_target(child_target, visible_persona_ids=visible)
+            return  # input re-enable deferred to _finish_dag_send
 
         # Re-enable the input if no more workers are outstanding.
         if not self._multi_workers:
