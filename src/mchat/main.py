@@ -71,6 +71,100 @@ def _find_icon() -> Path:
     return Path(__file__).parent / "resources" / "icon.png"
 
 
+def _set_windows_app_user_model_id() -> None:
+    """Set the Windows taskbar identity before Qt creates windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "mchat.mchat.app.1"
+        )
+    except Exception:
+        # Best effort only: failure should not block startup.
+        pass
+
+
+def _apply_windows_window_icon(window, icon_path: Path) -> None:
+    """Force the native Windows small/big window icons from the app .ico.
+
+    PyInstaller's ``icon=...`` sets the executable resource that Explorer
+    shows, while Qt's ``setWindowIcon`` normally sets the runtime window icon.
+    Some Windows taskbar paths still use the native HWND icon handles, so set
+    those explicitly as a fallback.
+    """
+    if sys.platform != "win32" or not icon_path.exists():
+        return
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        hwnd = int(window.winId())
+        if not hwnd:
+            return
+
+        image_icon = 1
+        lr_load_from_file = 0x0010
+        wm_seticon = 0x0080
+        icon_small = 0
+        icon_big = 1
+        icon_small2 = 2
+        sm_cxicon = 11
+        sm_cyicon = 12
+        sm_cxsmicon = 49
+        sm_cysmicon = 50
+
+        load_image = user32.LoadImageW
+        load_image.argtypes = [
+            wintypes.HINSTANCE,
+            wintypes.LPCWSTR,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
+        load_image.restype = wintypes.HANDLE
+
+        send_message = user32.SendMessageW
+        send_message.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        send_message.restype = wintypes.LPARAM
+
+        def _load_icon(width: int, height: int):
+            return load_image(
+                None, str(icon_path), image_icon, width, height, lr_load_from_file
+            )
+
+        big_icon = _load_icon(
+            user32.GetSystemMetrics(sm_cxicon),
+            user32.GetSystemMetrics(sm_cyicon),
+        )
+        small_icon = _load_icon(
+            user32.GetSystemMetrics(sm_cxsmicon),
+            user32.GetSystemMetrics(sm_cysmicon),
+        )
+
+        if big_icon:
+            send_message(hwnd, wm_seticon, icon_big, big_icon)
+        if small_icon:
+            send_message(hwnd, wm_seticon, icon_small, small_icon)
+            send_message(hwnd, wm_seticon, icon_small2, small_icon)
+
+        if big_icon or small_icon:
+            # Keep handles alive for the process lifetime; Windows reclaims
+            # them on exit and this avoids dangling HWND icon handles.
+            window._mchat_windows_icon_handles = (big_icon, small_icon)
+    except Exception:
+        # Best effort only; Qt's icon path remains the portable baseline.
+        pass
+
+
 def main() -> None:
     # Install crash logger before anything else so we capture failures
     # that happen during startup too.
@@ -85,11 +179,7 @@ def main() -> None:
         sys.argv = [a for a in sys.argv if a not in ("-debug", "--debug")]
 
     # Set AppUserModelID so Windows taskbar shows our icon, not Python's
-    if sys.platform == "win32":
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "mchat.mchat.app.1"
-        )
+    _set_windows_app_user_model_id()
 
     # #146/#150: log diagram tool availability once at startup so a
     # missing binary shows up in crash.log rather than failing silently.
@@ -126,6 +216,7 @@ def main() -> None:
     if not icon.isNull():
         window.setWindowIcon(icon)
     window.show()
+    _apply_windows_window_icon(window, icon_path)
 
     exit_code = app.exec()
     db.close()
