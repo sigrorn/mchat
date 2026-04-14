@@ -136,6 +136,7 @@ class SendController:
         self._dag_targets: dict[str, PersonaTarget] = {}
         self._dag_active: bool = False
         self._dag_completed_msgs: list[Message] = []   # buffered for column rendering
+        self._dag_finished_workers: list = []           # prevent GC of completed QThreads
         self._dag_retry_run_id: dict[str, int] = {}    # pid → dag_run_id at failure
 
     # ------------------------------------------------------------------
@@ -620,6 +621,7 @@ class SendController:
         self._dag_active = False
         self._dag_conv_id = None
         self._dag_completed_msgs.clear()
+        self._dag_finished_workers.clear()
 
     def _send_parallel(
         self,
@@ -799,7 +801,10 @@ class SendController:
         host = self._host
         svc = self._services
         host._set_combo_waiting(target.persona_id, False)
-        self._multi_workers.pop(target.persona_id, None)
+        # Move worker to finished list to prevent GC while QThread finalises
+        worker = self._multi_workers.pop(target.persona_id, None)
+        if worker is not None:
+            self._dag_finished_workers.append(worker)
 
         # Check conversation switch
         current_conv = svc.session.current
@@ -865,7 +870,9 @@ class SendController:
         host = self._host
         svc = self._services
         host._set_combo_waiting(target.persona_id, False)
-        self._multi_workers.pop(target.persona_id, None)
+        worker = self._multi_workers.pop(target.persona_id, None)
+        if worker is not None:
+            self._dag_finished_workers.append(worker)
 
         current_conv = svc.session.current
         conv_switched = (
@@ -926,6 +933,8 @@ class SendController:
         svc = self._services
         self._dag_active = False
         # Don't clear DAG structures — retry needs them
+        # Release finished worker references now that all threads are done
+        self._dag_finished_workers.clear()
 
         if not conv_switched:
             # Render buffered DAG messages (column mode)
