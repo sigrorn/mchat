@@ -68,9 +68,13 @@ class StreamWorker(QThread):
                 debug_logger.log_outgoing(persona, f"[{role}] {m.content}")
 
         for attempt in range(1, MAX_RETRIES + 1):
+            if self.isInterruptionRequested():
+                return
             full_text = ""
             try:
                 for token in self._provider.stream(self._messages, self._model):
+                    if self.isInterruptionRequested():
+                        return  # clean exit on app close
                     full_text += token
                     self.token_received.emit(token)
                 # Log incoming response
@@ -85,11 +89,18 @@ class StreamWorker(QThread):
                 if _is_transient(e) and attempt < MAX_RETRIES:
                     self.last_error_transient = True
                     self.retrying.emit(attempt, MAX_RETRIES)
-                    time.sleep(RETRY_DELAY_S)
+                    # Interruptible sleep — check every 0.5s so
+                    # app close doesn't block for the full delay.
+                    for _ in range(int(RETRY_DELAY_S / 0.5)):
+                        if self.isInterruptionRequested():
+                            return
+                        time.sleep(0.5)
                     continue
                 else:
                     break
 
         # All retries exhausted or non-transient error
+        if self.isInterruptionRequested():
+            return
         self.last_error_transient = _is_transient(last_exc) if last_exc else False
         self.stream_error.emit(str(last_exc))

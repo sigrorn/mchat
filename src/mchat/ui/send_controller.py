@@ -176,6 +176,19 @@ class SendController:
             else None
         )
 
+    def stop_all_workers(self) -> None:
+        """Request interruption on all active StreamWorkers and wait for
+        them to finish. Called from closeEvent so in-flight API calls
+        don't outlive the window."""
+        workers: list[StreamWorker] = list(self._multi_workers.values())
+        workers.extend(self._dag_finished_workers)
+        for w in workers:
+            w.requestInterruption()
+        for w in workers:
+            w.wait(3000)  # 3s timeout per worker
+        self._multi_workers.clear()
+        self._dag_finished_workers.clear()
+
     # ------------------------------------------------------------------
     # Submission entry point
     # ------------------------------------------------------------------

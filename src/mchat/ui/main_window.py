@@ -877,6 +877,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._prefs.save_geometry()
+        # #175: stop active StreamWorkers so in-flight API calls don't
+        # outlive the window and crash during teardown.
+        try:
+            self._send.stop_all_workers()
+        except Exception:
+            pass
         # #129: stop any background TitleWorkers so they don't fire
         # after the DB is closed and crash the app during teardown.
         try:
