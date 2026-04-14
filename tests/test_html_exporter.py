@@ -706,6 +706,30 @@ class TestHtmlExporterMermaidGraphs:
         assert "mchat-mermaid://" not in html
 
 
+class TestApertusExportColor:
+    """#174 — Apertus messages must use color_apertus, not user colour."""
+
+    def test_apertus_color_in_export(self):
+        colors = ExportColors(
+            user="#d4d4d4",
+            claude="#b0b0b0",
+            openai="#e8e8e8",
+            gemini="#c8d8e8",
+            perplexity="#d8c8e8",
+            mistral="#ffe0c8",
+            apertus="#a0c8e8",
+        )
+        msg = Message(role=Role.ASSISTANT, content="hi", provider=Provider.APERTUS)
+        assert colors.color_for(msg) == "#a0c8e8"
+
+    def test_exporter_from_config_includes_apertus(self, tmp_path):
+        cfg = Config(config_path=tmp_path / "cfg.json")
+        cfg.set("color_apertus", "#a0c8e8")
+        cfg.save()
+        exp = exporter_from_config(cfg)
+        assert exp._colors.apertus == "#a0c8e8"
+
+
 class TestHelpTextMentionsGraphviz:
     """#146 — //help must tell the user that DOT graphs require
     graphviz, so they know why their graphs aren't rendering."""
