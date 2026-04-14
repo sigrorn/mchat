@@ -554,3 +554,41 @@ class TestVisiblePersonaIdsFilter:
                             visible_persona_ids={pa.id})
         contents = [m.content for m in ctx if m.role != Role.SYSTEM]
         assert "pinned from B" not in contents
+
+    def test_dag_root_sees_only_own_history(self, db, config):
+        """Regression: DAG roots must use visible_persona_ids={self},
+        not None — root A must not see root B's prior history."""
+        from mchat.models.persona import Persona, generate_persona_id
+        from mchat.ui.persona_target import PersonaTarget
+
+        conv = db.create_conversation()
+        pa = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.CLAUDE, name="A", name_slug="a")
+        pb = Persona(conversation_id=conv.id, id=generate_persona_id(),
+                     provider=Provider.OPENAI, name="B", name_slug="b")
+        db.create_persona(pa)
+        db.create_persona(pb)
+
+        # Prior exchange: user asked, both roots responded
+        db.add_message(Message(role=Role.USER, content="prior question",
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="A prior",
+                               provider=Provider.CLAUDE, persona_id=pa.id,
+                               conversation_id=conv.id))
+        db.add_message(Message(role=Role.ASSISTANT, content="B prior",
+                               provider=Provider.OPENAI, persona_id=pb.id,
+                               conversation_id=conv.id))
+        # New user prompt
+        db.add_message(Message(role=Role.USER, content="new question",
+                               conversation_id=conv.id))
+        conv.messages = db.get_messages(conv.id)
+
+        # Root A's context with visible_persona_ids={A} — simulates
+        # what _start_dag_send now passes.
+        target_a = PersonaTarget(persona_id=pa.id, provider=Provider.CLAUDE)
+        ctx = build_context(conv, target_a, db, config,
+                            visible_persona_ids={pa.id})
+        contents = [m.content for m in ctx if m.role != Role.SYSTEM]
+        assert any("A prior" in c for c in contents)
+        assert not any("B prior" in c for c in contents)
+        assert any("new question" in c for c in contents)
