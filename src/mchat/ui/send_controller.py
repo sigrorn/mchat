@@ -696,9 +696,13 @@ class SendController:
         self._multi_workers.clear()
         self._column_buffer.clear()
 
-        # Launch roots
+        # Launch roots — pass visible_persona_ids={self} so roots don't
+        # see unrelated branch history from prior exchanges.
         for pid in roots:
-            self._launch_target(self._dag.targets[pid])
+            self._launch_target(
+                self._dag.targets[pid],
+                visible_persona_ids=self._dag.visible_set(pid),
+            )
 
     def _launch_target(
         self,
