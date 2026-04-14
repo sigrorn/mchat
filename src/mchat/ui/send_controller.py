@@ -822,13 +822,15 @@ class SendController:
         if not conv_switched:
             host._update_spend_labels()
 
-        # Persist response immediately (display_mode="dag")
+        # Persist response — use "cols" or "lines" based on column_mode
+        # so reload renders them correctly.
+        dag_display = "cols" if host._column_mode else "lines"
         msg = Message(
             role=Role.ASSISTANT,
             content=strip_echoed_heading(full_text),
             provider=target.provider,
             model=model,
-            display_mode="dag",
+            display_mode=dag_display,
             persona_id=target.persona_id,
             conversation_id=self._dag_conv_id,
         )
@@ -881,11 +883,12 @@ class SendController:
         )
 
         # Persist error message
+        dag_display = "cols" if host._column_mode else "lines"
         error_msg = Message(
             role=Role.ASSISTANT,
             content=f"[Error: {error}]",
             provider=target.provider,
-            display_mode="dag",
+            display_mode=dag_display,
             persona_id=target.persona_id,
             conversation_id=self._dag_conv_id,
         )
@@ -949,9 +952,12 @@ class SendController:
                 self._dag_conv_id is not None
                 and self._title_gen.should_generate_title(self._dag_conv_id)
             ):
+                completed_pids = {
+                    pid for pid, s in self._dag_status.items() if s == "completed"
+                }
                 completed_msgs = [
                     m for m in (svc.session.current.messages if svc.session.current else [])
-                    if m.display_mode == "dag" and m.role == Role.ASSISTANT
+                    if m.role == Role.ASSISTANT and m.persona_id in completed_pids
                 ]
                 if completed_msgs:
                     last_target = self._dag_targets.get(completed_msgs[-1].persona_id)
