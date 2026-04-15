@@ -260,6 +260,34 @@ class TestMistralPrefix:
         assert text == "explain this"
 
 
+class TestApertusPrefix:
+    """#183 — Apertus must be routable via @apertus prefix."""
+
+    def test_apertus_prefix(self, mock_providers):
+        router = Router(mock_providers, default=Provider.CLAUDE)
+        targets, text = router.parse("@apertus explain this")
+        assert targets == [Provider.APERTUS]
+        assert text == "explain this"
+
+    def test_apertus_in_reserved_names(self):
+        from mchat.ui.persona_resolver import RESERVED_NAMES
+        assert "apertus" in RESERVED_NAMES
+
+
+class TestOpenaiAlias:
+    """#184 — 'openai' should work as an alias for 'gpt'."""
+
+    def test_openai_prefix(self, mock_providers):
+        router = Router(mock_providers, default=Provider.CLAUDE)
+        targets, text = router.parse("@openai what do you think?")
+        assert targets == [Provider.OPENAI]
+        assert text == "what do you think?"
+
+    def test_openai_in_reserved_names(self):
+        from mchat.ui.persona_resolver import RESERVED_NAMES
+        assert "openai" in RESERVED_NAMES
+
+
 class TestStripPrefix:
     """Router._strip_prefix: used by context_builder to clean user
     messages before sending them as context. Must recognise the new
