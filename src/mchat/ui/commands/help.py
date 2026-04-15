@@ -70,7 +70,7 @@ HELP_COMMANDS = (
 HELP_PROVIDERS = [
     ("@<name> <message>", "send to a specific persona by name", None),
     ("@claude <message>", "send to Claude (synthetic default)", Provider.CLAUDE),
-    ("@gpt <message>", "send to GPT (synthetic default)", Provider.OPENAI),
+    ("@gpt <message>", "send to GPT (also: @openai)", Provider.OPENAI),
     ("@gemini <message>", "send to Gemini (synthetic default)", Provider.GEMINI),
     ("@perplexity <message>", "send to Perplexity (also: @pplx)", Provider.PERPLEXITY),
     ("@mistral <message>", "send to Mistral (synthetic default)", Provider.MISTRAL),

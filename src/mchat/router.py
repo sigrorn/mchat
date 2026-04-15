@@ -17,10 +17,12 @@ OTHERS = "others"  # #140: renamed from 'flipped' — reads more naturally
 PREFIX_TO_PROVIDER = {
     "claude": Provider.CLAUDE,
     "gpt": Provider.OPENAI,
+    "openai": Provider.OPENAI,
     "gemini": Provider.GEMINI,
     "perplexity": Provider.PERPLEXITY,
     "pplx": Provider.PERPLEXITY,
     "mistral": Provider.MISTRAL,
+    "apertus": Provider.APERTUS,
 }
 
 # Special prefixes that are not combinable with others
