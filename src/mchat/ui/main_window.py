@@ -400,7 +400,8 @@ class MainWindow(QMainWindow):
         class _Fetcher(QThread):
             done = _Sig(object)
             def run(self_inner):
-                self_inner.done.emit(fetch_all())
+                if not self_inner.isInterruptionRequested():
+                    self_inner.done.emit(fetch_all())
 
         self._model_fetcher = _Fetcher()
 
@@ -887,6 +888,14 @@ class MainWindow(QMainWindow):
         # after the DB is closed and crash the app during teardown.
         try:
             self._send.stop_all_title_workers()
+        except Exception:
+            pass
+        # #185: stop the background model fetcher if still running.
+        try:
+            if self._model_fetcher is not None:
+                self._model_fetcher.requestInterruption()
+                self._model_fetcher.wait(2000)
+                self._model_fetcher = None
         except Exception:
             pass
         super().closeEvent(event)
