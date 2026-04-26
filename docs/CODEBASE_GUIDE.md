@@ -1,5 +1,15 @@
 # Codebase Guide
 
+## Archive status
+
+This guide documents the final legacy `mchat` codebase. The repository is being
+archived and should be treated as read-only reference material rather than a
+place for new feature work. Active development has moved to `mchat2`.
+
+The most useful reasons to keep this guide are historical orientation, parity
+checks against the successor implementation, and understanding the behaviour
+covered by the old test suite.
+
 This document is a first-pass orientation for a developer reading `mchat` for
 the first time. It explains where the application starts, how the source tree is
 organised, and which files are involved in the main runtime call paths.

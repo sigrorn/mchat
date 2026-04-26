@@ -1,5 +1,18 @@
 # Architecture Decisions
 
+## 2026-04-26: Archive the legacy PySide6 codebase
+
+**Summary:** Marked `mchat` as archived reference material. New development
+continues in `mchat2`.
+
+**Rationale:**
+- The successor codebase now covers the core workflows and is the target for
+  future architecture and feature work.
+- Remaining `mchat`-only behaviours are either optional, replaced by better
+  `mchat2` workflows, or preserved here for historical reference.
+- Keeping this repository stable makes it useful for parity checks, legacy
+  command semantics, import/export examples, and regression-oriented tests.
+
 ## 2026-03-29: Python + PySide6 for desktop chat UI
 
 **Summary:** Chose Python with PySide6 over Java for the multi-provider chat application.

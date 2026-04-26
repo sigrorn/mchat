@@ -1,5 +1,14 @@
 # mchat
 
+## Archive status
+
+This codebase is being archived. Active development has moved to the successor
+`mchat2` codebase, and no new features are planned here.
+
+The repository is kept as a reference for the original PySide6 implementation:
+legacy behaviour, command semantics, import/export formats, and the test suite
+remain useful when checking parity or explaining design decisions in `mchat2`.
+
 A multi-provider LLM chat application with a desktop UI. Chat with Claude, GPT, Gemini, Perplexity, and Mistral — using named personas to give each provider a distinct role in the same conversation.
 
 ## Features
